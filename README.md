@@ -1,48 +1,40 @@
-# AdmitBench
+# AdmitBench (deferred — Track 2)
 
-An open benchmark for LLM admission-control policies.
+**Status**: paused as of 2026-09-10.
 
-AdmitBench replays real and synthetic LLM serving traces through pluggable admission-control policies, running against any OpenAI-compatible engine (vLLM, SGLang, TensorRT-LLM), and reports metrics that matter for both chat and agentic workloads — goodput, tail latency, agent-completion rate, preemption-loss ratio, and per-tenant fairness.
+## Why paused
 
-## Why
+After 3-researcher critical audit + 5 rounds of prior-art re-verification, the field turned out more crowded than initial scoping assumed. Peer-reviewed admission-control papers exist at ICML 2026 (CONCUR, Shen et al.), SoCC '24 (QLM), MLSys 2025 (SOLA), NSDI 2026 (FastServe), Frontiers CS 2026 (Chronos), plus adjacent work at ICML 2024/2025 (InferCept, Cake), NeurIPS 2025 (KVFlow), SOSP 2025 (Pie).
 
-The admission-control literature has grown quickly — CONCUR, Fluid-WAIT, Aqua, FairBatching, Chronos, FastServe, ProServe, SOLA — but no two papers report numbers on the same workload, the same engine, or the same metric suite. Reviewers and practitioners cannot tell which policy wins where. AdmitBench fixes that by providing:
+A 2-week solo benchmark paper into this crowded space would produce marginal contribution. Instead, primary effort redirected to a **survey** (Track 1) that establishes taxonomy and reference position. AdmitBench resumes as Track 2 after survey ships.
 
-- A common `AdmissionPolicy` interface every published policy re-implements against.
-- A trace corpus drawn from Azure LLM inference traces, LMSYS-Chat-1M, and public agent trajectories (SWE-bench, τ-bench, GAIA, ToolBench).
-- A metric suite that measures agentic behavior — not just per-request TTFT.
-- Reproducibility artifacts: seeds, configs, Modal recipes, and fidelity notes against each original paper.
+## Original intent (preserved for future resumption)
 
-## Status
+An open benchmark harness that plugs published LLM admission-control policies against a common trace corpus on OpenAI-compatible engines (vLLM/SGLang/TensorRT-LLM), reports goodput, tail latency, agent-completion rate, preemption-loss ratio, and per-tenant fairness. Position on the admission-decision axis (not agentic inference speed, not general serving throughput).
 
-Early scaffold. Not yet runnable. See `docs/design.md` for the target architecture.
+## What will change when resumed
 
-## Install (planned)
+The survey (Track 1) will document the specific open question worth answering empirically. Current best candidate — from CONCUR ICML 2026 Reviewer Afcg's public comment: *"the underlying problem can be addressed through more effective request-level scheduling."* AdmitBench v2 answers this by cross-testing request-level admission (QLM, Chronos-inspired, Fluid-WAIT) against agent-level (CONCUR-inspired) on CONCUR's own BrowserComp setup.
 
-```bash
-uv pip install -e .
-admitbench --help
-```
-
-## Layout
+## Layout (existing scaffold)
 
 ```
-src/admitbench/
-  policies/     # baseline re-implementations
-  traces/       # trace loaders + synthetic generator
-  metrics/      # measurement instrumentation
-  harness/      # runner / orchestrator
-experiments/    # experiment configs + notebooks
-data/           # traces + results (gitignored)
-docs/           # design, metrics, policies
-tests/
-scripts/
+admitbench/
+├── README.md            # this file
+├── LICENSE (MIT)
+├── pyproject.toml
+├── .gitignore
+├── .python-version
+├── src/admitbench/      # ABCs for Policy, TraceLoader, SystemState — usable when we resume
+├── docs/                # design.md, policies.md, metrics.md
+├── experiments/         # empty; will fill on resume
+├── data/                # gitignored
+├── tests/               # smoke tests
+└── scripts/
 ```
 
-## Citation
+## Related
 
-Not yet published. Preprint pending.
-
-## License
-
-MIT. See `LICENSE`.
+- Umbrella roadmap: `../Roadmap.md`
+- Active survey work: `../survey/`
+- Prior-art audit dossier: `../private/prior-art/`
