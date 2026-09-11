@@ -1,40 +1,60 @@
-# AdmitBench (deferred — Track 2)
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="AdmitPerf — admission control benchmark for LLM inference serving" width="100%"/>
+</p>
 
-**Status**: paused as of 2026-09-10.
+# AdmitPerf
 
-## Why paused
+*A reproducible harness for admission control in LLM inference serving.*
+*Status: proposal accepted 2026-09-11. Week-1 scaffold in progress.*
 
-After 3-researcher critical audit + 5 rounds of prior-art re-verification, the field turned out more crowded than initial scoping assumed. Peer-reviewed admission-control papers exist at ICML 2026 (CONCUR, Shen et al.), SoCC '24 (QLM), MLSys 2025 (SOLA), NSDI 2026 (FastServe), Frontiers CS 2026 (Chronos), plus adjacent work at ICML 2024/2025 (InferCept, Cake), NeurIPS 2025 (KVFlow), SOSP 2025 (Pie).
+## What it is
 
-A 2-week solo benchmark paper into this crowded space would produce marginal contribution. Instead, primary effort redirected to a **survey** (Track 1) that establishes taxonomy and reference position. AdmitBench resumes as Track 2 after survey ships.
+AdmitPerf is a pluggable-policy benchmark harness that measures **goodput-under-admission** for LLM serving systems across SLO-diverse, multi-tenant, and agent-session workloads — the axis that LLMPerf, GenAI-Perf, GuideLLM, and MLPerf Inference LLM do not cover.
 
-## Original intent (preserved for future resumption)
+Companion to the systematic-review survey at `../survey/`, which documents (a) 9-for-9 no ingress admission across top-venue LLM serving papers, (b) zero baseline overlap across 14 admission-primary papers, and (c) the empty intersection `agent-level × online × deadline-aware × fair`.
 
-An open benchmark harness that plugs published LLM admission-control policies against a common trace corpus on OpenAI-compatible engines (vLLM/SGLang/TensorRT-LLM), reports goodput, tail latency, agent-completion rate, preemption-loss ratio, and per-tenant fairness. Position on the admission-decision axis (not agentic inference speed, not general serving throughput).
+## Read this first
 
-## What will change when resumed
+- **Full proposal**: `docs/PROPOSAL.md` — goals, non-goals, architecture, workload suite, reference policies, metrics contract, author split, 8-week milestones, compute plan, venue targets.
+- **Design notes**: `docs/design.md`, `docs/policies.md`, `docs/metrics.md`.
+- **Prior-art dossier**: `docs/prior-art/`.
 
-The survey (Track 1) will document the specific open question worth answering empirically. Current best candidate — from CONCUR ICML 2026 Reviewer Afcg's public comment: *"the underlying problem can be addressed through more effective request-level scheduling."* AdmitBench v2 answers this by cross-testing request-level admission (QLM, Chronos-inspired, Fluid-WAIT) against agent-level (CONCUR-inspired) on CONCUR's own BrowserComp setup.
-
-## Layout (existing scaffold)
+## Layout
 
 ```
-admitbench/
-├── README.md            # this file
+admitperf/
+├── README.md
 ├── LICENSE (MIT)
 ├── pyproject.toml
 ├── .gitignore
 ├── .python-version
-├── src/admitbench/      # ABCs for Policy, TraceLoader, SystemState — usable when we resume
-├── docs/                # design.md, policies.md, metrics.md
-├── experiments/         # empty; will fill on resume
-├── data/                # gitignored
-├── tests/               # smoke tests
+├── src/admitperf/        # policy ABCs, harness, metrics, traces, CLI
+├── docs/
+│   ├── PROPOSAL.md            # v0.1 proposal (2026-09-11)
+│   ├── design.md
+│   ├── policies.md
+│   ├── metrics.md
+│   └── prior-art/             # adversarial_review, feasibility_audit, gap_matrix
+├── experiments/           # configs, notebooks, fidelity, results
+├── data/                  # gitignored
+├── tests/
 └── scripts/
 ```
+
+## Authors
+
+- Harshul Jain — systems
+- Dr. Tanmay Sah — theory + reference-policy port
+- Tanya Sah — workloads + measurement + writing
+
+All independent researchers. Co-first-author ordering resolved at freeze.
 
 ## Related
 
 - Umbrella roadmap: `../Roadmap.md`
-- Active survey work: `../survey/`
+- Companion survey: `../survey/`
 - Prior-art audit dossier: `../private/prior-art/`
+
+## License
+
+MIT for code. CC-BY 4.0 for docs and results bundles.

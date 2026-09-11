@@ -1,4 +1,4 @@
-# AdmitBench Feasibility & Fidelity Audit
+# AdmitPerf Feasibility & Fidelity Audit
 
 *Auditor: Feasibility & Fidelity Critic agent*
 *Date: 2026-09-10*
@@ -78,7 +78,7 @@ Ranked, cut top-to-bottom as timeline slips:
 4. **Cut τ-bench and ToolBench traces from v0.1.** Neither has a clean trace corpus. Ship with Azure (request-level) + LMSYS (conversation-level replay) + SWE-smith-trajectories (agent) + your synthetic generator.
 5. **Cut agent-completion metric down to "any-turn-succeeds"** instead of full-trajectory success. Full trajectory scoring requires re-executing task environments (SWE-bench Docker, τ-bench simulator). That's a week alone.
 6. **Cut Jain-fairness across tenants**, keep it across agents. Tenants require synthetic multi-tenant tagging that Azure trace doesn't have.
-7. **If Day 10 arrives and CONCUR isn't converging:** ship 3 policies (vLLM-default, Chronos, FastServe-port or Fluid-WAIT), 2 workloads (Azure + SWE-smith), 1 model (Qwen2.5-7B). This is still a legitimate preprint: "AdmitBench v0.1: a reproducible harness for LLM admission control, with three reference policies."
+7. **If Day 10 arrives and CONCUR isn't converging:** ship 3 policies (vLLM-default, Chronos, FastServe-port or Fluid-WAIT), 2 workloads (Azure + SWE-smith), 1 model (Qwen2.5-7B). This is still a legitimate preprint: "AdmitPerf v0.1: a reproducible harness for LLM admission control, with three reference policies."
 
 ## Bottom line
 

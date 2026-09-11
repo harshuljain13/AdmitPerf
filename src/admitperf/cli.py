@@ -1,28 +1,28 @@
-"""AdmitBench CLI entry point."""
+"""AdmitPerf CLI entry point."""
 
 from __future__ import annotations
 
 import click
 
-from admitbench import __version__
+from admitperf import __version__
 
 
 @click.group()
 @click.version_option(__version__)
 def main() -> None:
-    """AdmitBench — benchmark LLM admission-control policies."""
+    """AdmitPerf — benchmark LLM admission-control policies."""
 
 
 @main.command()
 def policies() -> None:
     """List available admission-control policies."""
-    click.echo("policies: (none registered yet — see src/admitbench/policies/)")
+    click.echo("policies: (none registered yet — see src/admitperf/policies/)")
 
 
 @main.command()
 def traces() -> None:
     """List available trace loaders."""
-    click.echo("traces: (none registered yet — see src/admitbench/traces/)")
+    click.echo("traces: (none registered yet — see src/admitperf/traces/)")
 
 
 @main.command()

@@ -1,4 +1,4 @@
-# Reviewer #2 Report — AdmitBench
+# Reviewer #2 Report — AdmitPerf
 
 *Auditor: Adversarial Reviewer agent, role-playing hostile Reviewer #2*
 *Date: 2026-09-10*
@@ -47,7 +47,7 @@
 
 Mitigation demands: (a) contact each policy's authors for sign-off before submission — you will not do this in 2 weeks; (b) release code and invite response; (c) publish per-policy micro-benchmarks demonstrating fidelity to the original paper's reported numbers on the original paper's workload.
 
-**Does the MLPerf analogy hold?** No. MLPerf works because (i) vendors self-submit, (ii) rules are ratified by a consortium, (iii) submissions are audited. AdmitBench has none of these. Calling a solo two-week measurement study "MLPerf for admission" is the kind of overclaim that annoys reviewers into rejecting on tone alone.
+**Does the MLPerf analogy hold?** No. MLPerf works because (i) vendors self-submit, (ii) rules are ratified by a consortium, (iii) submissions are audited. AdmitPerf has none of these. Calling a solo two-week measurement study "MLPerf for admission" is the kind of overclaim that annoys reviewers into rejecting on tone alone.
 
 **The "so what" test:** After reading, what does a practitioner do differently? Current framing gives no actionable takeaway. A strong version would say: *"if your workload is >30% agentic-with-tool-calls, replace vLLM-default with Chronos; we quantify the goodput cliff."* That is a paper.
 
@@ -103,7 +103,7 @@ Mitigation demands: (a) contact each policy's authors for sign-off before submis
 
 **Realistic venue:** arXiv preprint + ES-FoMo workshop submission with the reframed pitch.
 
-**EB1A relevance check:** A solo two-week measurement study, even accepted at a workshop, is a marginal contribution to the "scholarly articles" criterion. If the two weeks are being spent to *ship AdmitBench-the-paper*, the opportunity cost against your cross-paradigm health-voice-agent AAAI 2027 workshop track is high. If the two weeks are being spent to *build the policy-zoo artifact* that later enables a stronger paper — that reframe is EB1A-defensible.
+**EB1A relevance check:** A solo two-week measurement study, even accepted at a workshop, is a marginal contribution to the "scholarly articles" criterion. If the two weeks are being spent to *ship AdmitPerf-the-paper*, the opportunity cost against your cross-paradigm health-voice-agent AAAI 2027 workshop track is high. If the two weeks are being spent to *build the policy-zoo artifact* that later enables a stronger paper — that reframe is EB1A-defensible.
 
 ---
 

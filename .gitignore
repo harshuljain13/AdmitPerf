@@ -52,7 +52,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# AdmitBench-specific
+# AdmitPerf-specific
 data/traces/*
 data/results/*
 data/cache/*

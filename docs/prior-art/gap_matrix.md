@@ -1,4 +1,4 @@
-# AdmitBench Prior-Art Due Diligence
+# AdmitPerf Prior-Art Due Diligence
 
 *Auditor: Prior Art Deep Auditor agent*
 *Date: 2026-09-10*
@@ -32,19 +32,19 @@
 
 ## 2. Scoop-risk assessment (Med/High overlap only)
 
-**AgenticSwarmBench (High).** Same substrate: OpenAI-compatible endpoints, agentic traces that defeat prefix cache, TTFT/ITL metrics. To become a direct competitor it must (i) add a policy plug-in interface (admission hooks), (ii) implement ≥2 published admission policies, (iii) add fairness/preemption-loss metrics, (iv) add multi-tenant traces. No roadmap or issue signaling this; scope has stayed on client-side replay measurement. Risk vector: someone forks it and adds an admission axis before AdmitBench ships.
+**AgenticSwarmBench (High).** Same substrate: OpenAI-compatible endpoints, agentic traces that defeat prefix cache, TTFT/ITL metrics. To become a direct competitor it must (i) add a policy plug-in interface (admission hooks), (ii) implement ≥2 published admission policies, (iii) add fairness/preemption-loss metrics, (iv) add multi-tenant traces. No roadmap or issue signaling this; scope has stayed on client-side replay measurement. Risk vector: someone forks it and adds an admission axis before AdmitPerf ships.
 
 **llm-d (High).** Already offers pluggable "flow control" and multi-tenant routing on OpenAI-compatible engines; a neutral third-party could sit atop it. To compete it must (i) publish a *comparison* study across policies with a reproducible trace corpus, (ii) commit to third-party neutrality (currently a vendor-friendly consortium), (iii) surface admission as a first-class experiment axis, not a config knob. Predicted-latency scheduling and flow-control land in v0.4–0.7; a "benchmark policies inside llm-d" blog or paper is a natural next step. Mitigation: cite llm-d as a supported backend, not a competitor.
 
-**Etalon (Med).** Owns the fluidity-index framing for user experience — overlaps AdmitBench's tail-latency/goodput story. Would need admission-specific metrics + agent workloads to compete. No public roadmap surfaced; measurement-framework framing keeps it upstream of policy comparison. Cite as the metrics ancestor.
+**Etalon (Med).** Owns the fluidity-index framing for user experience — overlaps AdmitPerf's tail-latency/goodput story. Would need admission-specific metrics + agent workloads to compete. No public roadmap surfaced; measurement-framework framing keeps it upstream of policy comparison. Cite as the metrics ancestor.
 
-**MLPerf multi-turn (Med).** 2026 multi-turn addition targets agentic workloads. MLPerf would need a new "admission-policy" task category — inconsistent with its "measure what a submitter builds end-to-end" philosophy, which does not isolate admission. Governance timelines are long; unlikely to scoop in 12 mo. Position AdmitBench as the sub-component study MLPerf explicitly does not do.
+**MLPerf multi-turn (Med).** 2026 multi-turn addition targets agentic workloads. MLPerf would need a new "admission-policy" task category — inconsistent with its "measure what a submitter builds end-to-end" philosophy, which does not isolate admission. Governance timelines are long; unlikely to scoop in 12 mo. Position AdmitPerf as the sub-component study MLPerf explicitly does not do.
 
 **SLOs-Serve, NexusSched, Chronos (Med).** All are policy/system papers doing their own head-to-head. Would need to release a neutral harness with third-party policies plugged in. Low practical risk — teams typically don't do this. Include as baseline plug-ins.
 
 ## 3. Sharpened positioning
 
-**Pitch:** *AdmitBench is the first open, engine-agnostic harness that isolates the **admission decision** as an experimental axis — plugging published policies into a common vLLM/SGLang/TRT-LLM backend and reporting goodput, TTFT/TBT tails, agent-completion rate, preemption-loss ratio, and per-tenant fairness on a shared multi-tenant agentic trace corpus.*
+**Pitch:** *AdmitPerf is the first open, engine-agnostic harness that isolates the **admission decision** as an experimental axis — plugging published policies into a common vLLM/SGLang/TRT-LLM backend and reporting goodput, TTFT/TBT tails, agent-completion rate, preemption-loss ratio, and per-tenant fairness on a shared multi-tenant agentic trace corpus.*
 
 **Defensible claims.**
 - First harness whose *unit of comparison* is the admission policy, not the serving system.
@@ -56,7 +56,7 @@
 - "First LLM serving benchmark" — Etalon, Bench360, MLPerf, LLM-Inference-Bench predate.
 - "First agent-aware inference benchmark" — AgenticSwarmBench and MLPerf multi-turn (2026) predate.
 - "First to measure TTFT/TBT under SLO" — Chronos + SLOs-Serve + NexusSched already report these.
-- "New scheduling algorithm" — AdmitBench is a harness; any algorithmic claim would collide with baselines.
+- "New scheduling algorithm" — AdmitPerf is a harness; any algorithmic claim would collide with baselines.
 - "Production-grade admission control" — llm-d owns that framing.
 
 **Unverified via WebFetch (verify manually before submission):** FastServe (NSDI 2026), SOLA (MLSys 2025).
