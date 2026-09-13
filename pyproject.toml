@@ -61,7 +61,7 @@ ignore = ["E501"]
 #   UP042 — `StrEnum` changes what `str(DecisionKind.ADMIT)` returns.
 #   B027  — on_admit/on_complete/on_preempt are intentionally non-abstract, so a
 #           policy only has to implement `decide()`.
-"src/admitperf/policies/base.py" = ["UP042", "B027"]
+"src/admitperf/core/api.py" = ["UP042", "B027"]
 
 [tool.mypy]
 python_version = "3.11"
