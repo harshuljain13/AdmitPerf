@@ -5,17 +5,20 @@ description = "An open benchmark for LLM admission-control policies"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "Harshul Jain" }
+    { name = "Harshul Jain" },
+    { name = "Tanmay Sah" },
+    { name = "Tanya Sah" },
+    { name = "Parv Khatri" },
 ]
 requires-python = ">=3.11"
+# Runtime deps are deliberately minimal: a policy plugin should be cheap to
+# install next to an existing serving stack. Anything needed only for analysis,
+# plotting, or trace ingestion lives in an extra.
 dependencies = [
-    "httpx>=0.27",
-    "pydantic>=2.7",
-    "numpy>=1.26",
-    "pandas>=2.2",
-    "pyyaml>=6.0",
-    "click>=8.1",
-    "rich>=13.7",
+    "click>=8.1",     # CLI
+    "httpx>=0.27",    # engine adapter (/metrics scrape, OpenAI-compatible calls)
+    "pyyaml>=6.0",    # run configs
+    "rich>=13.7",     # CLI output
 ]
 
 [project.optional-dependencies]
@@ -25,9 +28,10 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-plots = [
+analysis = [
+    "numpy>=1.26",
+    "pandas>=2.2",
     "matplotlib>=3.8",
-    "seaborn>=0.13",
 ]
 traces = [
     "datasets>=2.19",
@@ -50,6 +54,14 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Adapter API v0 is frozen (see docs/status.md). These two rules would change the
+# public contract, so they are suppressed rather than applied:
+#   UP042 — `StrEnum` changes what `str(DecisionKind.ADMIT)` returns.
+#   B027  — on_admit/on_complete/on_preempt are intentionally non-abstract, so a
+#           policy only has to implement `decide()`.
+"src/admitperf/policies/base.py" = ["UP042", "B027"]
 
 [tool.mypy]
 python_version = "3.11"
