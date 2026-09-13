@@ -52,7 +52,7 @@ def test_core_imports_without_optional_dependencies() -> None:
         "    sys.modules[blocked] = None\n"
         "import admitperf\n"
         "from admitperf import AdmissionPolicy, Decision, Request, SystemState\n"
-        "from admitperf.core import VirtualClock, WallClock, check_compatibility\n"
+        "from admitperf.core import StateCache, check_compatibility\n"
         "print('ok')\n"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)

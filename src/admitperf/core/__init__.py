@@ -1,9 +1,8 @@
-"""Core — the shared decision path.
+"""Core — the decision path.
 
-Everything here is importable with no heavy dependencies (spec D7): an ops
-engineer dropping AdmitPerf in front of a fleet gets this and nothing else.
-`core` must never import `bench`, `engines`, or `runtime`; that rule is
-enforced by tests/test_layering.py.
+The four objects (Request, SystemState, Decision, Outcome), the policy base
+class, the policy registry, and the cached state a policy reads. No engine, no
+provisioning, no benchmark machinery.
 """
 
 from __future__ import annotations
@@ -15,52 +14,34 @@ from admitperf.core.api import (
     Request,
     SystemState,
 )
-from admitperf.core.clock import VirtualClock, WallClock
 from admitperf.core.ports import (
-    ENGINE_KEY,
     STATE_AGE_KEY,
-    BundleWriter,
     CapabilityError,
-    Clock,
     DecisionRecord,
-    DeferQueue,
     EngineAdapter,
-    MetricsSink,
     RequestOutcome,
-    StateSource,
-    TraceSource,
     check_compatibility,
 )
-from admitperf.core.registry import (
-    available,
-    get_policy,
-    register,
-    requirements_of,
-)
+from admitperf.core.registry import available, get_policy, register, requirements_of
+from admitperf.core.state import StateCache, empty_state, state_age
 
 __all__ = [
-    "ENGINE_KEY",
     "STATE_AGE_KEY",
     "AdmissionPolicy",
-    "BundleWriter",
     "CapabilityError",
-    "Clock",
     "Decision",
     "DecisionKind",
     "DecisionRecord",
-    "DeferQueue",
     "EngineAdapter",
-    "MetricsSink",
     "Request",
     "RequestOutcome",
-    "StateSource",
+    "StateCache",
     "SystemState",
-    "TraceSource",
-    "VirtualClock",
-    "WallClock",
     "available",
     "check_compatibility",
+    "empty_state",
     "get_policy",
     "register",
     "requirements_of",
+    "state_age",
 ]

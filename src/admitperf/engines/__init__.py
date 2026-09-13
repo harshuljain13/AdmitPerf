@@ -1,10 +1,5 @@
-"""Engine adapters — implementations of core.ports.EngineAdapter.
+"""Serving-engine adapters.
 
-ReplayEngine (deterministic, no GPU) and VllmEngine (real fleet, official
-Prometheus telemetry) are substitutable behind one port (spec D4). Published
-numbers come only from a real engine; replay exists for determinism and CI.
+Each one knows how to scrape a real engine's telemetry into a SystemState and
+how to run a request against it while timing the response stream.
 """
-
-from admitperf.engines.replay import REPLAY_CAPABILITIES, ReplayConfig, ReplayEngine
-
-__all__ = ["REPLAY_CAPABILITIES", "ReplayConfig", "ReplayEngine"]

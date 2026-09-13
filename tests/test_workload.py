@@ -12,11 +12,6 @@ import statistics
 import pytest
 
 from admitperf.bench.workloads.poisson import DEFAULT_CLASSES, PoissonWorkload
-from admitperf.core.ports import TraceSource
-
-
-def test_satisfies_the_trace_source_port() -> None:
-    assert isinstance(PoissonWorkload(n_requests=5), TraceSource)
 
 
 def test_same_seed_gives_an_identical_stream() -> None:
