@@ -23,7 +23,10 @@ from admitperf.core.api import Decision, Request, SystemState
 # under a namespaced prefix. If this set keeps growing, that is the signal to
 # cut API v1 with real fields rather than keep overloading a dict.
 STATE_AGE_KEY = "admitperf:state_age_s"
-ENGINE_KEY = "admitperf:engine"
+
+# Manifest key, not a SystemState key: engine_metrics is typed float-only, and
+# the engine identity belongs to the run rather than to any single snapshot.
+ENGINE_KEY = "engine"
 
 
 @dataclass(frozen=True)
