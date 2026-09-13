@@ -1,0 +1,21 @@
+---
+title: "8-week plan — see docs/PROPOSAL.md"
+---
+%% Not C4 - visual companion to docs/PROPOSAL.md §3.
+%% Yellow = current week. Grey = future weeks. Same palette family as C4 diagrams.
+flowchart LR
+  W1["<b>Week 1</b><br/>Engine adapter shim<br/>+ W1 loader<br/>+ CI smoke on P0"]
+  W2["<b>Week 2</b><br/>ChronosThresholdWCRT<br/>(first real reject)<br/>proves API v0"]
+  W3["<b>Week 3</b><br/>Second engine adapter<br/>+ W2 tenant-fair"]
+  W4["<b>Week 4</b><br/>QLM-inspired<br/>+ metric formalization"]
+  W5["<b>Week 5</b><br/>W3 agent-session<br/>+ CONCUR-inspired"]
+  W6["<b>Week 6</b><br/>Full sweep<br/>(size TBD - open question 2)"]
+  W7["<b>Week 7</b><br/>Leaderboard v1<br/>+ results bundle"]
+  W8["<b>Week 8</b><br/>Paper draft freeze<br/>+ arXiv preprint"]
+
+  W1 --> W2 --> W3 --> W4 --> W5 --> W6 --> W7 --> W8
+
+  classDef next fill:#fef3c7,stroke:#b45309,color:#7c2d12
+  classDef future fill:#f1f5f9,stroke:#64748b,color:#334155
+  class W1 next
+  class W2,W3,W4,W5,W6,W7,W8 future

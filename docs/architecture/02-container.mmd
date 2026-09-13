@@ -1,0 +1,67 @@
+%% C4 Level 2 — Container Diagram
+%% What lives inside the AdmitPerf boundary, and how each container talks to the outside.
+flowchart TB
+  %% People (compact)
+  policyAuthor(["Policy author"])
+  opsEngineer(["Ops engineer"])
+
+  subgraph SYS["<b>AdmitPerf</b> - Python library + CLI"]
+    direction TB
+
+    cli["<b>CLI</b><br/><i>Python · Click</i><br/>admitperf run · policies · traces"]
+
+    core["<b>Core</b><br/><i>Python module</i><br/>Adapter API, registry,<br/>runner loop, state cache"]
+
+    plugins["<b>Policy plugins</b><br/><i>Python subpackage</i><br/>NoAdmission, Chronos-inspired,<br/>QLM-inspired, CONCUR-inspired..."]
+
+    workloads["<b>Workloads</b><br/><i>Python subpackage</i><br/>W1 request-mix · W2 tenant-fair<br/>W3 agent-session · W4 reasoning"]
+
+    engineAdapter["<b>Engine adapter</b><br/><i>httpx client</i><br/>Scrapes /metrics from vLLM/SGLang,<br/>enqueues admitted requests"]
+
+    runtime["<b>Runtime middleware</b><br/><i>experimental</i><br/>ASGI/WSGI middleware, or LiteLLM<br/>pre-request hook, or Envoy filter"]
+
+    bench["<b>Benchmark harness</b><br/><i>Python subpackage</i><br/>Trace replay, metrics collector,<br/>SHA-256 results bundle writer"]
+
+  end
+
+  %% External systems
+  fleet[/"<b>LLM serving fleet</b><br/>vLLM · SGLang · TRT-LLM"/]
+  traceStore[/"<b>Trace store</b><br/>Azure LLM · ShareGPT · SWE-Bench"/]
+  bundleStore[/"<b>Results bundle store</b><br/>Local FS · S3 · R2"/]
+  ci[/"<b>CI</b><br/>GitHub Actions"/]
+
+  %% People -> containers
+  policyAuthor -- "implements plugins via" --> plugins
+  opsEngineer -- "wires into gateway via" --> runtime
+
+  %% CLI orchestrates
+  cli --> core
+  cli -- "picks a workload" --> workloads
+  ci -- "invokes" --> cli
+
+  %% Core is the shared engine
+  core -- "resolves policies from" --> plugins
+  core -- "consumes traces from" --> workloads
+  core -- "talks to engine via" --> engineAdapter
+
+  %% Two use modes share Core
+  core -- "benchmark mode" --> bench
+  core -- "runtime mode" --> runtime
+
+  %% Cross the boundary
+  engineAdapter -.-> fleet
+  workloads -.-> traceStore
+  bench -.-> bundleStore
+  runtime -.-> fleet
+
+  %% C4 palette
+  classDef person fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
+  classDef container fill:#dbeafe,stroke:#1e40af,color:#1e3a8a,stroke-width:1.5px
+  classDef containerExp fill:#dbeafe,stroke:#1e40af,color:#1e3a8a,stroke-width:1.5px,stroke-dasharray:4 3
+  classDef external fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-width:1.5px
+  classDef systemBoundary fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:3px
+
+  class policyAuthor,opsEngineer person
+  class cli,core,plugins,workloads,engineAdapter,bench container
+  class runtime containerExp
+  class fleet,traceStore,bundleStore,ci external

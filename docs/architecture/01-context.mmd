@@ -1,0 +1,37 @@
+%% C4 Level 1 — System Context
+%% Who uses AdmitPerf, and what external systems it talks to.
+flowchart TB
+  %% People
+  policyAuthor(["<b>Policy author</b><br/>Researcher writing<br/>a new admission policy"])
+  opsEngineer(["<b>Ops engineer</b><br/>Runs an LLM serving fleet<br/>and wants goodput"])
+  reviewer(["<b>Paper reviewer</b><br/>Verifies leaderboard numbers"])
+
+  %% The system
+  admitperf["<b>AdmitPerf</b><br/><i>Benchmark-driven admission control<br/>layer for LLM inference</i><br/>Python library + CLI"]
+
+  %% External systems
+  fleet[/"<b>LLM serving fleet</b><br/>vLLM · SGLang · TRT-LLM<br/><i>replicas the ops engineer runs</i>"/]
+  traces[/"<b>Trace sources</b><br/>Azure LLM · ShareGPT ·<br/>LMSYS-Chat-1M · SWE-Bench"/]
+  compute[/"<b>Compute</b><br/>Modal · Lambda GPU<br/><i>for benchmark sweeps</i>"/]
+  ci[/"<b>CI</b><br/>GitHub Actions<br/><i>runs smoke suite per PR</i>"/]
+  arxiv[/"<b>arXiv / venue</b><br/><i>where the paper + results<br/>bundle are published</i>"/]
+
+  %% Relationships
+  policyAuthor -- "implements<br/><b>AdmissionPolicy</b>" --> admitperf
+  opsEngineer -- "drops in front of<br/>the fleet as middleware" --> admitperf
+  reviewer -- "re-executes<br/>signed bundles" --> admitperf
+
+  admitperf -- "scrapes <b>/metrics</b>,<br/>returns admit/defer/reject" --> fleet
+  admitperf -- "loads JSONL<br/>workload traces" --> traces
+  admitperf -- "runs sweeps on" --> compute
+  ci -- "invokes<br/><b>admitperf run</b>" --> admitperf
+  admitperf -- "produces leaderboard +<br/>signed results bundle" --> arxiv
+
+  %% C4 palette
+  classDef person fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
+  classDef system fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:3px
+  classDef external fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-width:1.5px
+
+  class policyAuthor,opsEngineer,reviewer person
+  class admitperf system
+  class fleet,traces,compute,ci,arxiv external

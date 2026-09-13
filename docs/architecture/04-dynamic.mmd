@@ -1,0 +1,31 @@
+%% C4 Dynamic Diagram - per-request path through the Core container.
+%% Same sequence for benchmark replay and runtime middleware.
+sequenceDiagram
+  autonumber
+  participant W as Workload<br/>(JSONL trace<br/>or live traffic)
+  participant R as AdmitPerf runner
+  participant S as State cache<br/>(refreshed on engine tick)
+  participant P as Policy plugin<br/>(e.g. Chronos-inspired)
+  participant E as Engine<br/>(vLLM / SGLang / replay)
+  participant M as Metrics collector
+
+  Note over S,E: State is pushed on the engine's own cadence,<br/>never scraped per arrival.
+  E-->>S: tick: KV%, queue depth, running reqs
+
+  W->>R: request arrives (arrival_time, tokens, SLO class)
+  R->>S: read latest snapshot (no I/O)
+  S-->>R: SystemState (with staleness age)
+  R->>P: decide(request, state)
+  P-->>R: ADMIT | DEFER(50ms) | REJECT("kv_pressure")
+
+  alt ADMIT
+    R->>E: enqueue for inference
+    E-->>M: TTFT, TBT, completion
+  else DEFER
+    R->>R: hold until retry_after_ms OR next state tick
+    R->>P: decide(request, fresher state)
+  else REJECT
+    R->>M: log 429 with reason
+  end
+
+  M-->>M: update goodput, admit/defer/reject counts
