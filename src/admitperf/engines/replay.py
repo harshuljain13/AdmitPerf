@@ -15,6 +15,23 @@ and one shared resource, a KV budget in tokens. A request occupies its full
 context for as long as it runs; when the budget is exhausted, the newest
 running request is preempted and returns its tokens.
 
+Concurrency is modelled as **time intervals**, not as sleeping. `submit` never
+advances the clock; it records the interval during which the request occupies
+KV, and waits. The runner advances time and calls `settle`, which resolves the
+requests whose simulated life has ended.
+
+Both halves of that matter:
+
+- If `submit` slept until its own completion, the first long request would drag
+  the virtual clock past every later arrival and the whole arrival pattern
+  would collapse into a single instant.
+- If `submit` instead returned an outcome immediately, it would have to report
+  success before the request was safe. A request admitted at t can still be
+  preempted at t+1 when a later arrival needs its KV back, and the bundle could
+  not tell that premature claim apart from a real completion.
+
+Occupancy at any time t is derived by asking which intervals contain t.
+
 What this deliberately does NOT model: per-token scheduling, continuous
 batching interference, prefix-cache reuse, chunked prefill, tensor-parallel
 effects. Because inter-token timing is not modelled, this engine reports **no
@@ -23,6 +40,7 @@ TBT at all** rather than a plausible-looking number that would be fiction.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -42,14 +60,22 @@ REPLAY_CAPABILITIES = frozenset(
 
 
 @dataclass
-class _InFlight:
+class _Interval:
+    """One request's occupancy of the fleet, over simulated time."""
+
     req: Request
     kv_tokens: int
     started_at: float
     finishes_at: float
     ttft_at: float
     output_tokens: int
-    seq: int = 0
+    seq: int
+    future: asyncio.Future[RequestOutcome]
+    preempted: bool = False
+    settled: bool = False
+
+    def active_at(self, t: float) -> bool:
+        return not self.settled and self.started_at <= t < self.finishes_at
 
 
 @dataclass
@@ -83,7 +109,7 @@ class ReplayEngine:
     def __init__(self, clock: Clock, config: ReplayConfig | None = None) -> None:
         self._clock = clock
         self.config = config or ReplayConfig()
-        self._running: list[_InFlight] = []
+        self._intervals: list[_Interval] = []
         self._waiting = 0
         self._subscribers: list[Callable[[SystemState], None]] = []
         self._preemptions = 0
@@ -100,18 +126,21 @@ class ReplayEngine:
         self._subscribers.append(cb)
 
     async def submit(self, req: Request) -> RequestOutcome:
-        """Run one request to completion in simulated time."""
+        """Schedule one request and wait for its simulated outcome.
+
+        Does not advance the clock. Resolves when the runner advances time past
+        this request's completion and calls `settle` — or earlier, as a
+        preemption, if a later arrival reclaims its KV.
+        """
         now = self._clock.now()
         output_tokens = req.expected_output_tokens or 128
         kv_tokens = req.input_tokens + output_tokens
-
-        self._make_room(kv_tokens, now)
 
         prefill_s = req.input_tokens / self.config.prefill_tokens_per_s
         decode_s = output_tokens * self.config.seconds_per_output_token
 
         self._seq += 1
-        entry = _InFlight(
+        entry = _Interval(
             req=req,
             kv_tokens=kv_tokens,
             started_at=now,
@@ -119,41 +148,64 @@ class ReplayEngine:
             finishes_at=now + prefill_s + decode_s,
             output_tokens=output_tokens,
             seq=self._seq,
+            future=asyncio.get_running_loop().create_future(),
         )
-        self._running.append(entry)
+
+        self._make_room(kv_tokens, now)
+        self._intervals.append(entry)
+        self._prune(now)
         self._emit_tick()
 
-        await self._clock.sleep_until(entry.finishes_at)
+        return await entry.future
 
-        if entry not in self._running:
-            # Preempted while we were sleeping; its KV was already reclaimed.
-            self._emit_tick()
-            return RequestOutcome(
-                request_id=req.request_id,
-                status="preempted",
-                error="preempted_under_kv_pressure",
-            )
+    def settle(self, now: float) -> None:
+        """Resolve every request whose simulated life has ended by `now`.
 
-        self._running.remove(entry)
-        self._completions += 1
-        self._emit_tick()
+        The runner calls this as it advances time. Outcomes cannot be decided
+        at submit: a request admitted at t may still be preempted at t+1 when a
+        later arrival needs its KV back, and reporting it complete up front
+        would be a lie the results bundle could not distinguish from the truth.
+        """
+        for entry in self._intervals:
+            if entry.settled or entry.future.done():
+                continue
+            if entry.preempted:
+                entry.settled = True
+                entry.future.set_result(
+                    RequestOutcome(
+                        request_id=entry.req.request_id,
+                        status="preempted",
+                        error="preempted_under_kv_pressure",
+                    )
+                )
+            elif entry.finishes_at <= now:
+                entry.settled = True
+                self._completions += 1
+                ttft_ms = (entry.ttft_at - entry.started_at) * 1000.0
+                total_ms = (entry.finishes_at - entry.started_at) * 1000.0
+                entry.future.set_result(
+                    RequestOutcome(
+                        request_id=entry.req.request_id,
+                        status="completed",
+                        ttft_ms=ttft_ms,
+                        # No TBT: inter-token timing is not modelled, and a
+                        # synthesised value would be indistinguishable from a
+                        # measured one once it reached the bundle.
+                        tbt_ms=(),
+                        total_ms=total_ms,
+                        output_tokens=entry.output_tokens,
+                        met_deadline=self._met_deadline(entry.req, ttft_ms),
+                    )
+                )
 
-        ttft_ms = (entry.ttft_at - entry.started_at) * 1000.0
-        total_ms = (entry.finishes_at - entry.started_at) * 1000.0
-        return RequestOutcome(
-            request_id=req.request_id,
-            status="completed",
-            ttft_ms=ttft_ms,
-            # No TBT: this engine does not model inter-token timing, and a
-            # synthesised value would be indistinguishable from a measured one.
-            tbt_ms=(),
-            total_ms=total_ms,
-            output_tokens=entry.output_tokens,
-            met_deadline=self._met_deadline(req, ttft_ms),
-        )
+    def drain(self) -> float:
+        """Simulated time at which the last outstanding request finishes."""
+        pending = [e.finishes_at for e in self._intervals if not e.settled]
+        return max(pending) if pending else self._clock.now()
 
     async def aclose(self) -> None:
-        self._running.clear()
+        self.settle(float("inf"))
+        self._intervals.clear()
 
     # --- simulation internals --------------------------------------------
 
@@ -167,14 +219,25 @@ class ReplayEngine:
         """
         if not self.config.preemption_enabled:
             return
+
         budget = self.config.kv_budget_tokens
-        while self._running and self._kv_used() + needed > budget:
-            victim = max(self._running, key=lambda e: e.seq)
-            self._running.remove(victim)
+        while True:
+            active = [e for e in self._intervals if e.active_at(now)]
+            if not active or sum(e.kv_tokens for e in active) + needed <= budget:
+                break
+            victim = max(active, key=lambda e: e.seq)
+            victim.preempted = True
+            victim.finishes_at = now  # releases its KV at this instant
             self._preemptions += 1
 
-    def _kv_used(self) -> int:
-        return sum(e.kv_tokens for e in self._running)
+    def _kv_used(self, now: float) -> int:
+        return sum(e.kv_tokens for e in self._intervals if e.active_at(now))
+
+    def _prune(self, now: float) -> None:
+        """Drop intervals that ended long ago, so memory does not grow with
+        the length of the trace."""
+        if len(self._intervals) > 4096:
+            self._intervals = [e for e in self._intervals if e.finishes_at >= now]
 
     def _met_deadline(self, req: Request, ttft_ms: float) -> bool | None:
         if req.deadline_ttft_ms is None:
@@ -204,9 +267,10 @@ class ReplayEngine:
 
     def snapshot(self) -> SystemState:
         now = self._clock.now()
-        used = self._kv_used()
+        active = [e for e in self._intervals if e.active_at(now)]
+        used = sum(e.kv_tokens for e in active)
         per_tenant: dict[str, int] = {}
-        for entry in self._running:
+        for entry in active:
             per_tenant[entry.req.tenant_id] = per_tenant.get(entry.req.tenant_id, 0) + 1
 
         metrics = dict(self.config.metrics)
@@ -216,7 +280,7 @@ class ReplayEngine:
         return SystemState(
             now=now,
             kv_used_fraction=min(1.0, used / self.config.kv_budget_tokens),
-            running_requests=len(self._running),
+            running_requests=len(active),
             waiting_requests=self._waiting,
             running_agents=0,
             per_tenant_running=per_tenant,
