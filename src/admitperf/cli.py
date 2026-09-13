@@ -28,7 +28,9 @@ def traces() -> None:
 @main.command()
 @click.option("--policy", required=True, help="Policy name")
 @click.option("--trace", required=True, help="Trace name")
-@click.option("--engine-url", default="http://localhost:8000/v1", help="OpenAI-compatible engine URL")
+@click.option(
+    "--engine-url", default="http://localhost:8000/v1", help="OpenAI-compatible engine URL"
+)
 def run(policy: str, trace: str, engine_url: str) -> None:
     """Run a policy against a trace on a live engine."""
     click.echo(f"run: policy={policy} trace={trace} engine={engine_url} (not implemented)")
