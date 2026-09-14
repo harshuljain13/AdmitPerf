@@ -75,3 +75,6 @@ Roadmap.md
 # AdmitPerf session state
 .admitperf/
 results/
+
+# Spec-dev drafts stay local
+.spec-dev/

@@ -1,6 +1,6 @@
 # AdmitPerf — Project plan
 
-*Proposal v0.3 — 2026-09-13*
+*Proposal v0.4 — 2026-09-14*
 *Authors: Harshul Jain, Dr. Tanmay Sah, Tanya Sah, Parv Khatri (all independent researchers)*
 *Companion to: `../../survey/paper.tex` (systematic review, arXiv preprint pending)*
 
@@ -53,9 +53,9 @@ Rendered as [`architecture/05-plan.png`](architecture/05-plan.png).
 
 | Week | Milestone |
 |---|---|
-| 1 | Engine adapter shim, W1 loader, results bundle v0, CI smoke on `NoAdmission` |
-| 2 | First real policy (Chronos-inspired threshold WCRT) — proves the API v0 reject path |
-| 3 | Second engine adapter, W2 tenant-fairness workload |
+| 1 | ✅ vLLM adapter, runner, W1 loader, results bundle, Modal provisioning, CLI |
+| 2 | First run on real hardware; Chronos-inspired threshold WCRT |
+| 3 | SGLang adapter, W2 tenant-fairness workload |
 | 4 | QLM-inspired KV admission + metric formalization |
 | 5 | W3 agent-session workload, token-budget + CONCUR-inspired agent-level admission |
 | 6 | Full sweep (size set by the open question in §7) |
@@ -97,10 +97,14 @@ for archival credit. MLSys 2027 D&B only if the week-6 sweep lands clean.
 
 Unresolved. Each one changes the build, so none should be answered by accident.
 
-1. **Execution substrate.** Deterministic replay against a calibrated queueing/KV model
-   (runs in CI, ~$0, GPUs only for a fidelity-calibration appendix), or live engine only
-   (higher fidelity, higher cost, not reproducible by readers)? This bears directly on the
-   "cheap and deterministic" corollary in [`motivation.md`](motivation.md).
+1. ~~**Execution substrate.**~~ **Resolved 2026-09-14: live engines only.** A simulated
+   engine cannot answer whether one policy beats another on a real serving stack, which is
+   the question the project exists to ask. The simulator built earlier was removed. What
+   remains of the "cheap and deterministic" corollary in [`motivation.md`](motivation.md)
+   is a tension worth naming: a run against real hardware is not bit-reproducible, so
+   reproducibility here means a pinned manifest and a published bundle, not identical
+   numbers. `scripts/fake_vllm.py` covers the wiring; it is explicitly not a measurement
+   substrate.
 2. **Policy count.** The roster in [`policies.md`](policies.md) versus the 3–4 that
    [`prior-art/feasibility_audit.md`](prior-art/feasibility_audit.md) argues is achievable.
 3. **Driving hypothesis.** Whether the work is organized around one falsifiable question
@@ -110,3 +114,5 @@ Unresolved. Each one changes the build, so none should be answered by accident.
    review argues hard against "benchmark."
 5. Whether to bundle a captured production trace (licensing) or ship synthetic-only.
 6. Whether the leaderboard lives in the repo or on a hosted page.
+7. How many repeats per configuration, and how to report variance. A live engine gives a
+   different number every run, and a single sample per policy is not a comparison.

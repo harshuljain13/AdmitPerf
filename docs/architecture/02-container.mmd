@@ -8,19 +8,21 @@ flowchart TB
   subgraph SYS["<b>AdmitPerf</b> - Python library + CLI"]
     direction TB
 
-    cli["<b>CLI</b><br/><i>Python · Click</i><br/>admitperf run · policies · traces"]
+    cli["<b>CLI</b><br/><i>Python · Click</i><br/>admitperf infra up · smoke · run"]
 
     core["<b>Core</b><br/><i>Python module</i><br/>Adapter API, registry,<br/>runner loop, state cache"]
 
-    plugins["<b>Policy plugins</b><br/><i>Python subpackage</i><br/>NoAdmission, Chronos-inspired,<br/>QLM-inspired, CONCUR-inspired..."]
+    plugins["<b>Policy plugins</b><br/><i>Python subpackage</i><br/>NoAdmission, KVThreshold,<br/>+ third-party via entry points"]
 
-    workloads["<b>Workloads</b><br/><i>Python subpackage</i><br/>W1 request-mix · W2 tenant-fair<br/>W3 agent-session · W4 reasoning"]
+    workloads["<b>Workloads</b><br/><i>Python subpackage</i><br/>W1 request-mix (Poisson, 3 SLO classes)<br/>tenant-fair and agent-session planned"]
 
-    engineAdapter["<b>Engine adapter</b><br/><i>httpx client</i><br/>Scrapes /metrics from vLLM/SGLang,<br/>enqueues admitted requests"]
+    engineAdapter["<b>Engine adapter</b><br/><i>httpx client</i><br/>Scrapes /metrics, streams requests,<br/>times TTFT and inter-token gaps"]
 
     runtime["<b>Runtime middleware</b><br/><i>experimental</i><br/>ASGI/WSGI middleware, or LiteLLM<br/>pre-request hook, or Envoy filter"]
 
-    bench["<b>Benchmark harness</b><br/><i>Python subpackage</i><br/>Trace replay, metrics collector,<br/>SHA-256 results bundle writer"]
+    infra["<b>Provisioning</b><br/><i>Python subpackage</i><br/>Deploy vLLM on a GPU,<br/>remember the endpoint"]
+
+    bench["<b>Benchmark harness</b><br/><i>Python subpackage</i><br/>Load generation, percentiles,<br/>results bundle with provenance tags"]
 
   end
 
@@ -28,7 +30,7 @@ flowchart TB
   fleet[/"<b>LLM serving fleet</b><br/>vLLM · SGLang · TRT-LLM"/]
   traceStore[/"<b>Trace store</b><br/>Azure LLM · ShareGPT · SWE-Bench"/]
   bundleStore[/"<b>Results bundle store</b><br/>Local FS · S3 · R2"/]
-  ci[/"<b>CI</b><br/>GitHub Actions"/]
+  gpuCloud[/"<b>GPU cloud</b><br/>Modal · Lambda"/]
 
   %% People -> containers
   policyAuthor -- "implements plugins via" --> plugins
@@ -37,7 +39,7 @@ flowchart TB
   %% CLI orchestrates
   cli --> core
   cli -- "picks a workload" --> workloads
-  ci -- "invokes" --> cli
+  cli -- "provisions via" --> infra
 
   %% Core is the shared engine
   core -- "resolves policies from" --> plugins
@@ -53,6 +55,8 @@ flowchart TB
   workloads -.-> traceStore
   bench -.-> bundleStore
   runtime -.-> fleet
+  infra -.-> gpuCloud
+  gpuCloud -.-> fleet
 
   %% C4 palette
   classDef person fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
@@ -62,6 +66,6 @@ flowchart TB
   classDef systemBoundary fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:3px
 
   class policyAuthor,opsEngineer person
-  class cli,core,plugins,workloads,engineAdapter,bench container
+  class cli,core,plugins,workloads,engineAdapter,bench,infra container
   class runtime containerExp
-  class fleet,traceStore,bundleStore,ci external
+  class fleet,traceStore,bundleStore,gpuCloud external

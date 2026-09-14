@@ -1,11 +1,11 @@
 ---
-title: "8-week plan — see docs/PROPOSAL.md"
+title: "Plan — see docs/PROPOSAL.md. Green is done."
 ---
 %% Not C4 - visual companion to docs/PROPOSAL.md §3.
-%% Yellow = current week. Grey = future weeks. Same palette family as C4 diagrams.
+%% Green = done. Yellow = current. Grey = future. Same palette family as C4 diagrams.
 flowchart LR
-  W1["<b>Week 1</b><br/>Engine adapter shim<br/>+ W1 loader<br/>+ CI smoke on P0"]
-  W2["<b>Week 2</b><br/>ChronosThresholdWCRT<br/>(first real reject)<br/>proves API v0"]
+  W1["<b>Week 1</b> ✓<br/>vLLM adapter · runner<br/>Poisson workload · results<br/>Modal provisioning · CLI"]
+  W2["<b>Week 2</b><br/>First run on real hardware<br/>+ ChronosThresholdWCRT"]
   W3["<b>Week 3</b><br/>Second engine adapter<br/>+ W2 tenant-fair"]
   W4["<b>Week 4</b><br/>QLM-inspired<br/>+ metric formalization"]
   W5["<b>Week 5</b><br/>W3 agent-session<br/>+ CONCUR-inspired"]
@@ -15,7 +15,9 @@ flowchart LR
 
   W1 --> W2 --> W3 --> W4 --> W5 --> W6 --> W7 --> W8
 
+  classDef done fill:#ccfbf1,stroke:#0f766e,color:#134e4a
   classDef next fill:#fef3c7,stroke:#b45309,color:#7c2d12
   classDef future fill:#f1f5f9,stroke:#64748b,color:#334155
-  class W1 next
-  class W2,W3,W4,W5,W6,W7,W8 future
+  class W1 done
+  class W2 next
+  class W3,W4,W5,W6,W7,W8 future

@@ -25,16 +25,24 @@ class YourPolicy(AdmissionPolicy):
 - If your policy needs state across calls (AIMD counters, EWMA windows), keep it on `self` and expose the fields so tests can pin them.
 - Do not mutate `req` or `state`. Both are frozen dataclasses.
 
-Register the policy in `src/admitperf/policies/__init__.py`:
+Declare which signals it needs, so a mismatch fails at startup instead of silently
+reading a missing value as zero:
 
 ```python
-from admitperf.policies.your_policy import YourPolicy
-
-POLICIES: dict[str, type[AdmissionPolicy]] = {
-    NoAdmission.name: NoAdmission,
-    YourPolicy.name: YourPolicy,   # add here
-}
+class YourPolicy(AdmissionPolicy):
+    name = "your_policy"
+    requires = frozenset({"kv_used_fraction"})
 ```
+
+If the policy lives **in this repo**, register it in `src/admitperf/policies/__init__.py`.
+If it lives in **your own package**, declare an entry point instead — no edit here needed:
+
+```toml
+[project.entry-points."admitperf.policies"]
+your_policy = "your_pkg.policies:YourPolicy"
+```
+
+`admitperf policies` lists everything resolvable either way.
 
 ## 2. The fidelity rule for reference-policy ports
 
@@ -62,7 +70,12 @@ pytest tests/policies/test_your_policy.py # just yours
 pytest -k determinism                     # cross-policy determinism suite
 ```
 
-CI runs the smoke suite on every PR (~5 seconds, no GPU).
+Against the fake engine, no GPU needed:
+
+```bash
+python scripts/fake_vllm.py --port 8077 &
+admitperf run --policy your_policy --engine-url http://127.0.0.1:8077 -n 40 --rate 20
+```
 
 ## 4. Coding conventions
 
@@ -87,7 +100,8 @@ CI runs the smoke suite on every PR (~5 seconds, no GPU).
 - Claims of a faithful port that we cannot verify against the source paper.
 - New metrics without a definition in [`docs/metrics.md`](docs/metrics.md).
 - Changes to the adapter API (`Request`, `SystemState`, `Decision`, `AdmissionPolicy`) — that is v0 frozen. If you think the API needs to change, open an issue first.
+- Metrics estimated rather than measured. If a number cannot be obtained from the engine or from client-side timing, it belongs in the bundle's `unavailable` block with a reason.
 
 ## Questions
 
-Open an issue with the `question` label, or read the [motivation](docs/motivation.md) and [scope](docs/scope.md) docs first.
+Open an issue with the `question` label, or read the [motivation](docs/motivation.md), [scope](docs/scope.md) and [status](docs/status.md) docs first.

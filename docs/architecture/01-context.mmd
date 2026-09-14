@@ -12,8 +12,7 @@ flowchart TB
   %% External systems
   fleet[/"<b>LLM serving fleet</b><br/>vLLM · SGLang · TRT-LLM<br/><i>replicas the ops engineer runs</i>"/]
   traces[/"<b>Trace sources</b><br/>Azure LLM · ShareGPT ·<br/>LMSYS-Chat-1M · SWE-Bench"/]
-  compute[/"<b>Compute</b><br/>Modal · Lambda GPU<br/><i>for benchmark sweeps</i>"/]
-  ci[/"<b>CI</b><br/>GitHub Actions<br/><i>runs smoke suite per PR</i>"/]
+  compute[/"<b>GPU cloud</b><br/>Modal · Lambda<br/><i>AdmitPerf deploys the engine here</i>"/]
   arxiv[/"<b>arXiv / venue</b><br/><i>where the paper + results<br/>bundle are published</i>"/]
 
   %% Relationships
@@ -23,8 +22,7 @@ flowchart TB
 
   admitperf -- "scrapes <b>/metrics</b>,<br/>returns admit/defer/reject" --> fleet
   admitperf -- "loads JSONL<br/>workload traces" --> traces
-  admitperf -- "runs sweeps on" --> compute
-  ci -- "invokes<br/><b>admitperf run</b>" --> admitperf
+  admitperf -- "provisions vLLM on" --> compute
   admitperf -- "produces leaderboard +<br/>signed results bundle" --> arxiv
 
   %% C4 palette
@@ -34,4 +32,4 @@ flowchart TB
 
   class policyAuthor,opsEngineer,reviewer person
   class admitperf system
-  class fleet,traces,compute,ci,arxiv external
+  class fleet,traces,compute,arxiv external
