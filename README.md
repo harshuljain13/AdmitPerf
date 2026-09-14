@@ -114,6 +114,22 @@ pip install -e '.[dev]'          # + pytest, ruff, mypy
 
 The runtime dependency list is deliberately short. Putting admission control in front of a fleet should not drag in a plotting stack.
 
+### Environment
+
+Nothing is required. The fake-engine path needs no configuration at all, and deploying an
+ungated model to Modal needs only your existing `modal setup` credentials.
+
+`.env.example` documents the optional knobs. The one that matters:
+
+```bash
+# gated weights only (Llama, Gemma) — ungated models need nothing
+modal secret create huggingface HF_TOKEN=hf_xxx
+admitperf infra up --model meta-llama/Llama-3.1-8B --hf-secret huggingface
+```
+
+The token lives in a Modal secret, never in `.env` — putting it there would bake it into
+the deploy environment.
+
 ---
 
 ## Documentation

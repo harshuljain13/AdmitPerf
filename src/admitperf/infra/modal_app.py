@@ -27,6 +27,14 @@ GPU = os.environ.get("ADMITPERF_GPU", "A10G")
 MAX_NUM_SEQS = os.environ.get("ADMITPERF_MAX_NUM_SEQS", "8")
 MAX_MODEL_LEN = os.environ.get("ADMITPERF_MAX_MODEL_LEN", "16384")
 GPU_MEM_UTIL = os.environ.get("ADMITPERF_GPU_MEM_UTIL", "0.90")
+
+# Name of a Modal secret holding HF_TOKEN. Empty by default, and deliberately
+# so: most benchmark models are ungated, and requiring a secret that does not
+# exist would fail the deploy for everyone who does not need one. Set it only
+# for gated weights (Llama, Gemma):
+#     modal secret create huggingface HF_TOKEN=hf_...
+#     export ADMITPERF_HF_SECRET=huggingface
+HF_SECRET = os.environ.get("ADMITPERF_HF_SECRET", "").strip()
 VLLM_PORT = 8000
 
 try:
@@ -55,7 +63,7 @@ hf_cache = modal.Volume.from_name("admitperf-hf-cache", create_if_missing=True)
     image=image,
     gpu=GPU,
     volumes={"/root/.cache/huggingface": hf_cache},
-    secrets=[modal.Secret.from_name("huggingface", required_keys=[])],
+    secrets=[modal.Secret.from_name(HF_SECRET)] if HF_SECRET else [],
     timeout=60 * 60,
     # One container. Modal would otherwise autoscale, and a fleet that grows
     # under load is measuring elasticity rather than admission control.
