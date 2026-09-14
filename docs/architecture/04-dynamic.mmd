@@ -1,0 +1,41 @@
+%% C4 Dynamic Diagram — the two loops.
+%% A background task scrapes the engine; the arrival loop decides per request.
+%% They are separate so the decision path never blocks on HTTP.
+sequenceDiagram
+  autonumber
+  participant W as Workload<br/>(generated or live traffic)
+  participant R as AdmitPerf runner
+  participant S as State cache
+  participant P as Policy<br/>(e.g. kv_threshold)
+  participant E as Engine adapter<br/>(vLLM)
+  participant M as Results
+
+  Note over R,E: Background loop, every scrape_interval_s
+  R->>E: GET /metrics
+  E-->>S: KV%, queue depth, running reqs
+  Note over S: stamped with its age on read
+
+  Note over W,M: Arrival loop, per request
+  W->>R: request due (tokens, SLO class, deadline)
+  R->>S: read latest snapshot (no I/O)
+  S-->>R: SystemState + age
+
+  alt snapshot older than max_state_age_s
+    R->>M: reject 503 "no_signal"
+    Note over R: deciding on stale signal is guessing.<br/>A guess recorded as a decision corrupts the run.
+  else snapshot usable
+    R->>P: decide(request, state)
+    P-->>R: ADMIT | DEFER(50ms) | REJECT("kv_pressure")
+  end
+
+  alt ADMIT
+    R->>E: POST /v1/chat/completions (stream)
+    E-->>R: tokens, timed on arrival
+    R->>M: TTFT, inter-token gaps, deadline verdict
+  else DEFER
+    R->>R: sleep retry_after_ms
+    R->>P: decide again, on fresher state
+    Note over R: past max_defers it becomes a reject,<br/>so the request cannot vanish from the run.
+  else REJECT
+    R->>M: 429 / 503 / 529 with reason + the state it was decided on
+  end

@@ -71,3 +71,10 @@ modal_logs/
 
 # Roadmap intentionally outside this repo — do not commit if placed here by mistake
 Roadmap.md
+
+# AdmitPerf session state
+.admitperf/
+results/
+
+# Spec-dev drafts stay local
+.spec-dev/

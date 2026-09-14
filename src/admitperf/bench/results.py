@@ -1,0 +1,126 @@
+"""Turn a run into numbers, and write them somewhere a reader can check.
+
+Every reported value says where it came from:
+
+  client   measured here, as the response streamed back
+  harness  counted by the admission layer itself
+  engine   read from the engine's own telemetry
+
+That tagging is the difference between a number you can defend and one you
+cannot. It also makes the absent ones visible: anything AdmitPerf cannot
+actually measure is written down as unavailable, with the reason, rather than
+estimated into existence.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from admitperf.core.runner import RunResult
+
+
+def percentiles(values: list[float]) -> dict[str, float | None]:
+    """p50/p95/p99 from measured samples.
+
+    Computed here rather than read from the engine on purpose: vLLM publishes
+    latency as sum/count, which is a mean over every request it has served and
+    carries no distribution at all.
+    """
+    if not values:
+        return {"p50": None, "p95": None, "p99": None}
+    ordered = sorted(values)
+    n = len(ordered)
+
+    def at(q: float) -> float:
+        # Nearest-rank: the smallest value at or below which q of the samples
+        # fall. Interpolating between samples would invent latencies that were
+        # never observed, which is the wrong trade for a tail measurement.
+        rank = math.ceil(q * n)
+        return ordered[min(n - 1, max(0, rank - 1))]
+
+    return {"p50": at(0.50), "p95": at(0.95), "p99": at(0.99)}
+
+
+def summarize(result: RunResult) -> dict[str, Any]:
+    completed = [o for o in result.outcomes if o.status == "completed"]
+    ttfts = [o.ttft_ms for o in completed if o.ttft_ms is not None]
+    tbts = [gap for o in completed for gap in o.tbt_ms]
+    judged = [o for o in completed if o.met_deadline is not None]
+    met = [o for o in judged if o.met_deadline]
+
+    offered = result.admitted + result.rejected
+    wall = result.wall_s or 1.0
+
+    return {
+        "offered": offered,
+        "admitted": result.admitted,
+        "deferred": result.deferred,
+        "rejected": result.rejected,
+        "completed": result.completed,
+        "failed": result.failed,
+        "reject_reasons": dict(result.reject_reasons),
+        "wall_s": round(result.wall_s, 3),
+        "throughput_rps": round(result.completed / wall, 3),
+        # The headline. Unlike goodput, the denominator is everything offered,
+        # so a policy cannot win by refusing most of the traffic.
+        "goodput_under_admission": round(len(met) / offered, 4) if offered else None,
+        "admit_rate": round(result.admitted / offered, 4) if offered else None,
+        "ttft_ms": percentiles([float(v) for v in ttfts]),
+        "tbt_ms": percentiles([float(v) for v in tbts]),
+        "deadline_met": len(met),
+        "deadline_judged": len(judged),
+        "scrapes": result.scrapes,
+        "scrape_failures": result.scrape_failures,
+        "sources": {
+            "ttft_ms": "client",
+            "tbt_ms": "client",
+            "goodput_under_admission": "client+harness",
+            "admit_rate": "harness",
+            "reject_reasons": "harness",
+            "throughput_rps": "client",
+        },
+        "unavailable": {
+            "preemption_loss_bytes": (
+                "no engine reports KV bytes discarded to preemption; "
+                "vllm:num_preemptions_total is a count, not a volume"
+            ),
+            "gpu_utilization": "needs DCGM alongside the engine; not collected",
+        },
+    }
+
+
+def write_bundle(
+    out_dir: Path,
+    *,
+    result: RunResult,
+    manifest: dict[str, Any],
+) -> Path:
+    """Write the run as a directory.
+
+    A directory rather than an archive, because the point is that someone can
+    look: diff two runs, grep the decisions, see why a request was refused.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary = summarize(result)
+
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+
+    with (out_dir / "decisions.jsonl").open("w") as fh:
+        for record in result.decisions:
+            fh.write(json.dumps(asdict(record)) + "\n")
+
+    with (out_dir / "outcomes.jsonl").open("w") as fh:
+        for outcome in result.outcomes:
+            row = asdict(outcome)
+            row["tbt_ms"] = list(row["tbt_ms"])
+            fh.write(json.dumps(row) + "\n")
+
+    return out_dir
+
+
+__all__ = ["percentiles", "summarize", "write_bundle"]

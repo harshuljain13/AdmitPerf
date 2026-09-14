@@ -1,0 +1,67 @@
+%% C4 Level 3 — Component Diagram
+%% What lives inside the package. Green boxes exist and are tested;
+%% amber is written but unproven; grey is not built. Matches docs/status.md.
+flowchart TB
+
+  cli(["CLI<br/><i>admitperf infra up · smoke · run</i>"])
+
+  subgraph CORE["<b>core</b> - the decision path (stdlib + click)"]
+    direction TB
+
+    api["<b>Adapter API v0</b><br/><i>core/api.py</i><br/>Request · SystemState · Decision<br/>AdmissionPolicy"]
+
+    registry["<b>Policy registry</b><br/><i>core/registry.py</i><br/>built-ins + entry-point plugins<br/>capability check at startup"]
+
+    runner["<b>Runner</b><br/><i>core/runner.py</i><br/>background scrape loop +<br/>arrival loop: decide, forward or refuse"]
+
+    stateCache["<b>State cache</b><br/><i>core/state.py</i><br/>latest scrape, stamped with age<br/>current() does no I/O"]
+  end
+
+  subgraph ENGINES["<b>engines</b>"]
+    vllm["<b>vLLM adapter</b><br/><i>engines/vllm.py</i><br/>scrape /metrics · stream requests<br/>time TTFT and inter-token gaps"]
+    sglang["SGLang adapter"]
+  end
+
+  subgraph INFRA["<b>infra</b>"]
+    modal["<b>Modal provisioner</b><br/><i>infra/modal_provider.py</i><br/>deploy vLLM on a GPU"]
+    session["<b>Session file</b><br/><i>.admitperf/session.json</i>"]
+  end
+
+  subgraph BENCH["<b>bench</b>"]
+    workloads["<b>Poisson workload</b><br/>3 SLO classes, seeded"]
+    results["<b>Results</b><br/><i>bench/results.py</i><br/>percentiles, goodput,<br/>provenance tags"]
+  end
+
+  plugins["Policy plugins<br/><i>your own pip package</i>"]
+  fleet[/"vLLM on a GPU"/]
+  disk[/"results/&lt;run&gt;/"/]
+
+  cli --> runner
+  cli --> modal
+  modal --> session
+  session -. "endpoint" .-> cli
+
+  runner -- "reads snapshot, no I/O" --> stateCache
+  runner -- "resolves by name" --> registry
+  registry -- "instantiates" --> api
+  plugins -- "implements" --> api
+  runner -- "asks decide" --> plugins
+  runner -- "admit: submit / reject: 429" --> vllm
+  vllm -- "background scrape" --> stateCache
+  vllm --> fleet
+  modal --> fleet
+  workloads -- "feeds arrivals" --> runner
+  runner -- "decisions + outcomes" --> results
+  results --> disk
+
+  classDef built fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
+  classDef unproven fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
+  classDef planned fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-width:1.5px,stroke-dasharray:4 3
+  classDef external fill:#dbeafe,stroke:#1e40af,color:#1e3a8a,stroke-width:1.5px
+  classDef entry fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
+
+  class api,registry,runner,stateCache,vllm,workloads,results,session built
+  class modal unproven
+  class sglang planned
+  class plugins,fleet,disk external
+  class cli entry
