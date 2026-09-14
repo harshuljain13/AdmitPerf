@@ -28,12 +28,15 @@ MAX_NUM_SEQS = os.environ.get("ADMITPERF_MAX_NUM_SEQS", "8")
 MAX_MODEL_LEN = os.environ.get("ADMITPERF_MAX_MODEL_LEN", "16384")
 GPU_MEM_UTIL = os.environ.get("ADMITPERF_GPU_MEM_UTIL", "0.90")
 
-# Name of a Modal secret holding HF_TOKEN. Empty by default, and deliberately
-# so: most benchmark models are ungated, and requiring a secret that does not
-# exist would fail the deploy for everyone who does not need one. Set it only
-# for gated weights (Llama, Gemma):
-#     modal secret create huggingface HF_TOKEN=hf_...
-#     export ADMITPERF_HF_SECRET=huggingface
+# Gated weights (Llama, Gemma) need a HuggingFace token in the container. Two
+# ways to provide one, and none is required for ungated models:
+#
+#   HF_TOKEN=hf_...              in your shell or .env — forwarded at deploy
+#   ADMITPERF_HF_SECRET=name     an existing Modal secret, by name
+#
+# Attaching nothing by default is deliberate: requiring a secret that does not
+# exist would fail the deploy for everyone who never needed one.
+HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 HF_SECRET = os.environ.get("ADMITPERF_HF_SECRET", "").strip()
 VLLM_PORT = 8000
 
@@ -63,7 +66,15 @@ hf_cache = modal.Volume.from_name("admitperf-hf-cache", create_if_missing=True)
     image=image,
     gpu=GPU,
     volumes={"/root/.cache/huggingface": hf_cache},
-    secrets=[modal.Secret.from_name(HF_SECRET)] if HF_SECRET else [],
+    # from_dict creates the secret at deploy time. The token is never written
+    # into an image layer, so it does not end up in the cached build.
+    secrets=(
+        [modal.Secret.from_dict({"HF_TOKEN": HF_TOKEN})]
+        if HF_TOKEN
+        else [modal.Secret.from_name(HF_SECRET)]
+        if HF_SECRET
+        else []
+    ),
     timeout=60 * 60,
     # One container. Modal would otherwise autoscale, and a fleet that grows
     # under load is measuring elasticity rather than admission control.
