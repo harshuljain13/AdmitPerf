@@ -1,44 +1,41 @@
 """A Modal app that serves vLLM behind an HTTPS URL.
 
-Deployed by `admitperf infra up --provider modal`. Configuration arrives as
-environment variables rather than function arguments, because Modal builds this
-module at deploy time and the values must be known then.
+Deployed by `admitperf infra up`. The whole resolved configuration arrives as
+one JSON blob in `ADMITPERF_CONFIG`, rather than as a scatter of individual
+environment variables with their own fallbacks. That is deliberate: defaults
+belong in `core/config.py` and nowhere else, so a value printed by the CLI is
+necessarily the value the deploy used.
 
-The vLLM flags here are not arbitrary — they come from a working two-replica
-Lambda setup (module7-admission-and-routing/setup/launch_replicas.sh):
-
-  --max-num-seqs is kept deliberately small. It is the bottleneck that creates
-  queueing, and without queueing there is nothing for an admission policy to
-  decide about. A generous limit produces a benchmark where every policy looks
-  identical because the fleet never saturates.
-
-  --served-model-name fixes the name clients use, so swapping the underlying
-  model does not change the request payload.
+Modal evaluates this module locally at deploy time to build the app graph,
+which is why configuration has to be readable at import.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 
-MODEL = os.environ.get("ADMITPERF_MODEL", "Qwen/Qwen3-0.6B")
-SERVED_NAME = os.environ.get("ADMITPERF_SERVED_NAME", "lab")
-GPU = os.environ.get("ADMITPERF_GPU", "A10G")
-MAX_NUM_SEQS = os.environ.get("ADMITPERF_MAX_NUM_SEQS", "8")
-MAX_MODEL_LEN = os.environ.get("ADMITPERF_MAX_MODEL_LEN", "16384")
-GPU_MEM_UTIL = os.environ.get("ADMITPERF_GPU_MEM_UTIL", "0.90")
+VLLM_PORT = 8000
 
-# Gated weights (Llama, Gemma) need a HuggingFace token in the container. Two
-# ways to provide one, and none is required for ungated models:
-#
-#   HF_TOKEN=hf_...              in your shell or .env — forwarded at deploy
-#   ADMITPERF_HF_SECRET=name     an existing Modal secret, by name
-#
-# Attaching nothing by default is deliberate: requiring a secret that does not
-# exist would fail the deploy for everyone who never needed one.
+# Defaults here would be a second source of truth, so there are none: an empty
+# object falls through to the dataclass defaults on the caller's side.
+_RAW = json.loads(os.environ.get("ADMITPERF_CONFIG", "{}"))
+
+MODEL: str = _RAW.get("model", "Qwen/Qwen3-0.6B")
+SERVED_NAME: str = _RAW.get("served_model_name", "lab")
+GPU: str = _RAW.get("gpu", "A10G")
+SCALEDOWN_S: int = int(_RAW.get("scaledown_window_s", 300))
+STARTUP_TIMEOUT_S: int = int(_RAW.get("startup_timeout_s", 900))
+ENGINE: dict = _RAW.get("engine", {})
+
+# Gated weights (Llama, Gemma) need a token in the container. Neither is
+# required for ungated models, and attaching a secret that does not exist would
+# fail the deploy for everyone who never needed one.
+#   HF_TOKEN=hf_...           forwarded at deploy time
+#   ADMITPERF_HF_SECRET=name  an existing Modal secret, by name
 HF_TOKEN = os.environ.get("HF_TOKEN", "").strip()
 HF_SECRET = os.environ.get("ADMITPERF_HF_SECRET", "").strip()
-VLLM_PORT = 8000
 
 try:
     import modal
@@ -47,6 +44,53 @@ except ImportError as exc:  # pragma: no cover - only meaningful with modal inst
         "modal is not installed. Install the provisioning extra:\n"
         "    pip install 'admitperf[modal]'"
     ) from exc
+
+
+def _vllm_args() -> list[str]:
+    """Rebuild the vLLM argv from the resolved engine config.
+
+    Mirrors EngineConfig.to_vllm_args. It is duplicated rather than imported
+    because this module is executed inside Modal's build environment, where
+    admitperf itself is not installed.
+    """
+    e = ENGINE
+    args = [
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(VLLM_PORT),
+        "--served-model-name",
+        SERVED_NAME,
+        "--max-num-seqs",
+        str(e.get("max_num_seqs", 8)),
+        "--max-model-len",
+        str(e.get("max_model_len", 16384)),
+        "--gpu-memory-utilization",
+        str(e.get("gpu_memory_utilization", 0.90)),
+        "--tensor-parallel-size",
+        str(e.get("tensor_parallel_size", 1)),
+        "--pipeline-parallel-size",
+        str(e.get("pipeline_parallel_size", 1)),
+        "--scheduling-policy",
+        str(e.get("scheduling_policy", "priority")),
+        "--dtype",
+        str(e.get("dtype", "auto")),
+    ]
+    args.append(
+        "--enable-prefix-caching"
+        if e.get("enable_prefix_caching")
+        else "--no-enable-prefix-caching"
+    )
+    if e.get("quantization"):
+        args += ["--quantization", str(e["quantization"])]
+    if e.get("max_num_batched_tokens"):
+        args += ["--max-num-batched-tokens", str(e["max_num_batched_tokens"])]
+    if e.get("swap_space_gb"):
+        args += ["--swap-space", str(e["swap_space_gb"])]
+    if e.get("block_size"):
+        args += ["--block-size", str(e["block_size"])]
+    return args + [str(a) for a in e.get("extra_args", [])]
+
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -58,7 +102,7 @@ image = (
 
 app = modal.App("admitperf-vllm")
 
-# Cache weights across deploys, so bringing the same model back up is quick.
+# Cache weights across deploys, so bringing the same model back is quick.
 hf_cache = modal.Volume.from_name("admitperf-hf-cache", create_if_missing=True)
 
 
@@ -66,8 +110,8 @@ hf_cache = modal.Volume.from_name("admitperf-hf-cache", create_if_missing=True)
     image=image,
     gpu=GPU,
     volumes={"/root/.cache/huggingface": hf_cache},
-    # from_dict creates the secret at deploy time. The token is never written
-    # into an image layer, so it does not end up in the cached build.
+    # from_dict registers the secret at deploy time. The token is never written
+    # into an image layer, so it stays out of the cached build.
     secrets=(
         [modal.Secret.from_dict({"HF_TOKEN": HF_TOKEN})]
         if HF_TOKEN
@@ -77,31 +121,12 @@ hf_cache = modal.Volume.from_name("admitperf-hf-cache", create_if_missing=True)
     ),
     timeout=60 * 60,
     # One container. Modal would otherwise autoscale, and a fleet that grows
-    # under load is measuring elasticity rather than admission control.
+    # under load measures elasticity rather than admission control.
     max_containers=1,
-    scaledown_window=60 * 5,
+    scaledown_window=SCALEDOWN_S,
 )
-@modal.web_server(port=VLLM_PORT, startup_timeout=60 * 15)
+@modal.web_server(port=VLLM_PORT, startup_timeout=STARTUP_TIMEOUT_S)
 def serve() -> None:
-    cmd = [
-        "vllm",
-        "serve",
-        MODEL,
-        "--host",
-        "0.0.0.0",
-        "--port",
-        str(VLLM_PORT),
-        "--served-model-name",
-        SERVED_NAME,
-        "--max-num-seqs",
-        MAX_NUM_SEQS,
-        "--max-model-len",
-        MAX_MODEL_LEN,
-        "--gpu-memory-utilization",
-        GPU_MEM_UTIL,
-        "--scheduling-policy",
-        "priority",
-        # /metrics is the whole point; make sure it is not disabled.
-        "--disable-log-requests",
-    ]
+    cmd = ["vllm", "serve", MODEL, *_vllm_args()]
+    print("launching:", " ".join(cmd), flush=True)
     subprocess.Popen(" ".join(cmd), shell=True)

@@ -1,0 +1,35 @@
+# A minimal experiment. Everything here has a default; override only what matters.
+#   admitperf infra up   -c experiments/demo.yaml
+#   admitperf bench run  -c experiments/demo.yaml
+name: kv-threshold-vs-baseline
+
+infra:
+  provider: modal
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen3-0.6B
+  engine:
+    # The bottleneck that creates queueing. Raise it and the fleet stops
+    # saturating, at which point every policy scores the same.
+    max_num_seqs: 8
+    max_model_len: 16384
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    # Off for benchmarking: with caching on, repeated prompts skip prefill and
+    # KV pressure stops tracking offered load.
+    enable_prefix_caching: false
+    scheduling_policy: priority
+
+workload:
+  kind: poisson
+  n: 300
+  rate: 25
+  seed: 0
+
+policies:
+  - no_admission
+  - name: kv_threshold
+    threshold: 0.90
+
+bench:
+  repeats: 3
