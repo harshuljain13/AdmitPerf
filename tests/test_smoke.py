@@ -2,16 +2,16 @@
 
 import pytest
 
-from admitperf import __version__
-from admitperf.policies import (
+from admitperf import (
     AdmissionPolicy,
     Decision,
     DecisionKind,
-    NoAdmission,
     Request,
     SystemState,
+    __version__,
     get_policy,
 )
+from admitperf.baseline import NoAdmission
 
 
 def test_version() -> None:

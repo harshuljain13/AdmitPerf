@@ -211,17 +211,65 @@ class BenchConfig:
 
 
 @dataclass
+class Deployment:
+    """One provisioned engine, and the label its results are filed under."""
+
+    label: str
+    infra: InfraConfig
+
+
+@dataclass
 class ExperimentConfig:
     """Everything one experiment needs, in one object."""
 
     name: str = "unnamed"
     infra: InfraConfig = field(default_factory=InfraConfig)
+    #: Optional sweep: several deployments, every policy run against each.
+    #:
+    #: The unit of comparison is the deployment, never the matrix. Policies are
+    #: comparable to each other only when they faced the same engine on the
+    #: same hardware, so results are filed per deployment and `bench compare`
+    #: refuses to pool across them. A table mixing an A10G row with an A100 row
+    #: would be measuring hardware, not admission control.
+    matrix: list[InfraConfig] = field(default_factory=list)
     workload: WorkloadConfig = field(default_factory=WorkloadConfig)
     policies: list[PolicySpec] = field(default_factory=lambda: [PolicySpec("no_admission")])
     bench: BenchConfig = field(default_factory=BenchConfig)
 
+    def deployments(self) -> list[Deployment]:
+        """Every engine this experiment needs, in order.
+
+        Without a matrix that is one deployment, which is the common case and
+        the only one where a single comparison table is meaningful.
+        """
+        if not self.matrix:
+            return [Deployment(label=self._label(self.infra), infra=self.infra)]
+        return [Deployment(label=self._label(i), infra=i) for i in self.matrix]
+
+    @staticmethod
+    def _label(infra: InfraConfig) -> str:
+        """A short, filesystem-safe description of what makes this deployment
+        different from its siblings."""
+        model = infra.model.rsplit("/", 1)[-1]
+        e = infra.engine
+        bits = [model, infra.modal_gpu.replace(":", "x"), f"seqs{e.max_num_seqs}"]
+        if e.tensor_parallel_size > 1:
+            bits.append(f"tp{e.tensor_parallel_size}")
+        if e.enable_prefix_caching:
+            bits.append("prefixcache")
+        return "-".join(b.replace("/", "-") for b in bits)
+
     def validate(self) -> ExperimentConfig:
         self.infra.validate()
+        for entry in self.matrix:
+            entry.validate()
+        labels = [d.label for d in self.deployments()]
+        if len(labels) != len(set(labels)):
+            raise ConfigError(
+                f"matrix entries produce duplicate labels {labels}; they differ "
+                "only in settings the label does not capture, so their results "
+                "would overwrite each other"
+            )
         self.workload.validate()
         self.bench.validate()
         if not self.policies:
@@ -237,6 +285,15 @@ class ExperimentConfig:
     def from_dict(cls, raw: dict[str, Any]) -> ExperimentConfig:
         infra_raw = dict(raw.get("infra") or {})
         engine_raw = infra_raw.pop("engine", None) or {}
+
+        def _infra(entry: dict[str, Any]) -> InfraConfig:
+            """A matrix entry inherits the base infra and overrides parts of it,
+            so a sweep states only what varies."""
+            merged = {**infra_raw, **{k: v for k, v in entry.items() if k != "engine"}}
+            engine = {**engine_raw, **(entry.get("engine") or {})}
+            return InfraConfig(**merged, engine=EngineConfig(**engine))
+
+        matrix_raw = raw.get("matrix") or []
         # .get with a default, not `or`: an explicitly empty list means the
         # caller asked for no policies, which validate() rejects. `or` would
         # silently substitute the default and run something unrequested.
@@ -245,6 +302,7 @@ class ExperimentConfig:
         cfg = cls(
             name=raw.get("name", "unnamed"),
             infra=InfraConfig(**infra_raw, engine=EngineConfig(**engine_raw)),
+            matrix=[_infra(e or {}) for e in matrix_raw],
             workload=WorkloadConfig(**(raw.get("workload") or {})),
             policies=[PolicySpec.parse(p) for p in policies_raw],
             bench=BenchConfig(**(raw.get("bench") or {})),
@@ -336,6 +394,7 @@ class ExperimentConfig:
 
 __all__ = [
     "BenchConfig",
+    "Deployment",
     "ConfigError",
     "EngineConfig",
     "ExperimentConfig",

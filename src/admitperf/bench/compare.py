@@ -59,7 +59,12 @@ def _spread(values: list[float]) -> str:
 
 def load_runs(root: Path) -> list[tuple[str, dict[str, Any]]]:
     """Every (policy label, summary) under a directory tree."""
-    runs: list[tuple[str, dict[str, Any]]] = []
+    return [(label, summary) for _, label, summary in _load(root)]
+
+
+def _load(root: Path) -> list[tuple[str | None, str, dict[str, Any]]]:
+    """Every (deployment, policy, summary). Deployment is None for a plain run."""
+    runs: list[tuple[str | None, str, dict[str, Any]]] = []
     for summary_path in sorted(root.rglob("summary.json")):
         manifest_path = summary_path.parent / "manifest.json"
         if not manifest_path.exists():
@@ -70,24 +75,57 @@ def load_runs(root: Path) -> list[tuple[str, dict[str, Any]]]:
         except json.JSONDecodeError:
             continue
         label = manifest.get("policy_label") or manifest.get("policy") or "unknown"
-        runs.append((label, summary))
+        runs.append((manifest.get("deployment"), label, summary))
     return runs
 
 
 def compare_dir(root: Path) -> str | None:
-    runs = load_runs(root)
+    """Compare policies, one table per deployment.
+
+    Never one table across deployments. Policies are comparable only when they
+    faced the same engine on the same hardware; a single table mixing an A10G
+    row with an A100 row would be reporting the machine as if it were the
+    policy. A sweep therefore produces several tables, not a leaderboard.
+    """
+    runs = _load(root)
     if not runs:
         return None
 
+    groups: dict[str | None, list[tuple[str, dict[str, Any]]]] = {}
+    for deployment, label, summary in runs:
+        groups.setdefault(deployment, []).append((label, summary))
+
+    if len(groups) == 1 and next(iter(groups)) is None:
+        return _table(root, groups[None])
+
+    blocks = [
+        f"{len(runs)} run(s) across {len(groups)} deployments under {root}",
+        "",
+        "Each deployment is compared separately. Policies are only comparable when",
+        "they faced the same engine on the same hardware, so these tables are not",
+        "pooled and rows must not be read across them.",
+    ]
+    for deployment in sorted(groups, key=lambda d: d or ""):
+        blocks.append("")
+        blocks.append(f"=== {deployment or 'ungrouped'} ===")
+        blocks.append(_table(root, groups[deployment], header=False))
+    return "\n".join(blocks)
+
+
+def _table(root: Path, runs: list[tuple[str, dict[str, Any]]], *, header: bool = True) -> str:
     stats: dict[str, PolicyStats] = {}
     for label, summary in runs:
         stats.setdefault(label, PolicyStats(label)).add(summary)
 
     width = max(len(s.label) for s in stats.values())
-    lines = [
-        f"{len(runs)} run(s) across {len(stats)} "
-        f"{'policy' if len(stats) == 1 else 'policies'} under {root}",
-        "",
+    lines = []
+    if header:
+        lines += [
+            f"{len(runs)} run(s) across {len(stats)} "
+            f"{'policy' if len(stats) == 1 else 'policies'} under {root}",
+            "",
+        ]
+    lines += [
         f"{'policy':<{width}}  {'runs':>4}  {'admit%':>8}  {'TTFT p95':>14}  {'goodput':>9}",
         f"{'-' * width}  {'-' * 4}  {'-' * 8}  {'-' * 14}  {'-' * 9}",
     ]

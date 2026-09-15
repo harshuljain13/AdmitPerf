@@ -14,13 +14,15 @@ between policies would change the thing being controlled for.
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from admitperf.bench.results import summarize, write_bundle
 from admitperf.bench.workloads.poisson import PoissonWorkload
-from admitperf.core.config import ExperimentConfig, PolicySpec
+from admitperf.core.config import Deployment, ExperimentConfig, PolicySpec
 from admitperf.core.registry import get_policy
 from admitperf.core.runner import Runner, RunnerConfig, RunResult
 from admitperf.engines.vllm import VllmConfig, VllmEngine
@@ -68,8 +70,14 @@ async def run_experiment(
     engine_url: str,
     served_model: str,
     out_dir: Path | None = None,
+    deployment: Deployment | None = None,
 ) -> Path:
-    """Every policy × every repeat, written as one experiment directory."""
+    """Every policy × every repeat against one deployment.
+
+    One deployment, because that is the unit of comparison: policies are
+    comparable only when they faced the same engine on the same hardware.
+    Sweeping several deployments is `run_sweep`, which calls this once each.
+    """
     root = out_dir or Path("results") / f"{_stamp()}-{cfg.name}"
     root.mkdir(parents=True, exist_ok=True)
 
@@ -121,12 +129,20 @@ async def run_experiment(
                     "repeats": cfg.bench.repeats,
                     "seed": seed,
                     "engine_url": engine_url,
+                    "deployment": deployment.label if deployment else None,
+                    "deployment_infra": asdict(deployment.infra) if deployment else None,
                     "config": cfg.to_dict(),
                     "created_at": _stamp(),
                 },
             )
             index.append(
-                {"policy": spec.label, "repeat": repeat + 1, "dir": run_dir.name, **summary}
+                {
+                    "policy": spec.label,
+                    "deployment": deployment.label if deployment else None,
+                    "repeat": repeat + 1,
+                    "dir": run_dir.name,
+                    **summary,
+                }
             )
 
     (root / "index.json").write_text(json.dumps(index, indent=2) + "\n")
@@ -143,4 +159,47 @@ def _ms(value: float | None) -> str:
     return "-" if value is None else f"{value:.0f}ms"
 
 
-__all__ = ["run_experiment", "run_one"]
+async def run_sweep(
+    cfg: ExperimentConfig,
+    *,
+    provision: Callable[[Deployment], Awaitable[tuple[str, str]]],
+    teardown: Callable[[], Awaitable[None]],
+    out_dir: Path | None = None,
+) -> Path:
+    """Provision each deployment in turn, run every policy against it, tear down.
+
+    Results are filed one directory per deployment. Nothing pools across them:
+    a table mixing an A10G row with an A100 row would be measuring hardware
+    rather than admission control, so the comparison stays inside a deployment
+    and the sweep only varies which deployment that is.
+
+    Provisioning is injected rather than imported so this stays testable and so
+    `bench run` against an engine you started yourself keeps working unchanged.
+    """
+    root = out_dir or Path("results") / f"{_stamp()}-{cfg.name}"
+    root.mkdir(parents=True, exist_ok=True)
+    deployments = cfg.deployments()
+
+    print(f"sweep '{cfg.name}': {len(deployments)} deployment(s) x {len(cfg.policies)} policies")
+    for i, dep in enumerate(deployments, 1):
+        print(f"\n[{i}/{len(deployments)}] {dep.label}")
+        engine_url, served = await provision(dep)
+        try:
+            await run_experiment(
+                cfg,
+                engine_url=engine_url,
+                served_model=served,
+                out_dir=root / dep.label,
+                deployment=dep,
+            )
+        finally:
+            # Always tear down, including on failure: a deployment left running
+            # after a crashed sweep bills until someone notices.
+            await teardown()
+
+    print(f"\nsweep results: {root}")
+    print(f"compare:       admitperf bench compare {root}")
+    return root
+
+
+__all__ = ["run_experiment", "run_one", "run_sweep"]

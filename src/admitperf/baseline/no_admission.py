@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from admitperf.policies.base import AdmissionPolicy, Decision, Request, SystemState
+from admitperf.core.api import AdmissionPolicy, Decision, Request, SystemState
 
 
 class NoAdmission(AdmissionPolicy):
