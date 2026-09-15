@@ -21,15 +21,20 @@ from admitperf.core.api import (
 from admitperf.core.registry import available, get_policy, register
 from admitperf.policies.kv_threshold import KVThreshold
 from admitperf.policies.no_admission import NoAdmission
+from admitperf.policies.queue_depth import QueueDepth, QueueDepthDefer
 
 register(NoAdmission.name, NoAdmission)
 register(KVThreshold.name, KVThreshold)
+register(QueueDepth.name, QueueDepth)
+register(QueueDepthDefer.name, QueueDepthDefer)
 
 #: Built-in policies. Retained for backward compatibility; prefer
 #: ``admitperf.core.registry.available()``, which also includes plugins.
 POLICIES: dict[str, type[AdmissionPolicy]] = {
     NoAdmission.name: NoAdmission,
     KVThreshold.name: KVThreshold,
+    QueueDepth.name: QueueDepth,
+    QueueDepthDefer.name: QueueDepthDefer,
 }
 
 __all__ = [
@@ -38,6 +43,8 @@ __all__ = [
     "Decision",
     "DecisionKind",
     "KVThreshold",
+    "QueueDepth",
+    "QueueDepthDefer",
     "NoAdmission",
     "Request",
     "SystemState",

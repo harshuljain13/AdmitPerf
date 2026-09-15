@@ -91,7 +91,10 @@ class ModalProvider:
             raise ProvisionError("the `modal` CLI is not on PATH")
         app_name = session.handle.get("app_name", APP_NAME)
         proc = subprocess.run(
-            ["modal", "app", "stop", app_name],
+            # -y because there is no terminal here to confirm at. Without it
+            # `modal app stop` aborts, teardown silently fails, and the
+            # deployment keeps costing money.
+            ["modal", "app", "stop", "-y", app_name],
             capture_output=True,
             text=True,
             check=False,

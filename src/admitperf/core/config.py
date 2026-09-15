@@ -116,6 +116,10 @@ class InfraConfig:
     #: Modal scales to zero after this; also how long an idle box costs nothing.
     scaledown_window_s: int = 300
     startup_timeout_s: int = 900
+    #: Concurrent requests the serving container accepts. Must exceed the
+    #: engine's max_num_seqs, or the platform queues in front of the engine and
+    #: the benchmark measures the platform instead.
+    max_concurrent_inputs: int = 256
     engine: EngineConfig = field(default_factory=EngineConfig)
 
     @property
@@ -324,6 +328,7 @@ class ExperimentConfig:
                 "gpu": self.infra.modal_gpu,
                 "scaledown_window_s": self.infra.scaledown_window_s,
                 "startup_timeout_s": self.infra.startup_timeout_s,
+                "max_concurrent_inputs": self.infra.max_concurrent_inputs,
                 "engine": asdict(self.infra.engine),
             }
         )
