@@ -88,7 +88,10 @@ class VllmConfig:
     base_url: str = "http://127.0.0.1:8000"
     model: str = "lab"
     request_timeout_s: float = 120.0
-    scrape_timeout_s: float = 2.0
+    #: 2s is fine against localhost and far too tight against a remote HTTPS
+    #: endpoint under load. A timing-out scrape leaves the policy reading a
+    #: stale, idle-looking fleet, which is worse than no policy at all.
+    scrape_timeout_s: float = 10.0
 
 
 class VllmEngine:

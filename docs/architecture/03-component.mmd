@@ -3,7 +3,7 @@
 %% amber is written but unproven; grey is not built. Matches docs/status.md.
 flowchart TB
 
-  cli(["CLI<br/><i>admitperf infra up · smoke · run</i>"])
+  cli(["CLI<br/><i>infra up · smoke · down</i><br/><i>bench run · compare</i>"])
 
   subgraph CORE["<b>core</b> - the decision path (stdlib + click)"]
     direction TB
@@ -29,6 +29,8 @@ flowchart TB
 
   subgraph BENCH["<b>bench</b>"]
     workloads["<b>Poisson workload</b><br/>3 SLO classes, seeded"]
+    experiment["<b>Experiment driver</b><br/><i>bench/experiment.py</i><br/>every policy x repeats,<br/>one deployment"]
+    compare["<b>Compare</b><br/><i>bench/compare.py</i><br/>medians + spread"]
     results["<b>Results</b><br/><i>bench/results.py</i><br/>percentiles, goodput,<br/>provenance tags"]
   end
 
@@ -50,7 +52,9 @@ flowchart TB
   vllm -- "background scrape" --> stateCache
   vllm --> fleet
   modal --> fleet
+  experiment -- "drives" --> runner
   workloads -- "feeds arrivals" --> runner
+  results --> compare
   runner -- "decisions + outcomes" --> results
   results --> disk
 
@@ -60,8 +64,7 @@ flowchart TB
   classDef external fill:#dbeafe,stroke:#1e40af,color:#1e3a8a,stroke-width:1.5px
   classDef entry fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
 
-  class api,registry,runner,stateCache,vllm,workloads,results,session built
-  class modal unproven
+  class api,registry,runner,stateCache,vllm,workloads,results,session,experiment,compare,modal built
   class sglang planned
   class plugins,fleet,disk external
   class cli entry

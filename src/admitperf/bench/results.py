@@ -75,6 +75,10 @@ def summarize(result: RunResult) -> dict[str, Any]:
         "deadline_judged": len(judged),
         "scrapes": result.scrapes,
         "scrape_failures": result.scrape_failures,
+        "scrape_error": result.scrape_error,
+        # False means the policy was deciding on a stale snapshot for most of
+        # the run, so these numbers describe the workload, not the policy.
+        "signal_was_healthy": result.signal_was_healthy,
         "sources": {
             "ttft_ms": "client",
             "tbt_ms": "client",

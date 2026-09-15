@@ -44,7 +44,7 @@ def _discover() -> dict[str, type[AdmissionPolicy]]:
     """Load third-party policies from the entry-point group.
 
     A plugin that fails to import is a hard error: silently dropping it would
-    mean `admitperf run --policy theirs` fails with "unknown policy", pointing
+    mean `admitperf bench run --policy theirs` fails with "unknown policy", pointing
     the user at the wrong problem entirely.
     """
     global _discovered

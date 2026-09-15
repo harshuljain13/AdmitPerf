@@ -10,9 +10,11 @@ sequenceDiagram
   participant E as Engine adapter<br/>(vLLM)
   participant M as Results
 
+  Note over R,E: The queue must form INSIDE the engine.<br/>A platform that serves one request at a time<br/>queues in front of it, and the signal stays flat.
+
   Note over R,E: Background loop, every scrape_interval_s
   R->>E: GET /metrics
-  E-->>S: KV%, queue depth, running reqs
+  E-->>S: kv_used_fraction, num_requests_waiting,<br/>num_requests_running
   Note over S: stamped with its age on read
 
   Note over W,M: Arrival loop, per request

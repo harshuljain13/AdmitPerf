@@ -10,26 +10,51 @@ AdmitPerf is two things in one repository: an **admission control library** you 
 
 > **Why this exists** — Across 14 admission-primary papers in the [companion survey](../survey/), no two share a baseline, engine version, workload, or SLO definition. AdmitPerf makes head-to-head comparison possible. See [`docs/motivation.md`](docs/motivation.md).
 
-**Status**: working MVP. Policies, the vLLM adapter, the runner, Modal provisioning, and results all exist; the Modal path has not yet been exercised against real hardware. See [`docs/status.md`](docs/status.md).
+**Status**: working MVP, verified on real hardware. First results in [`docs/results.md`](docs/results.md); honest gaps in [`docs/status.md`](docs/status.md).
 
 ---
 
 ## The loop
 
+Two command groups, matching the two jobs: `infra` provisions, `bench` measures.
+
 ```bash
-admitperf infra up --model Qwen/Qwen3-0.6B --gpu A10G   # start a real vLLM on a GPU
-admitperf smoke                                          # is it actually serving?
-admitperf run --policy no_admission --rate 30 -n 500     # baseline
-admitperf run --policy kv_threshold  --rate 30 -n 500    # challenger
-admitperf infra down                                     # stop paying for it
+admitperf infra up   -c experiments/demo.yaml   # real vLLM on a real GPU
+admitperf infra smoke                            # is it actually serving?
+admitperf bench run  -c experiments/demo.yaml    # every policy, repeated
+admitperf bench compare results/                 # who won, and by how much
+admitperf infra down                             # stop paying for it
 ```
 
-`infra up` writes the endpoint to `.admitperf/session.json`; `run` reads it. They are separate commands because loading a model takes minutes and you will run many policies against one deployment. Already have an engine running somewhere? Skip provisioning and pass `--engine-url`.
+`infra up` writes the endpoint to `.admitperf/session.json`; `bench run` reads it. They are separate commands because loading a model takes minutes and every policy must face the *same* deployment — re-provisioning between policies would change the thing being controlled for. Already have an engine running? Skip provisioning with `--engine-url`.
 
-Each run writes a directory you can open:
+Everything lives in one config file; flags override it for one-offs:
+
+```yaml
+name: queue-pressure
+infra:
+  gpu: A10G
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  max_concurrent_inputs: 256
+  engine:
+    max_num_seqs: 4            # the cap that creates the queue
+    tensor_parallel_size: 1
+    enable_prefix_caching: false
+    scheduling_policy: fcfs
+workload:
+  n: 80
+  rate: 15
+policies:
+  - no_admission
+  - {name: queue_depth, max_waiting: 2}
+bench:
+  repeats: 2
+```
+
+Each experiment writes a directory you can open:
 
 ```
-results/<timestamp>-<policy>/
+results/<timestamp>-<experiment>/<policy>-r<n>/
 ├── manifest.json     what was run, against what, with which settings
 ├── summary.json      the numbers, each tagged with where it came from
 ├── decisions.jsonl   every admit/defer/reject, with the state it was decided on
@@ -41,21 +66,31 @@ results/<timestamp>-<policy>/
 `scripts/fake_vllm.py` is a stdlib-only stand-in that speaks the three endpoints AdmitPerf touches. It gets busy under load — KV pressure rises with requests in flight and tokens slow down — so a policy has something real to react to.
 
 ```bash
-python scripts/fake_vllm.py --port 8077          # terminal 1
+python scripts/fake_vllm.py --port 8077                    # terminal 1
 
-admitperf smoke --engine-url http://127.0.0.1:8077
-admitperf run --policy no_admission --engine-url http://127.0.0.1:8077 -n 60 --rate 25
-admitperf run --policy kv_threshold  --engine-url http://127.0.0.1:8077 -n 60 --rate 25
+admitperf infra smoke --engine-url http://127.0.0.1:8077
+admitperf bench run --engine-url http://127.0.0.1:8077 \
+    --policy no_admission --policy queue_depth -n 60 --rate 25 --repeats 2
+admitperf bench compare results/
 ```
 
-| policy | offered | admitted | TTFT p99 | goodput |
-|---|---|---|---|---|
-| `no_admission` | 60 | 60 (100%) | 254ms | 1.0 |
-| `kv_threshold` | 60 | 30 (50%) | 82ms | 0.5 |
+None of the fake's timings mean anything about hardware — it exists to prove the wiring.
 
-Shedding half the load cuts tail latency by 3×. Note the baseline still wins on goodput: this fake fleet meets every deadline anyway, so refusing work is pure loss. That is the metric behaving correctly — **a policy cannot win by rejecting traffic**, because the denominator is everything offered rather than everything admitted.
+## Results from a real GPU
 
-None of those timings mean anything about real hardware. The fake exists to prove the wiring.
+Qwen2.5-0.5B on an A10G, `max_num_seqs=4`, 80 requests at 15/s, two repeats:
+
+| policy | admit % | TTFT p95 | goodput |
+|---|---|---|---|
+| `no_admission` | 100.0% | 2285ms ±725 | 0.319 |
+| `queue_depth[max_waiting=8]` | 88.1% | 1668ms ±145 | 0.300 |
+| `queue_depth[max_waiting=2]` | 63.1% | **951ms ±136** | 0.319 |
+
+Shedding 37% of traffic cut tail latency **2.4× at identical goodput** — the refused requests would have missed their deadline anyway. The baseline's spread (±725 vs ±136) says as much as its median: unmanaged queueing is unpredictable, not merely slow.
+
+**The signal mattered more than the threshold.** `kv_cache_usage_perc` never exceeded 0.005 while the queue reached 24 deep — on a 0.5B model the KV cache dwarfs what four short sequences can fill, so a KV-pressure policy reads a flat line and silently becomes admit-everything. Which signal carries the pressure depends on the regime, which is why policies declare what they need.
+
+Full numbers and caveats: [`docs/results.md`](docs/results.md).
 
 ## Writing a policy
 
@@ -74,7 +109,7 @@ class KVThreshold(AdmissionPolicy):
         return Decision.admit()
 ```
 
-`requires` is how a policy says which signals it needs. If the engine cannot report one, the run stops at startup with a readable error instead of silently reading the missing value as zero and behaving as an admit-everything baseline.
+`requires` is how a policy says which signals it needs. If the engine cannot report one, the run stops at startup with a readable error instead of silently reading the missing value as zero and behaving as an admit-everything baseline. That is not hypothetical — it is precisely what a KV-threshold policy does on a model whose cache never fills.
 
 Policies in **your own** pip package are discovered automatically — no edit to this repo:
 
@@ -95,7 +130,8 @@ admitperf/
 │   ├── infra/         provision a GPU and remember where it is
 │   ├── bench/         load generation and results
 │   └── policies/      built-in policies
-├── docs/              motivation, scope, design, metrics, plan, architecture diagrams
+├── experiments/       example configs (demo.yaml, multi-gpu.yaml)
+├── docs/              motivation, scope, design, metrics, results, architecture
 ├── scripts/           fake_vllm.py — a pretend engine for testing without a GPU
 ├── tests/
 ├── Makefile           make test · make lint · make diagrams
@@ -141,6 +177,7 @@ See `.env.example`.
 | Read the data-flow + reproducibility contract | [`docs/design.md`](docs/design.md) |
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
 | Read the candidate policy list + fidelity rules | [`docs/policies.md`](docs/policies.md) |
+| See the first real-hardware results | [`docs/results.md`](docs/results.md) |
 | Read the plan | [`docs/PROPOSAL.md`](docs/PROPOSAL.md) |
 | Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](docs/prior-art/adversarial_review.md) |
 | See what exists and what does not | [`docs/status.md`](docs/status.md) |

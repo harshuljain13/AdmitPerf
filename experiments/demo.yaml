@@ -1,0 +1,49 @@
+# Queue pressure on a single small GPU. This is the shape that actually
+# produced a result: see docs/results.md.
+#
+#   admitperf infra up   -c experiments/demo.yaml
+#   admitperf infra smoke
+#   admitperf bench run  -c experiments/demo.yaml
+#   admitperf bench compare results/
+#   admitperf infra down
+name: queue-pressure
+
+infra:
+  provider: modal
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen2.5-0.5B-Instruct
+
+  # Concurrent requests the container accepts. Must exceed max_num_seqs, or
+  # load queues in front of the engine instead of inside it and the admission
+  # signal stays flat while latency climbs.
+  max_concurrent_inputs: 256
+
+  engine:
+    # The GPU capacity limit, and the whole point. Four sequences run; the rest
+    # queue inside vLLM as num_requests_waiting, which is what a policy reads.
+    max_num_seqs: 4
+    max_model_len: 2048
+    gpu_memory_utilization: 0.55
+    # Off: with caching on, repeated prompts skip prefill and pressure stops
+    # tracking offered load.
+    enable_prefix_caching: false
+    scheduling_policy: fcfs
+
+workload:
+  kind: poisson
+  n: 80
+  # Above what four sequences can drain, so a queue forms. Too low and every
+  # policy scores identically because nothing is ever under pressure.
+  rate: 15
+  seed: 0
+
+policies:
+  - no_admission
+  - name: queue_depth
+    max_waiting: 8
+  - name: queue_depth
+    max_waiting: 2
+
+bench:
+  repeats: 2

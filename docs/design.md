@@ -66,6 +66,20 @@ determinism test in the cross-policy suite.
 Policies that need memory across calls (AIMD counters, EWMA windows) keep it on `self` and
 expose the fields so tests can pin them.
 
+## Where the queue must form
+
+The engine's own queue is the thing being measured, so nothing may queue in
+front of it. On the first real deployment the serving platform accepted one
+request at a time, so load queued at its proxy: `num_requests_running` sat at
+1, `num_requests_waiting` at 0, and latency climbed while the admission signal
+stayed flat. The benchmark was wired correctly end to end and was measuring the
+platform rather than the engine.
+
+Any provider must therefore accept far more concurrent requests than the engine
+will admit, so `max_num_seqs` is the only bottleneck. `max_concurrent_inputs`
+in the config exists for this, and a run records `signal_was_healthy` so a
+degraded one is flagged rather than read as a result.
+
 ## Reproducibility contract
 
 - Every run pins, in `manifest.json`: policy, engine, endpoint, KV scale as probed,

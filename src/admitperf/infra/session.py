@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 SESSION_DIR = Path(".admitperf")
 SESSION_FILE = SESSION_DIR / "session.json"
@@ -32,6 +33,10 @@ class Session:
     #: Anything the provider needs to tear itself down again — a Modal app
     #: name, a Lambda host, a pid file. Opaque to everyone else.
     handle: dict[str, str] = field(default_factory=dict)
+    #: The resolved experiment config this deployment was created from, so a
+    #: later `bench run` records what the engine was actually configured with
+    #: rather than what the caller assumed.
+    config: dict[str, Any] = field(default_factory=dict)
 
     @property
     def primary(self) -> str:

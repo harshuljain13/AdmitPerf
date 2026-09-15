@@ -65,6 +65,22 @@ class RunResult:
     outcomes: list[RequestOutcome] = field(default_factory=list)
     scrapes: int = 0
     scrape_failures: int = 0
+    #: First scrape error seen, kept so a run that measured nothing can say why.
+    scrape_error: str | None = None
+
+    @property
+    def signal_was_healthy(self) -> bool:
+        """Did the policy actually get to see the fleet?
+
+        A run where most scrapes failed produces numbers that look ordinary and
+        mean nothing: the policy decides on a stale snapshot taken while idle,
+        so it admits everything and scores identically to the baseline. That
+        happened on the first real deployment, and nothing in the output said
+        so.
+        """
+        total = self.scrapes + self.scrape_failures
+        return total > 0 and self.scrapes / total >= 0.5
+
     wall_s: float = 0.0
 
 
@@ -128,8 +144,10 @@ class Runner:
         while not stop.is_set():
             try:
                 self.states.update(await self.engine.fetch_state())
-            except Exception:  # noqa: BLE001 - a scrape blip must not end the run
+            except Exception as exc:  # noqa: BLE001 - a blip must not end the run
                 self.states.record_failure()
+                if self.result.scrape_error is None:
+                    self.result.scrape_error = f"{type(exc).__name__}: {exc}"
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=self.config.scrape_interval_s)
 

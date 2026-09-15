@@ -1,28 +1,50 @@
 """AdmitPerf CLI.
 
-The loop this exists to support:
+Two groups, matching the two jobs:
 
-    admitperf infra up --model Qwen/Qwen3-0.6B    # start a real vLLM on a GPU
-    admitperf smoke                                # is it actually serving?
-    admitperf run --policy kv_threshold            # drive load through a policy
-    admitperf run --policy no_admission            # again, for comparison
-    admitperf infra down                           # stop paying for it
+    admitperf infra  up | status | smoke | down     provision an engine
+    admitperf bench  run | compare                  measure policies against it
 
-`infra up` and `run` are separate commands because loading a model takes
-minutes and you will run several policies against one deployment.
+They are separate because bringing a model up takes minutes and you will run
+many policies against one deployment.
+
+    admitperf infra up -c experiments/demo.yaml
+    admitperf infra smoke
+    admitperf bench run -c experiments/demo.yaml
+    admitperf bench compare results/
+    admitperf infra down
+
+Every setting lives in the config file; flags override it for one-offs.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 
 from admitperf import __version__
-from admitperf.core.registry import available, get_policy
-from admitperf.core.runner import Runner, RunnerConfig, RunResult
+from admitperf.core.config import ConfigError, ExperimentConfig
+from admitperf.core.registry import available
+
+
+def _load(config: str | None, **overrides: object) -> ExperimentConfig:
+    base = ExperimentConfig.load(config) if config else ExperimentConfig()
+    return base.with_overrides(**overrides)
+
+
+def _resolve_endpoint(engine_url: str | None) -> tuple[str, str]:
+    """Explicit URL, else the provisioned session."""
+    from admitperf.infra.session import SessionStore
+
+    if engine_url:
+        return engine_url, "lab"
+    try:
+        session = SessionStore().load()
+    except FileNotFoundError as exc:
+        raise SystemExit(str(exc)) from exc
+    return session.primary, session.served_model_name
 
 
 @click.group()
@@ -31,63 +53,88 @@ def main() -> None:
     """Benchmark-driven admission control for LLM inference."""
 
 
-# --- policies -------------------------------------------------------------
-
-
 @main.command()
 def policies() -> None:
     """List every policy, including ones from installed plugins."""
     registry = available()
-    if not registry:
-        click.echo("no policies registered")
-        return
-    width = max(len(n) for n in registry)
+    width = max((len(n) for n in registry), default=10)
     for name, cls in sorted(registry.items()):
         requires = ", ".join(sorted(getattr(cls, "requires", frozenset()))) or "-"
         click.echo(f"{name:<{width}}  requires: {requires}  ({cls.__module__})")
 
 
-# --- infra ----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# infra — provisioning
+# ---------------------------------------------------------------------------
 
 
 @main.group()
 def infra() -> None:
-    """Provision and tear down a serving engine."""
+    """Provision, inspect and tear down a serving engine."""
 
 
 @infra.command("up")
-@click.option("--provider", type=click.Choice(["modal"]), default="modal")
-@click.option("--model", default="Qwen/Qwen3-0.6B", help="HuggingFace model id")
-@click.option("--gpu", default="A10G", help="GPU type to request")
+@click.option("-c", "--config", default=None, help="Experiment YAML")
+@click.option("--provider", type=click.Choice(["modal"]), default=None)
+@click.option("--model", default=None, help="HuggingFace model id")
+@click.option("--gpu", default=None, help="GPU type, e.g. A10G, A100, H100")
+@click.option("--gpu-count", type=int, default=None, help="GPUs to attach")
+@click.option("--tensor-parallel-size", "-tp", type=int, default=None)
+@click.option("--pipeline-parallel-size", "-pp", type=int, default=None)
 @click.option(
     "--max-num-seqs",
-    default=8,
-    show_default=True,
-    help="Engine concurrency cap. Small on purpose: this is the bottleneck "
-    "that creates queueing, and without queueing every policy scores alike.",
+    type=int,
+    default=None,
+    help="Engine concurrency cap. Small on purpose: it is the bottleneck that "
+    "creates queueing, and without queueing every policy scores alike.",
 )
+@click.option("--max-model-len", type=int, default=None)
+@click.option(
+    "--enable-prefix-caching/--no-enable-prefix-caching",
+    default=None,
+    help="Off by default for benchmarking: with it on, KV pressure stops reflecting offered load.",
+)
+@click.option("--scheduling-policy", type=click.Choice(["fcfs", "priority"]), default=None)
 @click.option(
     "--hf-secret",
-    default=lambda: __import__("os").environ.get("ADMITPERF_HF_SECRET", ""),
-    help="Name of a Modal secret holding HF_TOKEN. Only needed for gated "
-    "weights (Llama, Gemma). Create with: modal secret create huggingface HF_TOKEN=...",
+    default=None,
+    help="Name of a Modal secret holding HF_TOKEN, for gated weights. "
+    "Setting HF_TOKEN in the environment works too.",
 )
-def infra_up(provider: str, model: str, gpu: str, max_num_seqs: int, hf_secret: str) -> None:
+def infra_up(config: str | None, hf_secret: str | None, **overrides: object) -> None:
     """Start an engine and remember where it is."""
-    from admitperf.infra.modal_provider import ModalProvider, ModalSpec, ProvisionError
+    import os
+
+    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
     from admitperf.infra.session import SessionStore
 
-    spec = ModalSpec(model=model, gpu=gpu, max_num_seqs=max_num_seqs, hf_secret=hf_secret)
-    click.echo(f"deploying {model} on {gpu} via {provider} (this takes a few minutes)...")
+    if hf_secret:
+        os.environ["ADMITPERF_HF_SECRET"] = hf_secret
+
     try:
-        session = ModalProvider(spec).up()
+        cfg = _load(config, **overrides)
+    except ConfigError as exc:
+        raise SystemExit(f"config error: {exc}") from exc
+
+    i = cfg.infra
+    click.echo(f"deploying {i.model} on {i.modal_gpu} via {i.provider}")
+    click.echo(
+        f"  tp={i.engine.tensor_parallel_size} pp={i.engine.pipeline_parallel_size} "
+        f"max_num_seqs={i.engine.max_num_seqs} "
+        f"prefix_caching={i.engine.enable_prefix_caching} "
+        f"scheduling={i.engine.scheduling_policy}"
+    )
+    click.echo("this takes a few minutes...")
+
+    try:
+        session = ModalProvider(cfg).up()
     except ProvisionError as exc:
         raise SystemExit(str(exc)) from exc
 
     path = SessionStore().save(session)
     click.echo(f"endpoint: {session.primary}")
     click.echo(f"session:  {path}")
-    click.echo("next: admitperf smoke")
+    click.echo("next: admitperf infra smoke")
 
 
 @infra.command("status")
@@ -102,44 +149,24 @@ def infra_status() -> None:
     s = store.load()
     click.echo(f"provider: {s.provider}\nengine:   {s.engine}\nmodel:    {s.model}")
     click.echo(f"gpu:      {s.gpu}\nendpoint: {s.primary}\ncreated:  {s.created_at}")
+    engine = (s.config.get("infra") or {}).get("engine") or {}
+    if engine:
+        click.echo(
+            f"config:   tp={engine.get('tensor_parallel_size')} "
+            f"pp={engine.get('pipeline_parallel_size')} "
+            f"max_num_seqs={engine.get('max_num_seqs')} "
+            f"prefix_caching={engine.get('enable_prefix_caching')}"
+        )
 
 
-@infra.command("down")
-def infra_down() -> None:
-    """Stop the engine and forget the session."""
-    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
-    from admitperf.infra.session import SessionStore
-
-    store = SessionStore()
-    if not store.exists():
-        click.echo("no session to tear down")
-        return
-    session = store.load()
-    try:
-        ModalProvider().down(session)
-    except ProvisionError as exc:
-        raise SystemExit(str(exc)) from exc
-    store.clear()
-    click.echo(f"stopped {session.provider} deployment of {session.model}")
-
-
-# --- smoke ----------------------------------------------------------------
-
-
-@main.command()
+@infra.command("smoke")
 @click.option("--engine-url", default=None, help="Override the session endpoint")
-def smoke(engine_url: str | None) -> None:
-    """Check the engine serves /v1/models, /metrics, and a completion."""
+def infra_smoke(engine_url: str | None) -> None:
+    """Check the engine serves /v1/models, /metrics and a completion."""
+    from admitperf.core.api import Request
     from admitperf.engines.vllm import VllmConfig, VllmEngine
-    from admitperf.infra.session import SessionStore
 
-    url, served = engine_url, "lab"
-    if url is None:
-        try:
-            session = SessionStore().load()
-        except FileNotFoundError as exc:
-            raise SystemExit(str(exc)) from exc
-        url, served = session.primary, session.served_model_name
+    url, served = _resolve_endpoint(engine_url)
 
     async def check() -> int:
         engine = VllmEngine(VllmConfig(base_url=url, model=served))
@@ -160,8 +187,6 @@ def smoke(engine_url: str | None) -> None:
             except Exception as exc:  # noqa: BLE001 - report, do not traceback
                 click.echo(f"FAIL  /metrics: {exc}")
                 failures += 1
-
-            from admitperf.core.api import Request
 
             outcome = await engine.submit(
                 Request(
@@ -184,93 +209,85 @@ def smoke(engine_url: str | None) -> None:
             await engine.aclose()
         return failures
 
-    failures = asyncio.run(check())
-    if failures:
-        raise SystemExit(f"{failures} check(s) failed")
+    if asyncio.run(check()):
+        raise SystemExit("smoke failed")
     click.echo("SMOKE PASS")
 
 
-# --- run ------------------------------------------------------------------
-
-
-@main.command()
-@click.option("--policy", required=True, help="Policy name (see `admitperf policies`)")
-@click.option("--engine-url", default=None, help="Override the session endpoint")
-@click.option("-n", "--requests", "n_requests", default=200, show_default=True)
-@click.option("--rate", default=10.0, show_default=True, help="Arrivals per second")
-@click.option("--seed", default=0, show_default=True)
-@click.option("--out", default=None, help="Results directory (default: results/<timestamp>)")
-def run(
-    policy: str,
-    engine_url: str | None,
-    n_requests: int,
-    rate: float,
-    seed: int,
-    out: str | None,
-) -> None:
-    """Drive load through a policy against the running engine."""
-    from admitperf.bench.results import summarize, write_bundle
-    from admitperf.bench.workloads.poisson import PoissonWorkload
-    from admitperf.engines.vllm import VllmConfig, VllmEngine
+@infra.command("down")
+def infra_down() -> None:
+    """Stop the engine and forget the session."""
+    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
     from admitperf.infra.session import SessionStore
 
-    url, served, session_info = engine_url, "lab", {}
-    if url is None:
-        try:
-            session = SessionStore().load()
-        except FileNotFoundError as exc:
-            raise SystemExit(str(exc)) from exc
-        url, served = session.primary, session.served_model_name
-        session_info = {"model": session.model, "gpu": session.gpu, "provider": session.provider}
-
-    engine = VllmEngine(VllmConfig(base_url=url, model=served))
-    workload = PoissonWorkload(n_requests=n_requests, rate_per_s=rate, seed=seed)
-    runner = Runner(
-        workload=workload,
-        policy=get_policy(policy),
-        engine=engine,
-        config=RunnerConfig(),
-    )
-
-    click.echo(f"running {n_requests} requests at {rate}/s through '{policy}' against {url}")
-
-    async def go() -> RunResult:
-        try:
-            return await runner.run()
-        finally:
-            await engine.aclose()
-
-    result = asyncio.run(go())
-    summary = summarize(result)
-
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    out_dir = Path(out) if out else Path("results") / f"{stamp}-{policy}"
-    manifest = {
-        "policy": policy,
-        "engine": engine.name,
-        "engine_url": url,
-        "kv_scale": engine.kv_scale,
-        "workload": {"name": workload.name, "n": n_requests, "rate_per_s": rate, "seed": seed},
-        "session": session_info,
-        "created_at": stamp,
-        "admitperf_version": __version__,
-    }
-    write_bundle(out_dir, result=result, manifest=manifest)
-
-    click.echo("")
-    click.echo(f"  offered            {summary['offered']}")
-    click.echo(f"  admitted           {summary['admitted']}  ({summary['admit_rate']})")
-    click.echo(f"  rejected           {summary['rejected']}  {summary['reject_reasons']}")
-    click.echo(f"  completed          {summary['completed']}  failed {summary['failed']}")
-    click.echo(f"  TTFT p50/p95/p99   {_fmt(summary['ttft_ms'])}")
-    click.echo(f"  TBT  p50/p95/p99   {_fmt(summary['tbt_ms'])}")
-    click.echo(f"  goodput            {summary['goodput_under_admission']}")
-    click.echo("")
-    click.echo(f"results: {out_dir}")
+    store = SessionStore()
+    if not store.exists():
+        click.echo("no session to tear down")
+        return
+    session = store.load()
+    try:
+        ModalProvider(ExperimentConfig()).down(session)
+    except ProvisionError as exc:
+        raise SystemExit(str(exc)) from exc
+    store.clear()
+    click.echo(f"stopped {session.provider} deployment of {session.model}")
 
 
-def _fmt(p: dict[str, float | None]) -> str:
-    return " / ".join("-" if p[k] is None else f"{p[k]:.0f}ms" for k in ("p50", "p95", "p99"))
+# ---------------------------------------------------------------------------
+# bench — measurement
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def bench() -> None:
+    """Measure admission policies against a running engine."""
+
+
+@bench.command("run")
+@click.option("-c", "--config", default=None, help="Experiment YAML")
+@click.option("--engine-url", default=None, help="Override the session endpoint")
+@click.option("--policy", multiple=True, help="Policy name; repeatable")
+@click.option("-n", type=int, default=None, help="Requests per run")
+@click.option("--rate", type=float, default=None, help="Arrivals per second")
+@click.option("--seed", type=int, default=None)
+@click.option("--repeats", type=int, default=None, help="Runs per policy")
+@click.option("--out", default=None, help="Output directory")
+def bench_run(
+    config: str | None, engine_url: str | None, out: str | None, **overrides: object
+) -> None:
+    """Drive load through each policy and record what it cost."""
+    from admitperf.bench.experiment import run_experiment
+
+    try:
+        cfg = _load(config, **overrides)
+    except ConfigError as exc:
+        raise SystemExit(f"config error: {exc}") from exc
+
+    url, served = _resolve_endpoint(engine_url)
+
+    try:
+        asyncio.run(
+            run_experiment(
+                cfg,
+                engine_url=url,
+                served_model=served,
+                out_dir=Path(out) if out else None,
+            )
+        )
+    except KeyboardInterrupt:
+        raise SystemExit("interrupted") from None
+
+
+@bench.command("compare")
+@click.argument("path", default="results", required=False)
+def bench_compare(path: str) -> None:
+    """Compare every run under a directory, grouped by policy."""
+    from admitperf.bench.compare import compare_dir
+
+    text = compare_dir(Path(path))
+    if text is None:
+        raise SystemExit(f"no result bundles under {path}")
+    click.echo(text)
 
 
 if __name__ == "__main__":

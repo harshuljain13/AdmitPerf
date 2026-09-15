@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from admitperf.infra.modal_provider import ModalProvider, ModalSpec, ProvisionError
+from admitperf.core.config import ExperimentConfig
+from admitperf.infra.modal_provider import ModalProvider, ProvisionError
 from admitperf.infra.session import Session, SessionStore
 
 DEPLOY_OUTPUT = """
@@ -66,7 +67,7 @@ def test_deploy_output_yields_an_endpoint(monkeypatch: pytest.MonkeyPatch) -> No
         lambda *a, **k: subprocess.CompletedProcess(a, 0, DEPLOY_OUTPUT, ""),
     )
 
-    session = ModalProvider(ModalSpec(model="Qwen/Qwen3-0.6B")).up()
+    session = ModalProvider(ExperimentConfig()).up()
 
     assert session.endpoints == ["https://harshul--admitperf-vllm-serve.modal.run"]
     assert session.provider == "modal"
@@ -76,7 +77,7 @@ def test_deploy_output_yields_an_endpoint(monkeypatch: pytest.MonkeyPatch) -> No
 def test_missing_modal_cli_fails_before_a_slow_deploy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _: None)
     with pytest.raises(ProvisionError, match="modal setup"):
-        ModalProvider().up()
+        ModalProvider(ExperimentConfig()).up()
 
 
 def test_deploy_failure_surfaces_modal_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,7 +88,7 @@ def test_deploy_failure_surfaces_modal_output(monkeypatch: pytest.MonkeyPatch) -
         lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "no such GPU: H200x"),
     )
     with pytest.raises(ProvisionError, match="no such GPU"):
-        ModalProvider().up()
+        ModalProvider(ExperimentConfig()).up()
 
 
 def test_deploy_without_a_url_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,4 +100,4 @@ def test_deploy_without_a_url_is_an_error(monkeypatch: pytest.MonkeyPatch) -> No
         lambda *a, **k: subprocess.CompletedProcess(a, 0, "deployed, somewhere", ""),
     )
     with pytest.raises(ProvisionError, match="no .modal.run URL"):
-        ModalProvider().up()
+        ModalProvider(ExperimentConfig()).up()

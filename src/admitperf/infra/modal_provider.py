@@ -1,14 +1,13 @@
 """Modal provisioner — deploy the vLLM app and find out where it landed.
 
-This shells out to the `modal` CLI rather than driving the SDK in-process.
-That is deliberate: deploying is a slow, chatty, occasionally interactive
-operation, and users already have `modal` configured and authenticated. Shelling
-out means their existing login works and their existing `modal app logs` works
-for debugging, which matters more here than API elegance.
+Shells out to the `modal` CLI rather than driving the SDK in-process. Users
+already have `modal` authenticated, and when a deploy misbehaves `modal app
+logs` is where they will look; keeping that surface matters more here than API
+tidiness.
 
 Modal is the default provider because it creates the GPU itself. Lambda is the
-other shape — you already own the box, and provisioning means installing vLLM on
-it over ssh — and slots in behind the same two methods.
+other shape — you already own the box, and provisioning means installing vLLM
+over ssh — and would slot in behind the same two methods.
 """
 
 from __future__ import annotations
@@ -17,10 +16,10 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from admitperf.core.config import ExperimentConfig
 from admitperf.infra.session import Session
 
 APP_PATH = Path(__file__).parent / "modal_app.py"
@@ -34,27 +33,11 @@ class ProvisionError(RuntimeError):
     """Provisioning failed. Message carries the provider's own output."""
 
 
-@dataclass
-class ModalSpec:
-    model: str = "Qwen/Qwen3-0.6B"
-    gpu: str = "A10G"
-    served_model_name: str = "lab"
-    #: Small on purpose: this is the bottleneck that creates queueing, and
-    #: without queueing an admission policy has nothing to decide.
-    max_num_seqs: int = 8
-    max_model_len: int = 16384
-    gpu_memory_utilization: float = 0.90
-    #: Name of a Modal secret holding HF_TOKEN, for gated weights only. Empty
-    #: means no secret is attached, which is correct for ungated models and
-    #: avoids failing the deploy on a secret the user never needed.
-    hf_secret: str = ""
-
-
 class ModalProvider:
     name = "modal"
 
-    def __init__(self, spec: ModalSpec | None = None) -> None:
-        self.spec = spec or ModalSpec()
+    def __init__(self, config: ExperimentConfig) -> None:
+        self.config = config
 
     def preflight(self) -> None:
         """Fail before a slow deploy rather than during one."""
@@ -62,26 +45,22 @@ class ModalProvider:
             raise ProvisionError(
                 "the `modal` CLI is not on PATH.\n    pip install 'admitperf[modal]' && modal setup"
             )
+        # Catches a tensor-parallel size larger than the GPUs requested, which
+        # would otherwise surface only after the weights had downloaded.
+        self.config.infra.validate()
 
-    def up(self, *, timeout_s: float = 1800.0) -> Session:
+    def up(self, *, timeout_s: float | None = None) -> Session:
         self.preflight()
-        env = {
-            **os.environ,
-            "ADMITPERF_MODEL": self.spec.model,
-            "ADMITPERF_GPU": self.spec.gpu,
-            "ADMITPERF_SERVED_NAME": self.spec.served_model_name,
-            "ADMITPERF_MAX_NUM_SEQS": str(self.spec.max_num_seqs),
-            "ADMITPERF_MAX_MODEL_LEN": str(self.spec.max_model_len),
-            "ADMITPERF_GPU_MEM_UTIL": str(self.spec.gpu_memory_utilization),
-            "ADMITPERF_HF_SECRET": self.spec.hf_secret,
-        }
+        infra = self.config.infra
+
+        env = {**os.environ, "ADMITPERF_CONFIG": self.config.engine_env()}
 
         proc = subprocess.run(
             ["modal", "deploy", str(APP_PATH)],
             env=env,
             capture_output=True,
             text=True,
-            timeout=timeout_s,
+            timeout=timeout_s or (infra.startup_timeout_s + 600),
             check=False,
         )
         output = proc.stdout + proc.stderr
@@ -98,19 +77,24 @@ class ModalProvider:
         return Session(
             provider=self.name,
             engine="vllm",
-            model=self.spec.model,
+            model=infra.model,
             endpoints=[match.group(0).rstrip("/")],
-            gpu=self.spec.gpu,
-            served_model_name=self.spec.served_model_name,
+            gpu=infra.modal_gpu,
+            served_model_name=infra.served_model_name,
             created_at=datetime.now(UTC).isoformat(timespec="seconds"),
             handle={"app_name": APP_NAME},
+            config=self.config.to_dict(),
         )
 
     def down(self, session: Session) -> None:
-        self.preflight()
+        if shutil.which("modal") is None:
+            raise ProvisionError("the `modal` CLI is not on PATH")
         app_name = session.handle.get("app_name", APP_NAME)
         proc = subprocess.run(
-            ["modal", "app", "stop", app_name],
+            # -y because there is no terminal here to confirm at. Without it
+            # `modal app stop` aborts, teardown silently fails, and the
+            # deployment keeps costing money.
+            ["modal", "app", "stop", "-y", app_name],
             capture_output=True,
             text=True,
             check=False,
@@ -119,4 +103,4 @@ class ModalProvider:
             raise ProvisionError(f"`modal app stop {app_name}` failed:\n{proc.stderr}")
 
 
-__all__ = ["APP_NAME", "ModalProvider", "ModalSpec", "ProvisionError"]
+__all__ = ["APP_NAME", "ModalProvider", "ProvisionError"]
