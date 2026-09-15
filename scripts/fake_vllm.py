@@ -25,6 +25,19 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STATE = {"running": 0, "waiting": 0, "completed": 0, "preemptions": 0}
+
+# Cumulative timing counters, the same sum/count pairs vLLM publishes. A
+# predictive policy derives its service rates from these, so a fake without
+# them leaves such a policy permanently uncalibrated — which looks exactly like
+# a policy that decided everything was admissible.
+TIMING = {
+    "prefill_s": 0.0,
+    "prefill_tokens": 0.0,
+    "decode_s": 0.0,
+    "itl_s": 0.0,
+    "itl_n": 0.0,
+    "queue_s": 0.0,
+}
 LOCK = threading.Lock()
 
 # Concurrency at which the pretend engine is considered saturated. Past this,
@@ -52,8 +65,24 @@ vllm:kv_cache_usage_perc{{model_name="lab"}} {kv}
 vllm:num_preemptions_total{{model_name="lab"}} {preemptions}.0
 # HELP vllm:request_queue_time_seconds Time spent in WAITING phase.
 # TYPE vllm:request_queue_time_seconds histogram
-vllm:request_queue_time_seconds_sum{{model_name="lab"}} {qsum}
+vllm:request_queue_time_seconds_sum{{model_name="lab"}} {queue_s}
 vllm:request_queue_time_seconds_count{{model_name="lab"}} {completed}.0
+# HELP vllm:request_prefill_time_seconds Prefill duration.
+# TYPE vllm:request_prefill_time_seconds histogram
+vllm:request_prefill_time_seconds_sum{{model_name="lab"}} {prefill_s}
+vllm:request_prefill_time_seconds_count{{model_name="lab"}} {completed}.0
+# HELP vllm:request_prefill_kv_computed_tokens Prompt tokens prefilled.
+# TYPE vllm:request_prefill_kv_computed_tokens histogram
+vllm:request_prefill_kv_computed_tokens_sum{{model_name="lab"}} {prefill_tokens}
+vllm:request_prefill_kv_computed_tokens_count{{model_name="lab"}} {completed}.0
+# HELP vllm:request_decode_time_seconds Decode duration.
+# TYPE vllm:request_decode_time_seconds histogram
+vllm:request_decode_time_seconds_sum{{model_name="lab"}} {decode_s}
+vllm:request_decode_time_seconds_count{{model_name="lab"}} {completed}.0
+# HELP vllm:inter_token_latency_seconds Time between output tokens.
+# TYPE vllm:inter_token_latency_seconds histogram
+vllm:inter_token_latency_seconds_sum{{model_name="lab"}} {itl_s}
+vllm:inter_token_latency_seconds_count{{model_name="lab"}} {itl_n}
 # HELP vllm:prefix_cache_queries_total Prefix cache queries.
 # TYPE vllm:prefix_cache_queries_total counter
 vllm:prefix_cache_queries_total{{model_name="lab"}} {completed}.0
@@ -81,13 +110,14 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/metrics":
             with LOCK:
                 snapshot = dict(STATE)
+                timing = dict(TIMING)
             body = METRICS_TEMPLATE.format(
                 running=snapshot["running"],
                 waiting=snapshot["waiting"],
                 kv=kv_fraction(),
                 preemptions=snapshot["preemptions"],
                 completed=snapshot["completed"],
-                qsum=round(snapshot["completed"] * 0.05, 3),
+                **{k: round(v, 4) for k, v in timing.items()},
             ).encode()
             self._send(200, body, "text/plain; version=0.0.4")
         else:
@@ -128,7 +158,11 @@ class Handler(BaseHTTPRequestHandler):
             load = STATE["running"]
         slowdown = 1.0 + max(0.0, (load - CAPACITY) / CAPACITY)
 
-        time.sleep(0.05 * slowdown)  # prefill
+        prefill_s = 0.05 * slowdown
+        prefill_tokens = 200 * slowdown
+        time.sleep(prefill_s)
+
+        decode_started = time.monotonic()
         for i in range(n_tokens):
             chunk = {
                 "id": "fake",
@@ -137,6 +171,15 @@ class Handler(BaseHTTPRequestHandler):
             }
             self._chunk(f"data: {json.dumps(chunk)}\n\n")
             time.sleep(0.01 * slowdown * random.uniform(0.8, 1.2))
+
+        decode_s = time.monotonic() - decode_started
+        with LOCK:
+            TIMING["prefill_s"] += prefill_s
+            TIMING["prefill_tokens"] += prefill_tokens
+            TIMING["decode_s"] += decode_s
+            TIMING["itl_s"] += decode_s
+            TIMING["itl_n"] += max(1, n_tokens - 1)
+            TIMING["queue_s"] += 0.05 * max(0.0, slowdown - 1.0)
 
         self._chunk("data: [DONE]\n\n")
         self._chunk("")  # terminating chunk
@@ -159,7 +202,7 @@ def main() -> None:
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"fake vLLM on http://127.0.0.1:{args.port}  (capacity {CAPACITY})")
-    print("  admitperf smoke --engine-url http://127.0.0.1:%d" % args.port)
+    print(f"  admitperf infra smoke --engine-url http://127.0.0.1:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

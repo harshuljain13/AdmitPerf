@@ -1,0 +1,46 @@
+# Deadline-aware admission against threshold policies.
+#
+# The comparison worth running: queue_depth and kv_threshold refuse past a
+# busyness threshold and cannot tell an interactive request from a batch one.
+# chronos_inspired predicts each request's response time and judges it against
+# its own deadline, so the same fleet state yields different answers for
+# different SLO classes.
+#
+#   admitperf infra up   -c experiments/chronos.yaml
+#   admitperf bench run  -c experiments/chronos.yaml
+#   admitperf bench compare results/
+name: deadline-vs-threshold
+
+infra:
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  max_concurrent_inputs: 256
+  engine:
+    max_num_seqs: 4
+    max_model_len: 2048
+    gpu_memory_utilization: 0.55
+    enable_prefix_caching: false
+    scheduling_policy: fcfs
+
+workload:
+  n: 120
+  rate: 15
+  seed: 0
+
+policies:
+  - no_admission
+  - name: queue_depth
+    max_waiting: 4
+  # concurrency must match the engine's max_num_seqs — it is how the policy
+  # knows how fast the queue drains.
+  - name: chronos_inspired
+    concurrency: 4
+  # Pessimistic variant: the mean-based queue model understates the tail, and
+  # the cost of admitting a doomed request is paid by everything behind it.
+  - name: chronos_inspired
+    concurrency: 4
+    safety_factor: 1.5
+
+bench:
+  repeats: 3

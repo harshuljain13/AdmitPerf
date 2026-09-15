@@ -19,12 +19,14 @@ from admitperf.core.api import (
     SystemState,
 )
 from admitperf.core.registry import available, get_policy, register
+from admitperf.policies.chronos import ChronosInspiredWCRT
 from admitperf.policies.kv_threshold import KVThreshold
 from admitperf.policies.no_admission import NoAdmission
 from admitperf.policies.queue_depth import QueueDepth, QueueDepthDefer
 
 register(NoAdmission.name, NoAdmission)
 register(KVThreshold.name, KVThreshold)
+register(ChronosInspiredWCRT.name, ChronosInspiredWCRT)
 register(QueueDepth.name, QueueDepth)
 register(QueueDepthDefer.name, QueueDepthDefer)
 
@@ -33,6 +35,7 @@ register(QueueDepthDefer.name, QueueDepthDefer)
 POLICIES: dict[str, type[AdmissionPolicy]] = {
     NoAdmission.name: NoAdmission,
     KVThreshold.name: KVThreshold,
+    ChronosInspiredWCRT.name: ChronosInspiredWCRT,
     QueueDepth.name: QueueDepth,
     QueueDepthDefer.name: QueueDepthDefer,
 }
@@ -42,6 +45,7 @@ __all__ = [
     "AdmissionPolicy",
     "Decision",
     "DecisionKind",
+    "ChronosInspiredWCRT",
     "KVThreshold",
     "QueueDepth",
     "QueueDepthDefer",

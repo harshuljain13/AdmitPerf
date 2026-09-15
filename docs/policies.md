@@ -18,7 +18,7 @@ never under the paper's system name.
 | `QueueDepth` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
 | `QueueDepthDefer` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
 | `KVThreshold` ✅ built | derived | A | `kv_cache_usage_perc` | request | ✗ | ✗ | ✗ |
-| `ChronosThresholdWCRT` | Chronos, Frontiers Comp Sci 1873627 | A | TTFT/TBT deadline bound | request | ✓ | ✗ | ✗ |
+| `ChronosInspiredWCRT` ✅ built | Chronos, Frontiers Comp Sci 1873627 | **A → approximation** | predicted response time vs deadline | request | **✓** | ✗ | ✗ |
 | `QLMInspired` | QLM, SoCC 2024 | A | KV pressure + virtual-queue LP | request | ✓ | ✗ | ✗ |
 | `FluidWaitThreshold` | Fluid-WAIT, arXiv:2504.11320 | A | queue + KV scalar threshold | request | partial | ✗ | ✗ |
 | `TokenBudget` | derived (survey Table 2) | A | offered tokens vs capacity | request | ✓ | ✗ | ✗ |
@@ -45,6 +45,33 @@ Excluded because porting them means maintaining a vLLM fork. See
 - **ProServe** (arXiv:2512.12928) — very recent, fidelity risk.
 - **SOLA** (MLSys 2025) — may overlap Chronos; revisit if a scheduled port fails fidelity.
 - **Flow-controlled scheduling** (arXiv:2604.11001) — theory; evaluate if a scheduled port fails fidelity.
+
+## Deadline-aware vs threshold
+
+`ChronosInspiredWCRT` is the first policy here that reads the *request* rather
+than only the fleet. Threshold policies refuse past a busyness level and cannot
+distinguish an interactive request from a batch one; this predicts how long
+*this* request would take and compares that to *its* deadline, so the same
+fleet state produces different answers for different SLO classes.
+
+Measured against the fake engine at four-way concurrency:
+
+| queue depth | interactive (500ms) | streaming (2s) | batch (30s) |
+|---|---|---|---|
+| 0 | reject | admit | admit |
+| 8 | reject | reject | admit |
+| 60 | reject | reject | reject |
+
+Its rejections are typed — `deadline_unmeetable` for a first-token miss,
+`tbt_unmeetable` for streaming smoothness — so a results bundle records which
+promise could not be kept.
+
+**It is named "inspired" deliberately.** The published analysis derives sound
+worst-case bounds from per-task knowledge: arrival periods, execution-time
+bounds, the state of every queued task. A Prometheus endpoint reports counts,
+so the queue ahead is characterised by its size and a mean. The reasoning has
+the shape of the paper's; the guarantee does not, and per the fidelity rule
+below that forbids the bare name.
 
 ## Choosing a signal
 
