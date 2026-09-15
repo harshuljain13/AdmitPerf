@@ -23,7 +23,12 @@ from admitperf.engines.vllm import (
     parse_prometheus,
 )
 
+#: Hand-written, with values chosen to make assertions readable.
 FIXTURE = Path(__file__).parent / "fixtures" / "vllm_metrics.txt"
+#: Captured from vLLM 0.29 on an A10G. Idle, so useless for value assertions,
+#: but it is the real vocabulary — which is the only thing the contract test
+#: cares about.
+REAL_FIXTURE = Path(__file__).parent / "fixtures" / "vllm_metrics_real.txt"
 
 
 def _engine(handler: object = None) -> VllmEngine:
@@ -54,9 +59,14 @@ def test_satisfies_the_engine_port() -> None:
 
 
 def test_every_metric_we_read_exists_in_a_real_payload() -> None:
-    """Guards against a vLLM rename. `kv_cache_usage_perc` was
-    `gpu_cache_usage_perc` before v1; the next rename should break here."""
-    metrics = parse_prometheus(FIXTURE.read_text())
+    """Guards against a vLLM rename, against a payload captured from a real
+    engine rather than one we wrote to agree with ourselves.
+
+    `kv_cache_usage_perc` was `gpu_cache_usage_perc` before v1; the next rename
+    should break here rather than silently reading zero and turning every
+    KV-aware policy into an admit-everything baseline.
+    """
+    metrics = parse_prometheus(REAL_FIXTURE.read_text())
     missing = [name for name in VLLM_METRICS.values() if name not in metrics]
     assert not missing, f"metric names absent from the captured payload: {missing}"
 
