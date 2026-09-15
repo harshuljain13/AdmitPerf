@@ -130,7 +130,8 @@ admitperf/
 │   ├── infra/         provision a GPU and remember where it is
 │   ├── bench/         load generation and results
 │   └── policies/      built-in policies
-├── experiments/       example configs (demo.yaml, multi-gpu.yaml)
+├── experiments/       example configs (demo.yaml, chronos.yaml, multi-gpu.yaml)
+├── reports/           written studies, each backed by a run bundle
 ├── docs/              motivation, scope, design, metrics, results, architecture
 ├── scripts/           fake_vllm.py — a pretend engine for testing without a GPU
 ├── tests/
@@ -178,6 +179,7 @@ See `.env.example`.
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
 | Read the candidate policy list + fidelity rules | [`docs/policies.md`](docs/policies.md) |
 | See the first real-hardware results | [`docs/results.md`](docs/results.md) |
+| Read the written studies | [`reports/`](reports/) |
 | Read the plan | [`docs/PROPOSAL.md`](docs/PROPOSAL.md) |
 | Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](docs/prior-art/adversarial_review.md) |
 | See what exists and what does not | [`docs/status.md`](docs/status.md) |

@@ -18,7 +18,7 @@ never under the paper's system name.
 | `QueueDepth` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
 | `QueueDepthDefer` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
 | `KVThreshold` ✅ built | derived | A | `kv_cache_usage_perc` | request | ✗ | ✗ | ✗ |
-| `ChronosInspiredWCRT` ✅ built | Chronos, Frontiers Comp Sci 1873627 | **A → approximation** | predicted response time vs deadline | request | **✓** | ✗ | ✗ |
+| `ChronosInspiredWCRT` ✅ built | Chronos, Frontiers CS 8 (2026) | **A → approximation** | Theorem 1 WCRT bound vs deadline | request | **✓** | ✗ | ✗ |
 | `QLMInspired` | QLM, SoCC 2024 | A | KV pressure + virtual-queue LP | request | ✓ | ✗ | ✗ |
 | `FluidWaitThreshold` | Fluid-WAIT, arXiv:2504.11320 | A | queue + KV scalar threshold | request | partial | ✗ | ✗ |
 | `TokenBudget` | derived (survey Table 2) | A | offered tokens vs capacity | request | ✓ | ✗ | ✗ |
@@ -54,24 +54,23 @@ distinguish an interactive request from a batch one; this predicts how long
 *this* request would take and compares that to *its* deadline, so the same
 fleet state produces different answers for different SLO classes.
 
-Measured against the fake engine at four-way concurrency:
+It implements Algorithm 1 from the paper: a utilization check, a Theorem 1
+WCRT bound against the request's deadline, and a Theorem 3 decode-capacity
+check. Rejections are typed by which check refused — `overloaded`,
+`deadline_unmeetable`, `tbt_unmeetable` — so a bundle records not just that a
+request was refused but why.
 
-| queue depth | interactive (500ms) | streaming (2s) | batch (30s) |
-|---|---|---|---|
-| 0 | reject | admit | admit |
-| 8 | reject | reject | admit |
-| 60 | reject | reject | reject |
+Measured on an A10G against an uncontrolled baseline, it cuts TTFT p95 from
+4750ms to 515ms but admits only 5.3% of offered load. Full study, including why
+that is far more conservative than the paper reports:
+[`../reports/chronos-reproduction.md`](../reports/chronos-reproduction.md).
 
-Its rejections are typed — `deadline_unmeetable` for a first-token miss,
-`tbt_unmeetable` for streaming smoothness — so a results bundle records which
-promise could not be kept.
-
-**It is named "inspired" deliberately.** The published analysis derives sound
-worst-case bounds from per-task knowledge: arrival periods, execution-time
-bounds, the state of every queued task. A Prometheus endpoint reports counts,
-so the queue ahead is characterised by its size and a mean. The reasoning has
-the shape of the paper's; the guarantee does not, and per the fidelity rule
-below that forbids the bare name.
+**It is named "inspired" deliberately.** The algorithm is the paper's, but two
+substitutions prevent a fidelity claim: the kernel parameters are fitted from
+engine telemetry rather than roofline-derived, and `gamma` is not fitted at all
+because separating it from the per-token slope needs measurements at several
+batch sizes. Utilization is therefore estimated rather than known, and Theorem
+1 inherits that error. Per the fidelity rule below, that forbids the bare name.
 
 ## Choosing a signal
 

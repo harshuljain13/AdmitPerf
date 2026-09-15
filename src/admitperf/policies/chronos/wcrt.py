@@ -1,171 +1,202 @@
-"""Worst-case response time for a request that has not been admitted yet.
+"""Chronos response-time analysis: Theorem 1, Theorem 3, and the cost model.
 
-Pure functions: inputs in, numbers out, no engine and no state. That is
-deliberate — the arithmetic is the part worth arguing about, and it should be
-checkable without a GPU or a mock.
+Pure functions — inputs in, numbers out, no engine and no state. The arithmetic
+is the part worth arguing about, so it is checkable without a GPU.
 
-## The idea
-
-Real-time systems admit a task only if its worst-case response time fits inside
-its deadline. Applied to LLM serving: before letting a request in, work out how
-long it would take in the worst case, and refuse it if that exceeds what the
-caller asked for. Refusing early is better than admitting something that will
-miss anyway *and* delay everyone queued behind it.
+Source: Marref, Tarmissi & Chaibi, "Formal schedulability analysis for LLM
+inference: TTFT and TBT deadline guarantees via response-time theory",
+*Frontiers in Computer Science* 8 (2026). DOI 10.3389/fcomp.2026.1873627.
+Reference implementation: github.com/am-research/rtss-ttft-tbt (simulator).
 
 ## The model
 
-A request cannot start until a slot frees. Slots do not clear in lockstep —
-they free one at a time as individual requests finish — so with `concurrency`
-slots each occupied for `service_time`, departures happen at
+Classical real-time theory applied to the prefill/decode split. A request is a
+**sporadic job**: prefill is released at arrival with an absolute TTFT
+deadline, and on completion spawns a **decode task** whose every iteration must
+land inside the TBT budget.
 
-    departure_rate = concurrency / service_time
+Prefill worst-case execution time is linear in chunks:
 
-and clearing `queued` requests ahead of ours takes
+    p_i    = ceil(input_tokens / B)          chunks
+    C_pre  = p_i * (alpha * B + gamma)       ms
 
-    queue_delay = queued / departure_rate = queued x service_time / concurrency
+**Theorem 1** bounds worst-case response time through a busy-period argument —
+longest continuously-non-empty prefill period, interfering work from arrivals
+within it, then a work-balance inequality:
 
-Once started, our own prefill costs `input_tokens / prefill_tokens_per_s`.
+    WCRT <= rho_P * D_TTFT / (1 - rho_P) + C_pre        valid iff rho_P < 1
 
-    TTFT_wcrt = queue_delay + own_prefill
+where `rho_P` is prefill utilization. The bound diverges as utilization
+approaches 1, which is the formal statement of what saturation does.
 
-Modelling this as whole batches instead — every arrival waiting one full
-service time — overestimates badly at shallow queues: a request arriving at a
-busy but short-queued fleet was predicted to wait seconds when it would
-actually wait for the next single departure.
+**Theorem 3** bounds concurrent decode tasks from the per-iteration budget:
 
-Inter-token latency is taken directly from measurement: the observed value
-already includes whatever contention the batch is under, which is the thing a
-predicted value would be trying to approximate.
+    beta * n_D + gamma <= s   =>   n_D <= (s - gamma) / beta
 
-## What this is not
+## Measured rather than roofline
 
-The published analysis assumes per-task knowledge — arrival periods, execution
-bounds, the state of every queued task. An engine's Prometheus endpoint reports
-*counts*, not per-request state, so the queue ahead is characterised by its
-size and a mean, not individually. That makes this an ingress approximation
-with a real bound's shape, not a sound bound. It is named accordingly.
+The paper derives alpha, beta and gamma from a roofline model of an A100 and
+evaluates in its own discrete-event simulator, never on a serving engine. Its
+limitations section flags that real measurements *could* replace them but the
+artifact does not do so. Here they are fitted from live engine telemetry, which
+answers that open question — and is also why results here are not directly
+comparable to the paper's.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-
-from admitperf.policies.chronos.estimator import ServiceRates
 
 
 @dataclass(frozen=True)
-class Prediction:
-    """What the model expects, and whether it fits the deadline."""
+class CostModel:
+    """The linear kernel model: alpha, beta, gamma.
 
-    ttft_ms: float
-    queue_delay_ms: float
-    own_prefill_ms: float
-    tbt_ms: float | None
-    #: None when the request carried no deadline to judge against.
-    ttft_fits: bool | None = None
-    tbt_fits: bool | None = None
+    Defaults are the paper's roofline values for a 7B model on an A100-80GB,
+    kept as a documented fallback for when telemetry has not yet produced a fit.
+    """
 
-    @property
-    def fits(self) -> bool:
-        """True unless something we can judge is predicted to miss."""
-        return self.ttft_fits is not False and self.tbt_fits is not False
+    #: Prefill cost per token (ms). Paper: 0.080 for 7B on A100.
+    alpha_ms_per_token: float = 0.080
+    #: Decode cost per token per iteration (ms). Paper: 0.250.
+    beta_ms_per_token: float = 0.250
+    #: Fixed per-iteration overhead (ms). Paper: 7.0.
+    gamma_ms: float = 7.0
+    #: Prefill chunk size B, in tokens. vLLM's chunked-prefill budget.
+    chunk_tokens: int = 512
 
-    @property
-    def violated(self) -> str | None:
-        if self.ttft_fits is False:
-            return "ttft"
-        if self.tbt_fits is False:
-            return "tbt"
+    def prefill_chunks(self, input_tokens: int) -> int:
+        """p_i = ceil(l_i / B)."""
+        return max(1, math.ceil(input_tokens / self.chunk_tokens))
+
+    def prefill_wcet_ms(self, input_tokens: int) -> float:
+        """C_pre,i = p_i * (alpha * B + gamma)."""
+        per_chunk = self.alpha_ms_per_token * self.chunk_tokens + self.gamma_ms
+        return self.prefill_chunks(input_tokens) * per_chunk
+
+
+def prefill_utilization(*, arrival_rate_hz: float, mean_prefill_wcet_ms: float) -> float:
+    """rho_P = lambda * E[C_pre].
+
+    The fraction of prefill capacity the offered load demands. At or above 1
+    the system is formally overloaded and Theorem 1 does not hold — which is
+    the first check of the admission test, not an edge case.
+    """
+    if arrival_rate_hz < 0 or mean_prefill_wcet_ms < 0:
+        raise ValueError("arrival rate and WCET must be non-negative")
+    return arrival_rate_hz * (mean_prefill_wcet_ms / 1000.0)
+
+
+def theorem1_wcrt_ms(
+    *, utilization: float, deadline_ttft_ms: float, own_wcet_ms: float
+) -> float | None:
+    """Worst-case response time bound. None when rho_P >= 1.
+
+    None rather than infinity because the two differ in kind: an unschedulable
+    system is caught by the utilization test before any per-request bound means
+    anything.
+    """
+    if utilization >= 1.0:
         return None
+    return utilization * deadline_ttft_ms / (1.0 - utilization) + own_wcet_ms
 
 
-def batch_service_seconds(rates: ServiceRates, *, mean_output_tokens: float) -> float:
-    """How long one batch of concurrent requests occupies its slots.
+def theorem3_max_decode_tasks(*, tbt_slo_ms: float, cost: CostModel) -> int:
+    """n*_D — concurrent decode tasks that still fit the per-iteration budget.
 
-    Prefer the engine's measured decode duration; fall back to per-token
-    latency times an assumed length only when the former is unavailable.
+    From beta * n_D + gamma <= s. At the paper's parameters with s = 200ms this
+    yields 772; the paper reports approximately 731, so the published figure
+    carries a term this reading does not reproduce. Recorded rather than tuned
+    away — see reports/chronos-reproduction.md.
     """
-    if rates.mean_decode_seconds is not None:
-        decode = rates.mean_decode_seconds
-    elif rates.seconds_per_output_token is not None:
-        decode = rates.seconds_per_output_token * mean_output_tokens
-    else:
-        decode = 0.0
-
-    prefill = 0.0
-    if rates.prefill_tokens_per_s:
-        # Mean prefill is unknown per-request; the measured decode time already
-        # dominates for typical generation lengths, so this stays a small term.
-        prefill = mean_output_tokens / rates.prefill_tokens_per_s
-    return prefill + decode
+    headroom = tbt_slo_ms - cost.gamma_ms
+    if headroom <= 0 or cost.beta_ms_per_token <= 0:
+        return 0
+    return int(headroom / cost.beta_ms_per_token)
 
 
-def queue_delay_seconds(*, queued: int, concurrency: int, service_seconds: float) -> float:
-    """How long until a slot frees for a request `queued` places back.
+@dataclass(frozen=True)
+class AdmissionTest:
+    """The outcome of Algorithm 1, with enough detail to explain itself."""
 
-    Slots free one at a time rather than all at once, so the fleet drains at
-    `concurrency / service_seconds` requests per second. Treating it as
-    lockstep batches would charge a shallow queue a full service time.
-    """
-    if concurrency < 1:
-        raise ValueError(f"concurrency must be >= 1, got {concurrency}")
-    if queued <= 0:
-        return 0.0
-    return queued * service_seconds / concurrency
+    admit: bool
+    #: "overloaded" | "ttft_infeasible" | "tbt_capacity" | None
+    failed: str | None
+    utilization: float
+    wcrt_ms: float | None
+    own_wcet_ms: float
+    max_decode_tasks: int
+    active_decode_tasks: int
 
 
-def predict(
+def admission_test(
     *,
     input_tokens: int,
-    expected_output_tokens: int | None,
-    running: int,
-    waiting: int,
-    concurrency: int,
-    rates: ServiceRates,
     deadline_ttft_ms: float | None,
     deadline_tbt_ms: float | None,
-    mean_output_tokens: float = 128.0,
+    arrival_rate_hz: float,
+    mean_prefill_wcet_ms: float,
+    active_decode_tasks: int,
+    cost: CostModel,
     safety_factor: float = 1.0,
-) -> Prediction:
-    """Predict this request's response time and compare it to its deadline.
+) -> AdmissionTest:
+    """Algorithm 1 — three checks, in the paper's order.
 
-    `safety_factor` scales the estimate. Above 1.0 the policy is pessimistic
-    and sheds earlier; it exists because the mean-based queue model understates
-    a heavy tail, and because the cost of admitting a doomed request is borne
-    by every request behind it.
+    (a) Utilization: reject if rho_P >= 1. The system is formally overloaded
+        and no per-request bound holds.
+    (b) TTFT feasibility: reject if the Theorem 1 bound exceeds this request's
+        deadline.
+    (c) TBT capacity: reject if one more decode task would push per-iteration
+        time past the TBT budget (Theorem 3).
+
+    `safety_factor` is not in the paper — there the bound is sound by
+    construction. It exists here because alpha, beta and gamma are fitted from
+    noisy telemetry rather than derived from a roofline.
     """
-    if not rates.is_calibrated:
-        raise ValueError("cannot predict without calibrated service rates")
+    own_wcet = cost.prefill_wcet_ms(input_tokens)
+    rho = prefill_utilization(
+        arrival_rate_hz=arrival_rate_hz, mean_prefill_wcet_ms=mean_prefill_wcet_ms
+    )
+    max_decode = (
+        theorem3_max_decode_tasks(tbt_slo_ms=deadline_tbt_ms, cost=cost)
+        if deadline_tbt_ms is not None
+        else 0
+    )
 
-    # mypy: is_calibrated guarantees both are non-None and positive.
-    assert rates.prefill_tokens_per_s is not None
-    assert rates.seconds_per_output_token is not None
-
-    # Slots already free absorb part of the queue before ours has to wait.
-    free_slots = max(0, concurrency - running)
-    effective_queue = max(0, waiting + 1 - free_slots)
-
-    service_s = batch_service_seconds(rates, mean_output_tokens=mean_output_tokens)
-    queue_delay_ms = (
-        queue_delay_seconds(
-            queued=effective_queue, concurrency=concurrency, service_seconds=service_s
+    def result(admit: bool, failed: str | None, wcrt: float | None) -> AdmissionTest:
+        return AdmissionTest(
+            admit=admit,
+            failed=failed,
+            utilization=rho,
+            wcrt_ms=wcrt,
+            own_wcet_ms=own_wcet,
+            max_decode_tasks=max_decode,
+            active_decode_tasks=active_decode_tasks,
         )
-        * 1000.0
-    )
 
-    own_prefill_ms = (input_tokens / rates.prefill_tokens_per_s) * 1000.0
-    ttft_ms = (queue_delay_ms + own_prefill_ms) * safety_factor
+    if rho >= 1.0:
+        return result(False, "overloaded", None)
 
-    tbt_ms = rates.seconds_per_output_token * 1000.0 * safety_factor
+    wcrt = None
+    if deadline_ttft_ms is not None:
+        wcrt = theorem1_wcrt_ms(
+            utilization=rho, deadline_ttft_ms=deadline_ttft_ms, own_wcet_ms=own_wcet
+        )
+        if wcrt is None or wcrt * safety_factor > deadline_ttft_ms:
+            return result(False, "ttft_infeasible", wcrt)
 
-    return Prediction(
-        ttft_ms=ttft_ms,
-        queue_delay_ms=queue_delay_ms,
-        own_prefill_ms=own_prefill_ms,
-        tbt_ms=tbt_ms,
-        ttft_fits=None if deadline_ttft_ms is None else ttft_ms <= deadline_ttft_ms,
-        tbt_fits=None if deadline_tbt_ms is None else tbt_ms <= deadline_tbt_ms,
-    )
+    if deadline_tbt_ms is not None and active_decode_tasks + 1 > max_decode:
+        return result(False, "tbt_capacity", wcrt)
+
+    return result(True, None, wcrt)
 
 
-__all__ = ["Prediction", "batch_service_seconds", "predict", "queue_delay_seconds"]
+__all__ = [
+    "AdmissionTest",
+    "CostModel",
+    "admission_test",
+    "prefill_utilization",
+    "theorem1_wcrt_ms",
+    "theorem3_max_decode_tasks",
+]

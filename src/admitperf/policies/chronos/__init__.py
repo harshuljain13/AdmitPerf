@@ -8,14 +8,30 @@ Three pieces, separated so each is useful and testable on its own:
     policy.py     the AdmissionPolicy that wires them together
 """
 
-from admitperf.policies.chronos.estimator import ServiceRateEstimator, ServiceRates
+from admitperf.policies.chronos.estimator import (
+    ArrivalRateWindow,
+    ServiceRateEstimator,
+    ServiceRates,
+    fit_cost_model,
+)
 from admitperf.policies.chronos.policy import ChronosInspiredWCRT
-from admitperf.policies.chronos.wcrt import Prediction, predict
+from admitperf.policies.chronos.wcrt import (
+    AdmissionTest,
+    CostModel,
+    admission_test,
+    theorem1_wcrt_ms,
+    theorem3_max_decode_tasks,
+)
 
 __all__ = [
+    "AdmissionTest",
+    "ArrivalRateWindow",
     "ChronosInspiredWCRT",
-    "Prediction",
+    "CostModel",
     "ServiceRateEstimator",
     "ServiceRates",
-    "predict",
+    "admission_test",
+    "fit_cost_model",
+    "theorem1_wcrt_ms",
+    "theorem3_max_decode_tasks",
 ]

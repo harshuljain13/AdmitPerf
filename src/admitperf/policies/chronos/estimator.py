@@ -18,9 +18,12 @@ completed in the last window only.
 
 from __future__ import annotations
 
+import collections
+import time
 from dataclasses import dataclass
 
 from admitperf.core.api import SystemState
+from admitperf.policies.chronos.wcrt import CostModel
 
 #: Counter pairs, named once so a vLLM rename shows up in one place.
 PREFILL_TIME = ("vllm:request_prefill_time_seconds_sum", "vllm:request_prefill_time_seconds_count")
@@ -154,4 +157,80 @@ def _ratio(numerator: float, denominator: float) -> float | None:
     return numerator / denominator
 
 
-__all__ = ["ServiceRateEstimator", "ServiceRates"]
+class ArrivalRateWindow:
+    """Sliding-window arrival rate, as Algorithm 1 uses for lambda.
+
+    The paper specifies a 60-second window. Reporting the *peak* sub-window
+    rate rather than the mean is what makes the utilization test respond to a
+    burst instead of averaging it away — a mean over 60s hides exactly the
+    overload the test exists to catch.
+    """
+
+    def __init__(self, *, window_s: float = 60.0, bucket_s: float = 1.0) -> None:
+        if window_s <= 0 or bucket_s <= 0:
+            raise ValueError("window and bucket must be positive")
+        self.window_s = window_s
+        self.bucket_s = bucket_s
+        self._buckets: collections.deque[tuple[float, int]] = collections.deque()
+
+    def record(self, now: float | None = None) -> None:
+        """Note one arrival."""
+        t = time.monotonic() if now is None else now
+        slot = int(t / self.bucket_s)
+        if self._buckets and self._buckets[-1][0] == slot:
+            self._buckets[-1] = (slot, self._buckets[-1][1] + 1)
+        else:
+            self._buckets.append((slot, 1))
+        self._evict(t)
+
+    def _evict(self, now: float) -> None:
+        oldest = int((now - self.window_s) / self.bucket_s)
+        while self._buckets and self._buckets[0][0] < oldest:
+            self._buckets.popleft()
+
+    def mean_rate_hz(self, now: float | None = None) -> float:
+        t = time.monotonic() if now is None else now
+        self._evict(t)
+        if not self._buckets:
+            return 0.0
+        total = sum(count for _, count in self._buckets)
+        span = max(self.bucket_s, (self._buckets[-1][0] - self._buckets[0][0] + 1) * self.bucket_s)
+        return total / span
+
+    def peak_rate_hz(self, now: float | None = None) -> float:
+        """Busiest bucket in the window — lambda_max."""
+        t = time.monotonic() if now is None else now
+        self._evict(t)
+        if not self._buckets:
+            return 0.0
+        return max(count for _, count in self._buckets) / self.bucket_s
+
+
+def fit_cost_model(rates: ServiceRates, *, base: CostModel, chunk_tokens: int) -> CostModel:
+    """Replace the paper's roofline alpha/beta with measured values.
+
+    The paper derives them from a roofline model and notes that real
+    measurements could take their place. This is that substitution: alpha comes
+    from observed prefill throughput, beta from observed inter-token latency.
+
+    gamma is left at the paper's value. Separating a fixed per-iteration
+    overhead from the per-token slope needs measurements at two or more batch
+    sizes, and a single aggregate window cannot do it.
+    """
+    alpha = base.alpha_ms_per_token
+    if rates.prefill_tokens_per_s:
+        alpha = 1000.0 / rates.prefill_tokens_per_s
+
+    beta = base.beta_ms_per_token
+    if rates.seconds_per_output_token:
+        beta = rates.seconds_per_output_token * 1000.0
+
+    return CostModel(
+        alpha_ms_per_token=alpha,
+        beta_ms_per_token=beta,
+        gamma_ms=base.gamma_ms,
+        chunk_tokens=chunk_tokens,
+    )
+
+
+__all__ = ["ArrivalRateWindow", "ServiceRateEstimator", "ServiceRates", "fit_cost_model"]
