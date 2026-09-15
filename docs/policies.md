@@ -1,5 +1,11 @@
 # Policies — the roster
 
+> **Looking for what each policy actually does?**
+> [`../policies/README.md`](../policies/README.md) is the catalogue: what each
+> one decides on, its parameters, and which regime it suits. This document is
+> the research roster — what is planned, what is portable, and the rules for
+> claiming fidelity to a published algorithm.
+
 This document owns the **concrete policy roster** and the **fidelity contract** that governs
 ports. The taxonomy behind the `Class` column (what is portable and what is not, and the
 naming rule) is owned by [`scope.md`](scope.md) — read that first.

@@ -8,14 +8,14 @@ Three pieces, separated so each is useful and testable on its own:
     policy.py     the AdmissionPolicy that wires them together
 """
 
-from admitperf.policies.chronos.estimator import (
+from admitperf_zoo.chronos.estimator import (
     ArrivalRateWindow,
     ServiceRateEstimator,
     ServiceRates,
     fit_cost_model,
 )
-from admitperf.policies.chronos.policy import ChronosInspiredWCRT
-from admitperf.policies.chronos.wcrt import (
+from admitperf_zoo.chronos.policy import ChronosInspiredWCRT
+from admitperf_zoo.chronos.wcrt import (
     AdmissionTest,
     CostModel,
     admission_test,

@@ -103,7 +103,19 @@ def get_policy(name: str, **kwargs: object) -> AdmissionPolicy:
     registry = available()
     if name not in registry:
         raise KeyError(f"unknown policy {name!r}; registered: {sorted(registry)}")
-    return registry[name](**kwargs)
+    cls = registry[name]
+    try:
+        return cls(**kwargs)
+    except TypeError as exc:
+        # A bare TypeError from a dataclass constructor names neither the
+        # policy nor the accepted parameters, and the usual cause is a config
+        # file written against an older version of a policy.
+        import inspect
+
+        accepted = [p for p in inspect.signature(cls.__init__).parameters if p != "self"]
+        raise TypeError(
+            f"policy {name!r} rejected these settings: {exc}. It accepts: {accepted or '(none)'}"
+        ) from exc
 
 
 def requirements_of(policy: AdmissionPolicy) -> frozenset[str]:

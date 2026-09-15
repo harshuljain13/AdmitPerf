@@ -8,9 +8,9 @@ and would make a predictive policy optimistic exactly when the fleet is busy.
 from __future__ import annotations
 
 import pytest
+from admitperf_zoo.chronos.estimator import ServiceRateEstimator, ServiceRates
 
 from admitperf.core.api import SystemState
-from admitperf.policies.chronos.estimator import ServiceRateEstimator, ServiceRates
 
 
 def _state(**metrics: float) -> SystemState:
@@ -49,7 +49,9 @@ def test_first_scrape_uses_the_lifetime_mean() -> None:
     """There is no window to difference against yet, and waiting for a second
     completion would leave the policy blind for most of a short run."""
     est = ServiceRateEstimator()
-    rates = est.update(_state(**_counters(prefill_s=1.0, prefill_tokens=8000, reqs=10, itl_s=2.0, itl_n=100)))
+    rates = est.update(
+        _state(**_counters(prefill_s=1.0, prefill_tokens=8000, reqs=10, itl_s=2.0, itl_n=100))
+    )
 
     assert rates.is_calibrated
     assert rates.prefill_tokens_per_s == pytest.approx(8000.0)
@@ -61,7 +63,9 @@ def test_rates_reflect_the_recent_window_not_the_lifetime() -> None:
     window must report the slow rate."""
     est = ServiceRateEstimator()
     # Fast start: 10k tokens/s.
-    est.update(_state(**_counters(prefill_s=1.0, prefill_tokens=10_000, reqs=10, itl_s=1.0, itl_n=100)))
+    est.update(
+        _state(**_counters(prefill_s=1.0, prefill_tokens=10_000, reqs=10, itl_s=1.0, itl_n=100))
+    )
     # Next window is 5x slower: 1000 more tokens took 1 more second.
     rates = est.update(
         _state(**_counters(prefill_s=2.0, prefill_tokens=11_000, reqs=20, itl_s=3.0, itl_n=150))
@@ -79,9 +83,13 @@ def test_empty_window_keeps_the_last_known_rates() -> None:
     est = ServiceRateEstimator()
     first = _counters(prefill_s=1.0, prefill_tokens=8000, reqs=10, itl_s=2.0, itl_n=100)
     est.update(_state(**first))
-    before = est.update(_state(**_counters(prefill_s=2.0, prefill_tokens=16000, reqs=20, itl_s=4.0, itl_n=200)))
+    before = est.update(
+        _state(**_counters(prefill_s=2.0, prefill_tokens=16000, reqs=20, itl_s=4.0, itl_n=200))
+    )
 
-    unchanged = est.update(_state(**_counters(prefill_s=2.0, prefill_tokens=16000, reqs=20, itl_s=4.0, itl_n=200)))
+    unchanged = est.update(
+        _state(**_counters(prefill_s=2.0, prefill_tokens=16000, reqs=20, itl_s=4.0, itl_n=200))
+    )
 
     assert unchanged == before
     assert unchanged.is_calibrated
@@ -91,8 +99,12 @@ def test_engine_restart_does_not_produce_a_negative_rate() -> None:
     """Counters reset to zero on restart. Without a guard the delta goes
     negative and every later estimate is poisoned."""
     est = ServiceRateEstimator()
-    est.update(_state(**_counters(prefill_s=10.0, prefill_tokens=80_000, reqs=100, itl_s=20.0, itl_n=1000)))
-    after_restart = est.update(_state(**_counters(prefill_s=0.1, prefill_tokens=800, reqs=1, itl_s=0.2, itl_n=10)))
+    est.update(
+        _state(**_counters(prefill_s=10.0, prefill_tokens=80_000, reqs=100, itl_s=20.0, itl_n=1000))
+    )
+    after_restart = est.update(
+        _state(**_counters(prefill_s=0.1, prefill_tokens=800, reqs=1, itl_s=0.2, itl_n=10))
+    )
 
     assert after_restart.prefill_tokens_per_s is None or after_restart.prefill_tokens_per_s > 0
 

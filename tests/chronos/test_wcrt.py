@@ -9,8 +9,7 @@ implementation's output.
 from __future__ import annotations
 
 import pytest
-
-from admitperf.policies.chronos.wcrt import (
+from admitperf_zoo.chronos.wcrt import (
     CostModel,
     admission_test,
     prefill_utilization,
@@ -43,7 +42,9 @@ def test_prefill_wcet_follows_the_paper_formula() -> None:
 
 def test_utilization_is_rate_times_service_time() -> None:
     """rho_P = lambda * E[C_pre]. 10/s at 50ms each = 50% of capacity."""
-    assert prefill_utilization(arrival_rate_hz=10.0, mean_prefill_wcet_ms=50.0) == pytest.approx(0.5)
+    assert prefill_utilization(arrival_rate_hz=10.0, mean_prefill_wcet_ms=50.0) == pytest.approx(
+        0.5
+    )
 
 
 def test_negative_inputs_are_refused() -> None:

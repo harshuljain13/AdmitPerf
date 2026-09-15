@@ -129,7 +129,8 @@ admitperf/
 │   ├── engines/       vLLM adapter: scrape /metrics, run requests, time the stream
 │   ├── infra/         provision a GPU and remember where it is
 │   ├── bench/         load generation and results
-│   └── policies/      built-in policies
+│   └── policies/      the null baseline only
+├── policies/          the policy zoo — a separate package (see its README)
 ├── experiments/       example configs (demo.yaml, chronos.yaml, multi-gpu.yaml)
 ├── reports/           written studies, each backed by a run bundle
 ├── docs/              motivation, scope, design, metrics, results, architecture
@@ -145,9 +146,15 @@ Architecture in [`docs/architecture/`](docs/architecture/), following the [C4 mo
 
 ```bash
 pip install -e .                 # the decision path: click, httpx, pyyaml, rich
+pip install -e policies          # + the research policies (see policies/README.md)
 pip install -e '.[modal]'        # + provisioning on Modal
 pip install -e '.[dev]'          # + pytest, ruff, mypy
 ```
+
+The policies are a **separate package on purpose**. Dropping admission control
+in front of a fleet should not install four research ports and the assumptions
+baked into them — and it means the plugin mechanism is proven by real code
+rather than only by a test fixture.
 
 The runtime dependency list is deliberately short. Putting admission control in front of a fleet should not drag in a plotting stack.
 
@@ -177,6 +184,7 @@ See `.env.example`.
 | See the C4 architecture | [`docs/architecture/`](docs/architecture/) |
 | Read the data-flow + reproducibility contract | [`docs/design.md`](docs/design.md) |
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
+| See what each policy does, without reading code | [`policies/README.md`](policies/README.md) |
 | Read the candidate policy list + fidelity rules | [`docs/policies.md`](docs/policies.md) |
 | See the first real-hardware results | [`docs/results.md`](docs/results.md) |
 | Read the written studies | [`reports/`](reports/) |

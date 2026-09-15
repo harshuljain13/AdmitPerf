@@ -109,3 +109,15 @@ def _state(kv: float = 0.2) -> SystemState:
 
 def _request() -> Request:
     return Request(request_id="r1", tenant_id="t1", arrival_time=0.0, input_tokens=100)
+
+
+def test_an_unknown_setting_names_the_policy_and_its_parameters() -> None:
+    """Configs outlive the policies they configure. A bare TypeError from a
+    constructor names neither, and the usual cause is a config written against
+    an older version."""
+    with pytest.raises(TypeError) as exc:
+        get_policy("kv_threshold", not_a_real_setting=1)
+
+    message = str(exc.value)
+    assert "kv_threshold" in message
+    assert "threshold" in message  # the parameter it does accept

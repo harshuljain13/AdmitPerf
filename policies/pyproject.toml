@@ -1,0 +1,26 @@
+[project]
+name = "admitperf-zoo"
+version = "0.0.1"
+description = "Research admission-control policies for AdmitPerf"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+# Depends on the adapter API only. Deliberately nothing else: a policy that
+# needed the benchmark harness to make a decision would not be deployable.
+dependencies = ["admitperf"]
+
+# How AdmitPerf finds these. No edit to the library is required — this is the
+# same mechanism any third party uses, which is the point of shipping the zoo
+# separately rather than bundling it.
+[project.entry-points."admitperf.policies"]
+kv_threshold = "admitperf_zoo.kv_threshold:KVThreshold"
+queue_depth = "admitperf_zoo.queue_depth:QueueDepth"
+queue_depth_defer = "admitperf_zoo.queue_depth:QueueDepthDefer"
+chronos_inspired = "admitperf_zoo.chronos:ChronosInspiredWCRT"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["admitperf_zoo"]

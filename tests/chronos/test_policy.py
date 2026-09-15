@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from admitperf_zoo.chronos.estimator import ArrivalRateWindow
 
 from admitperf.core.api import DecisionKind, Request, SystemState
 from admitperf.core.registry import get_policy, requirements_of
-from admitperf.policies.chronos.estimator import ArrivalRateWindow
 
 CALIBRATED = {
     "vllm:request_prefill_time_seconds_sum": 1.0,
@@ -33,7 +33,9 @@ def _state(*, running: int = 2, waiting: int = 0, metrics: dict | None = None) -
     )
 
 
-def _req(*, ttft: float | None = 2000.0, tbt: float | None = 200.0, at: float = 0.0, tokens: int = 512):
+def _req(
+    *, ttft: float | None = 2000.0, tbt: float | None = 200.0, at: float = 0.0, tokens: int = 512
+):
     return Request(
         request_id=f"r{at}",
         tenant_id="t1",
@@ -102,7 +104,7 @@ def test_rejects_once_utilization_makes_the_deadline_infeasible() -> None:
 
 
 def test_admits_while_uncalibrated_and_counts_it_separately() -> None:
-    """"Admitted everything while blind" and "found everything feasible" must
+    """ "Admitted everything while blind" and "found everything feasible" must
     be distinguishable afterwards, or a run cannot be interpreted."""
     policy = _policy()
     assert policy.decide(_req(), _state(metrics={})).kind is DecisionKind.ADMIT

@@ -1,12 +1,11 @@
-"""Built-in admission-control policies.
+"""Built-in policies.
+
+The library ships one: a null baseline, so the harness is runnable and
+testable on its own. Everything else lives in the zoo (`policies/`), installed
+separately and discovered through the `admitperf.policies` entry-point group.
 
 The frozen adapter API lives in ``admitperf.core.api`` and the registry in
-``admitperf.core.registry``; both are re-exported here so that pre-split
-imports keep working.
-
-To add a policy *inside* this package, import it below and call ``register``.
-To add one from your **own** package, use the ``admitperf.policies`` entry-point
-group — no edit to this file is needed (spec D3). See CONTRIBUTING.md.
+``admitperf.core.registry``; both are re-exported here for pre-split imports.
 """
 
 from __future__ import annotations
@@ -19,36 +18,19 @@ from admitperf.core.api import (
     SystemState,
 )
 from admitperf.core.registry import available, get_policy, register
-from admitperf.policies.chronos import ChronosInspiredWCRT
-from admitperf.policies.kv_threshold import KVThreshold
 from admitperf.policies.no_admission import NoAdmission
-from admitperf.policies.queue_depth import QueueDepth, QueueDepthDefer
 
 register(NoAdmission.name, NoAdmission)
-register(KVThreshold.name, KVThreshold)
-register(ChronosInspiredWCRT.name, ChronosInspiredWCRT)
-register(QueueDepth.name, QueueDepth)
-register(QueueDepthDefer.name, QueueDepthDefer)
 
-#: Built-in policies. Retained for backward compatibility; prefer
-#: ``admitperf.core.registry.available()``, which also includes plugins.
-POLICIES: dict[str, type[AdmissionPolicy]] = {
-    NoAdmission.name: NoAdmission,
-    KVThreshold.name: KVThreshold,
-    ChronosInspiredWCRT.name: ChronosInspiredWCRT,
-    QueueDepth.name: QueueDepth,
-    QueueDepthDefer.name: QueueDepthDefer,
-}
+#: Built-ins only. Prefer ``admitperf.core.registry.available()``, which also
+#: includes anything installed as a plugin.
+POLICIES: dict[str, type[AdmissionPolicy]] = {NoAdmission.name: NoAdmission}
 
 __all__ = [
     "POLICIES",
     "AdmissionPolicy",
     "Decision",
     "DecisionKind",
-    "ChronosInspiredWCRT",
-    "KVThreshold",
-    "QueueDepth",
-    "QueueDepthDefer",
     "NoAdmission",
     "Request",
     "SystemState",
