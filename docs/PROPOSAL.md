@@ -1,6 +1,6 @@
 # AdmitPerf — Project plan
 
-*Proposal v0.4 — 2026-09-14*
+*Proposal v0.5 — 2026-09-14*
 *Authors: Harshul Jain, Dr. Tanmay Sah, Tanya Sah, Parv Khatri (all independent researchers)*
 *Companion to: `../../survey/paper.tex` (systematic review, arXiv preprint pending)*
 
@@ -30,8 +30,9 @@ It does not restate anything that another document owns:
   accounting as first-class citizens. Defined in [`metrics.md`](metrics.md).
 - **G4** — Reference implementations for the policy roster in [`policies.md`](policies.md),
   every one of them Class A per [`scope.md`](scope.md).
-- **G5** — One-command reproduction: `admitperf run <config.yaml>` produces a signed results
-  bundle (traces, metrics, environment manifest, policy hash).
+- **G5** — Reproduction from one file: `admitperf bench run -c <config.yaml>` produces a
+  results bundle recording the resolved config, so a number can be traced to the engine
+  settings that produced it.
 
 ## 2. Workload suite
 
@@ -54,8 +55,8 @@ Rendered as [`architecture/05-plan.png`](architecture/05-plan.png).
 | Week | Milestone |
 |---|---|
 | 1 | ✅ vLLM adapter, runner, W1 loader, results bundle, Modal provisioning, CLI |
-| 2 | First run on real hardware; Chronos-inspired threshold WCRT |
-| 3 | SGLang adapter, W2 tenant-fairness workload |
+| 2 | ✅ First run on real hardware; queue-depth policies; config + CLI split |
+| 3 | Chronos-inspired threshold WCRT; report artifact |
 | 4 | QLM-inspired KV admission + metric formalization |
 | 5 | W3 agent-session workload, token-budget + CONCUR-inspired agent-level admission |
 | 6 | Full sweep (size set by the open question in §7) |
@@ -114,5 +115,10 @@ Unresolved. Each one changes the build, so none should be answered by accident.
    review argues hard against "benchmark."
 5. Whether to bundle a captured production trace (licensing) or ship synthetic-only.
 6. Whether the leaderboard lives in the repo or on a hosted page.
-7. How many repeats per configuration, and how to report variance. A live engine gives a
-   different number every run, and a single sample per policy is not a comparison.
+7. ~~How many repeats per configuration.~~ **Partly resolved**: repeats are first-class and
+   `bench compare` reports the observed range. Still open is how many are enough — two
+   showed the baseline's spread at ±725ms against ±136ms for a shedding policy, so the
+   answer is workload-dependent rather than a constant.
+8. Which regime to test next. The first run was concurrency-bound, where KV pressure is a
+   flat line; the KV-bound regime needs a larger model with long contexts, and until that
+   runs there is no evidence about which signal is generally better.

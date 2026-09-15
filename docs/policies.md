@@ -14,7 +14,10 @@ never under the paper's system name.
 
 | Planned policy | Source | Class | Signal | Unit | SLO-aware | Fair | Agent-aware |
 |---|---|---|---|---|---|---|---|
-| `NoAdmission` (P0 baseline) | — | A | none (FCFS + KV full) | request | ✗ | ✗ | ✗ |
+| `NoAdmission` (P0 baseline) | — | A | none | request | ✗ | ✗ | ✗ |
+| `QueueDepth` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
+| `QueueDepthDefer` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
+| `KVThreshold` ✅ built | derived | A | `kv_cache_usage_perc` | request | ✗ | ✗ | ✗ |
 | `ChronosThresholdWCRT` | Chronos, Frontiers Comp Sci 1873627 | A | TTFT/TBT deadline bound | request | ✓ | ✗ | ✗ |
 | `QLMInspired` | QLM, SoCC 2024 | A | KV pressure + virtual-queue LP | request | ✓ | ✗ | ✗ |
 | `FluidWaitThreshold` | Fluid-WAIT, arXiv:2504.11320 | A | queue + KV scalar threshold | request | partial | ✗ | ✗ |
@@ -42,6 +45,26 @@ Excluded because porting them means maintaining a vLLM fork. See
 - **ProServe** (arXiv:2512.12928) — very recent, fidelity risk.
 - **SOLA** (MLSys 2025) — may overlap Chronos; revisit if a scheduled port fails fidelity.
 - **Flow-controlled scheduling** (arXiv:2604.11001) — theory; evaluate if a scheduled port fails fidelity.
+
+## Choosing a signal
+
+Measured on real hardware (see [`results.md`](results.md)): on Qwen2.5-0.5B
+capped at four concurrent sequences, `kv_cache_usage_perc` never exceeded 0.005
+while the queue reached 24 deep. The KV cache dwarfed what four short sequences
+could fill, so the binding constraint was the concurrency cap.
+
+A policy reading the wrong signal for its regime does not fail loudly. It sees a
+flat line and degrades into admit-everything, scoring identically to the
+baseline while appearing to work. Roughly:
+
+| Regime | Binding constraint | Signal that moves |
+|---|---|---|
+| Small model, short contexts, low `max_num_seqs` | concurrency cap | `waiting_requests` |
+| Large model, long contexts, large batches | KV memory | `kv_used_fraction` |
+| Deadline-heterogeneous traffic | SLO slack | request deadlines |
+
+This is why `requires` exists: a policy declares its signal, and the harness
+refuses to start against an engine that cannot provide it.
 
 ## Fidelity contract
 

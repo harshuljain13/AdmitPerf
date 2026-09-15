@@ -28,8 +28,12 @@ class PolicyStats:
     goodput: list[float] = field(default_factory=list)
     rejects: dict[str, int] = field(default_factory=dict)
 
+    unhealthy: int = 0
+
     def add(self, summary: dict[str, Any]) -> None:
         self.runs += 1
+        if summary.get("signal_was_healthy") is False:
+            self.unhealthy += 1
         self.offered.append(float(summary.get("offered") or 0))
         self.admitted.append(float(summary.get("admitted") or 0))
         if (p95 := (summary.get("ttft_ms") or {}).get("p95")) is not None:
@@ -102,6 +106,14 @@ def compare_dir(root: Path) -> str | None:
 
     lines.append("")
     lines.append("medians across repeats; ± is half the observed range, not a CI.")
+
+    degraded = [s.label for s in stats.values() if s.unhealthy]
+    if degraded:
+        lines.append(
+            f"WARNING: {', '.join(sorted(degraded))} had runs where most scrapes "
+            "failed. The policy saw stale state and those numbers do not "
+            "describe it."
+        )
 
     single = [s.label for s in stats.values() if s.runs == 1]
     if single:

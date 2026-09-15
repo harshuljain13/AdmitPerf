@@ -26,7 +26,9 @@ class YourPolicy(AdmissionPolicy):
 - Do not mutate `req` or `state`. Both are frozen dataclasses.
 
 Declare which signals it needs, so a mismatch fails at startup instead of silently
-reading a missing value as zero:
+reading a missing value as zero. This is not theoretical: a KV-threshold policy on a
+small model reads `kv_used_fraction` near 0.0 forever and quietly becomes an
+admit-everything baseline. See [`docs/policies.md`](docs/policies.md#choosing-a-signal).
 
 ```python
 class YourPolicy(AdmissionPolicy):
@@ -74,7 +76,9 @@ Against the fake engine, no GPU needed:
 
 ```bash
 python scripts/fake_vllm.py --port 8077 &
-admitperf run --policy your_policy --engine-url http://127.0.0.1:8077 -n 40 --rate 20
+admitperf bench run --engine-url http://127.0.0.1:8077 \
+    --policy your_policy --policy no_admission -n 40 --rate 20 --repeats 2
+admitperf bench compare results/
 ```
 
 ## 4. Coding conventions

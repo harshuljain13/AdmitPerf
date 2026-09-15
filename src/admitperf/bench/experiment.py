@@ -97,6 +97,16 @@ async def run_experiment(
                 f"TTFT p95 {_ms(summary['ttft_ms']['p95'])}  "
                 f"goodput {summary['goodput_under_admission']}"
             )
+            if not summary["signal_was_healthy"]:
+                # Worth interrupting for. The run completes and the numbers
+                # look ordinary, but the policy never saw the fleet, so it
+                # cannot have done anything.
+                print(
+                    f"    WARNING: {result.scrape_failures} of "
+                    f"{result.scrapes + result.scrape_failures} scrapes failed "
+                    f"({summary['scrape_error']}). The policy was deciding on "
+                    "stale state; this run does not measure it."
+                )
 
             run_dir = root / f"{_slug(spec.label)}-r{repeat + 1}"
             write_bundle(

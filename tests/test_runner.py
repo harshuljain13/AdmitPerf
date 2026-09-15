@@ -212,3 +212,35 @@ async def test_decision_kinds_are_recorded_verbatim() -> None:
 
     result = await _runner(NoAdmission(), FakeEngine()).run()
     assert {d.kind for d in result.decisions} == {DecisionKind.ADMIT.value}
+
+
+async def test_signal_health_reflects_scrape_success() -> None:
+    from admitperf.core.runner import RunResult
+
+    healthy = RunResult(scrapes=10, scrape_failures=1)
+    degraded = RunResult(scrapes=1, scrape_failures=10)
+    never = RunResult()
+
+    assert healthy.signal_was_healthy is True
+    assert degraded.signal_was_healthy is False
+    assert never.signal_was_healthy is False
+
+
+async def test_scrape_error_is_remembered_for_the_report() -> None:
+    """Counting failures is not enough — a run that measured nothing has to be
+    able to say why."""
+    from admitperf.policies import NoAdmission
+
+    engine = FakeEngine()
+    runner = _runner(NoAdmission(), engine)
+
+    async def break_it() -> None:
+        await asyncio.sleep(0.02)
+        engine.fail_scrape = True
+
+    asyncio.create_task(break_it())
+    result = await runner.run()
+
+    if result.scrape_failures:
+        assert result.scrape_error is not None
+        assert "ConnectionError" in result.scrape_error
