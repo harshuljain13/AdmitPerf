@@ -1,380 +1,402 @@
-# Running Chronos on a Real Engine: A Reproduction Study
+# Running Chronos on a Real GPU
 
 **Harshul Jain, Tanmay Sah, Tanya Sah, Parv Khatri**
 AdmitPerf technical report · 2026-09-15
 
 ---
 
-## Abstract
+## Summary
 
-Chronos (Marref, Tarmissi & Chaibi, *Frontiers in Computer Science* 8, 2026)
-applies classical real-time response-time theory to LLM inference, deriving a
-closed-form worst-case response time bound and a per-request admission test
-with formal TTFT and TBT guarantees. Its evaluation runs entirely in a
-purpose-built discrete-event simulator with roofline-derived kernel parameters;
-the authors flag validation against a real serving engine as future work. We
-port Algorithm 1 to vLLM, fit its kernel parameters from live engine telemetry
-rather than a roofline model, and compare it against an uncontrolled baseline
-and a queue-depth threshold policy on an NVIDIA A10G.
+Chronos is a 2026 paper that borrows a forty-year-old idea from real-time
+systems — *before you accept a job, check whether you can actually finish it on
+time* — and applies it to LLM serving. It comes with proofs and a simulator.
+What it does not come with is any test on a real serving engine; the authors
+say so themselves and list it as future work.
 
-Three findings. First, the algorithm ports cleanly: the theorems are
-implementable in roughly 200 lines against an engine's Prometheus endpoint.
-Second, on our hardware it is **drastically more conservative than the paper
-reports** — 23.3% admission against the paper's 53.9–88.9%, driven by an
-arrival-rate estimate that saturates the utilization test. Third, and most
-consequential for the project: at this operating point **no policy achieved
-acceptable deadline attainment**, so the comparison establishes a working
-reproduction pipeline rather than a verdict on Chronos.
+We implemented their admission test, pointed it at a real vLLM server on a
+rented GPU, and compared it against doing nothing.
+
+Three things came out of it:
+
+1. **The algorithm ports cleanly.** About 200 lines. No conceptual obstacles.
+2. **It was far more cautious than the paper reports** — it accepted 23% of
+   traffic where the paper accepts 54–89%. We traced why, and it is a problem
+   with how we feed it numbers, not with the algorithm.
+3. **At the load we tested, nothing performed well.** So this is a working
+   pipeline for reproducing the paper, not a verdict on whether Chronos is good.
 
 ---
 
-## 1. Background: what Chronos is
+## 1. What Chronos actually does
 
-### 1.1 The idea
+### 1.1 The core idea
 
-Real-time systems have admitted tasks by feasibility test for forty years: a
-task is accepted only if its worst-case response time provably fits inside its
-deadline. Chronos is, to the survey's knowledge, the first work to carry that
-machinery onto the prefill/decode split of LLM inference. Where most admission
-work tracks SLOs empirically — observe latency, back off when it degrades —
-Chronos offers a *guarantee*, conditional on its model holding.
+Most admission control watches the system and reacts: latency is climbing, so
+start refusing requests. Chronos does something different. For each arriving
+request it asks a question that can be answered *before* accepting:
 
-### 1.2 The formalization
+> Given everything already in flight and how fast traffic is arriving, is there
+> any way this request finishes in time?
 
-Each request becomes a **sporadic job**. Prefill is released at arrival with an
-absolute TTFT deadline; on completion it spawns a **decode task** modelled as a
-recurrent task under continuous batching, whose every iteration must land
-inside the TBT budget.
+If the answer is no, it refuses immediately. Not because the server looks busy,
+but because the request is provably doomed — and letting it in would also slow
+down everything queued behind it.
 
-Prefill worst-case execution time is linear in chunks:
+This is how air-traffic control and engine-control software have worked for
+decades. Chronos is the first work we know of to bring it to LLM serving.
 
-```
-p_i    = ceil(l_i / B)                 prefill chunks for input length l_i
-C_pre  = p_i · (α·B + γ)               worst-case execution time
-```
+### 1.2 How it models a request
 
-with `α` the per-token prefill cost, `B` the chunk size, and `γ` a fixed
-per-iteration overhead.
+An LLM request has two phases with very different behaviour, so Chronos treats
+them separately:
 
-### 1.3 Theorem 1 — the WCRT bound
+- **Prefill** — reading the prompt. Happens once. Cost grows with prompt length.
+- **Decode** — generating the answer, one token at a time. Every token must
+  arrive promptly or the response looks choppy.
 
-Derived through a four-step busy-period argument: identify the longest
-continuously-non-empty prefill busy period; upper-bound interfering work from
-arrivals inside that window via worst-case chunk count; apply a work-balance
-inequality on GPU work as backlog plus initiating chunk; sum interference and
-own service. The result:
+Prefill maps to a deadline: *first token within X milliseconds*. Decode maps to
+a rhythm: *no gap between tokens longer than Y milliseconds*. Chronos gives a
+rule for each.
 
-```
-WCRT  ≤  ρ_P · D_TTFT / (1 − ρ_P)  +  C_pre        valid iff ρ_P < 1
-```
+### 1.3 The waiting-time rule
 
-where `ρ_P = λ · E[C_pre]` is prefill utilization. The bound diverges as
-utilization approaches unity — the formal statement of what saturation does.
-
-**A property worth stating explicitly**, because it shapes everything
-downstream and is easy to miss: `D_TTFT` appears *inside* the bound as well as
-being the quantity compared against. Halving the deadline roughly halves the
-predicted WCRT. Since `ρ·D/(1−ρ) ≤ D` requires `ρ ≤ 0.5`, the test refuses
-essentially everything above half utilization **regardless of how generous the
-deadline is**. Feasibility is governed by utilization and the request's own
-prefill cost, not by the deadline in the way a naive reading suggests. This is
-consistent with the paper's own reported admission rates, which fall to 53.9%
-at 10× nominal load.
-
-### 1.4 Theorem 3 — decode capacity
-
-From the per-iteration budget `β·n_D + γ ≤ s`:
+The paper's central result estimates the worst case wait as:
 
 ```
-n*_D  ≤  (s − γ) / β
+worst-case wait  =  (load / (1 - load)) × deadline  +  own prefill time
 ```
 
-At the paper's parameters (β = 0.250 ms/token, γ = 7.0 ms) and `s` = 200 ms
-this yields **772**. The paper reports approximately **731**. We record the
-discrepancy rather than tune it away: the published figure evidently carries a
-term our reading of the stated formula does not reproduce. Resolving it needs
-the paper's full derivation. It does not affect our results, because decode
-capacity was never the binding check in our runs (§5.3).
+Read "load" as **what fraction of the GPU's prompt-reading capacity the
+incoming traffic is asking for**. At 50% load the server is doing half the
+prompt-reading work it is capable of.
 
-### 1.5 Algorithm 1 — the admission test
+The shape of that fraction is the whole story:
+
+| Load | `load / (1 − load)` | Meaning |
+|---|---|---|
+| 25% | 0.33 | comfortable |
+| 50% | 1.0 | at the edge |
+| 75% | 3.0 | wait is triple the deadline |
+| 90% | 9.0 | hopeless |
+| 100% | ∞ | no promise possible |
+
+This is a formal version of something every engineer has felt: a queue does not
+degrade gently as it fills, it degrades *suddenly* near capacity.
+
+**A consequence that surprised us.** The deadline appears on both sides — it is
+inside the formula as well as being the thing you compare against. So asking
+for a tighter deadline also shrinks the predicted wait, and the two largely
+cancel. What actually decides the answer is the **load**, and the fraction only
+stays under 1 while load is under 50%.
+
+In other words: Chronos refuses almost everything once the server passes half
+its prompt-reading capacity, no matter how generous the deadline. That is not a
+quirk of our implementation — it explains the paper's own numbers, where
+acceptance falls to 54% when load is pushed to ten times nominal.
+
+### 1.4 The streaming-capacity rule
+
+A second rule limits how many responses can stream at once. Each generation
+step has a fixed overhead plus a per-response cost, so there is a hard ceiling
+past which token gaps exceed the promised rhythm.
+
+At the paper's numbers and a 200ms gap budget, our reading gives **772**
+concurrent responses. The paper says about **731**. We record the difference
+rather than fudge our numbers to match — their figure evidently includes a term
+our reading of the published formula misses. It did not affect anything here,
+because this rule never triggered in our tests.
+
+### 1.5 The test itself
 
 Three checks on every arrival, in order:
 
-| # | Check | Rejects when |
+| Check | Refuses when | Plain meaning |
 |---|---|---|
-| (a) | Utilization | `ρ_P ≥ 1` — system formally overloaded, no bound holds |
-| (b) | TTFT feasibility | Theorem 1 bound exceeds this request's `D_TTFT` |
-| (c) | TBT capacity | admitting one more decode task breaches Theorem 3 |
+| 1. Load | load is at or above 100% | server is oversubscribed, no promise is possible to anyone |
+| 2. Wait | predicted wait exceeds this request's deadline | *this* request cannot make it |
+| 3. Streaming | one more response breaks the token rhythm | too many streams already |
 
-Arrival rate `λ` comes from a 60-second sliding window, using the **peak**
-sub-window rate rather than the mean — averaging a burst over a minute would
-hide precisely the overload the test exists to catch.
+Arrival rate is measured over a rolling 60-second window, using the **busiest
+second** rather than the average — averaging a burst across a minute would hide
+exactly the overload the test exists to catch.
 
-### 1.6 Published results
+### 1.6 What the paper reports
 
-Azure LLM inference traces (May 2024), 50,000 sub-sampled requests, seed 42, a
-7B dense model on an A100-80GB, `D_TTFT` = 2,000 ms, TBT = 200 ms:
+Replayed Azure production traces, 50,000 requests, a 7B model on an A100:
 
-| Load | Policy | TTFT miss | Admitted | P99 TTFT |
-|---|---|---|---|---|
-| 5× | **Chronos** | 0.00% | 88.9% | 161 ms |
-| 5× | FCFS / EDF | 0.00% | 100% | 400 ms |
-| 5× | AC-FCFS (rate-matched) | 6.80% | 88.9% | 4,127 ms |
-| 10× | **Chronos** | 0.00% | 53.9% | 111 ms |
-| 10× | FCFS / EDF | **99.44%** | 100% | — |
-| 10× | SLAI | 22.55% | 100% | — |
+| Load | Approach | Missed deadlines | Accepted |
+|---|---|---|---|
+| 5× normal | **Chronos** | 0.00% | 88.9% |
+| 5× normal | No admission control | 0.00% | 100% |
+| 5× normal | Rate limiter, same volume | 6.80% | 88.9% |
+| 10× normal | **Chronos** | 0.00% | 53.9% |
+| 10× normal | No admission control | **99.44%** | 100% |
 
-The AC-FCFS row is the paper's sharpest result: a token-bucket rate limiter
-*matched to Chronos's own admission volume* still misses 6.8% of deadlines
-where Chronos misses none. Admitting the right requests matters, not merely
-admitting fewer.
+The third row is their sharpest point. A plain rate limiter, tuned to accept
+*exactly as many requests as Chronos*, still misses 6.8% of deadlines where
+Chronos misses none. **Which requests you accept matters, not just how many.**
 
 ---
 
-## 2. Reproducibility assessment
+## 2. Can it be reproduced?
 
-### 2.1 Artifact status
+### 2.1 What they released
 
-Code is available at `github.com/am-research/rtss-ttft-tbt` — a CPU-only
-discrete-event simulator implementing all four schedulers, with fixed seed,
-scripts for parameter fitting and trace characterisation, and roughly two
-minutes of laptop runtime. By the standards of this literature that is
-excellent: of 14 admission-primary papers in the companion survey, it is one of
-two with a runnable artifact.
+A simulator, at `github.com/am-research/rtss-ttft-tbt`. Runs on a laptop in two
+minutes, no GPU, fixed random seed, includes all the comparison approaches. By
+the standards of this field that is unusually good — of 14 papers on admission
+control in our survey, only two ship anything runnable.
 
-> **Correction to our own records.** `docs/prior-art/feasibility_audit.md`
-> lists Chronos as "**No code** (theory paper)". That is wrong;
-> `survey/notes/chronos.md` records the repository. The audit predates the
-> deep-read and was never reconciled. Flagged here, and to be fixed at source.
+> **A correction to our own notes.** Our `feasibility_audit.md` says Chronos has
+> "no code (theory paper)." That is wrong — the simulator exists, and our own
+> reading notes record it. The audit was written before anyone read the paper
+> properly and never got updated. Now fixed.
 
-### 2.2 The gap the artifact leaves
+### 2.2 The gap they left
 
-Everything is validated in simulation. The kernel parameters α, β, γ are
-roofline-derived from A100 specifications, not measured. The README states that
-real vLLM measurements *could* replace them but the artifact does not do so.
+Everything is simulated. The speed numbers for the GPU are calculated from
+hardware specifications on paper, not measured from a running server. Their own
+limitations section says real measurements could replace them but the released
+code does not do that.
 
-So the paper's guarantee is sound **with respect to its model**, and the model's
-correspondence to a real engine is untested. That gap is what this study
-addresses: not whether the theorems are right — they are theorems — but whether
-the admission test behaves usefully when its inputs come from a real engine
-instead of a roofline.
+So the proofs are sound *about their model*. Whether the model matches a real
+server is untested. **That gap is what this study is about** — not whether the
+theorems are correct, they are theorems, but whether the test behaves usefully
+when its inputs come from a real GPU instead of a spreadsheet.
 
-### 2.3 What we ported, and what we could not
+### 2.3 What we could and could not carry over
 
-| Component | Status |
+| Piece | Status |
 |---|---|
-| Cost model `C_pre = p·(αB + γ)` | ported exactly |
-| Theorem 1 WCRT bound | ported exactly |
-| Theorem 3 decode capacity | ported; yields 772 vs published ~731 (§1.4) |
-| Algorithm 1, three checks in order | ported exactly |
-| 60s sliding-window λ estimator | ported, peak sub-window |
-| α, β from telemetry | **substituted** for roofline derivation |
-| γ | **not fitted** — paper's value retained |
-| Azure trace replay | **not used** — synthetic workload (§4) |
-| FCFS / EDF / SLAI / AC-FCFS baselines | only FCFS-equivalent (`no_admission`) |
+| How prefill cost is calculated | copied exactly |
+| The waiting-time rule | copied exactly |
+| The streaming-capacity rule | copied; ours says 772, paper says ~731 |
+| The three checks, in order | copied exactly |
+| 60-second arrival window | copied |
+| GPU speed numbers | **changed** — measured from the live server instead of calculated |
+| Fixed per-step overhead | **not measured** — kept the paper's A100 figure |
+| Azure production traces | **not used** — we generated traffic instead |
+| Their three other comparison approaches | **not implemented** — only the do-nothing baseline |
 
-Two substitutions are load-bearing and prevent us from claiming a faithful
-reproduction:
+Two of those matter enough to say plainly:
 
-**γ is not fitted.** Separating a fixed per-iteration overhead from the
-per-token slope requires measurements at two or more batch sizes. vLLM's
-aggregate counters report totals, not a curve, so the decomposition is
-unidentifiable from a single window. We retain the paper's A100 value on
-hardware that is not an A100.
+**We could not measure the fixed overhead.** Every generation step has a fixed
+cost plus a per-token cost. Telling them apart requires measuring at several
+different batch sizes; the server only reports totals. So we kept the paper's
+number — measured on an A100 running a 7B model — while running an A10G with a
+0.5B model. It is almost certainly wrong for our hardware.
 
-**ρ_P is estimated, not known.** The paper computes utilization from an arrival
-process it controls. We infer λ from observed arrivals and `E[C_pre]` from a
-fitted cost model, so ρ_P carries the error of both, and Theorem 1 inherits it.
+**We estimate load rather than knowing it.** The paper controls its own traffic,
+so it knows the arrival rate exactly. We infer it by watching arrivals and
+estimating prefill cost, so our load figure carries the error of both.
 
-Per the project's fidelity rule the implementation is therefore named
-`ChronosInspiredWCRT`, never `Chronos`.
-
----
-
-## 3. Experimental setup
-
-| | |
-|---|---|
-| Engine | vLLM 0.29, `Qwen/Qwen2.5-0.5B-Instruct` |
-| Hardware | 1× NVIDIA A10G (Modal), fp16 |
-| Engine config | `max_num_seqs=4`, `max_model_len=2048`, `gpu_memory_utilization=0.55` |
-| Scheduling | FCFS, prefix caching **disabled** |
-| Workload | 150 requests, Poisson arrivals at 20/s, seed 0 |
-| Repeats | 3 per policy, fresh seed each |
-| Config | [`../experiments/chronos.yaml`](../experiments/chronos.yaml) |
-| Bundles | `results/chronos/` |
-
-Prefix caching is disabled deliberately: with it enabled, repeated prompts skip
-prefill and KV pressure stops tracking offered load, which would corrupt both
-the utilization estimate and the comparison.
-
-`max_num_seqs=4` is the capacity limit that makes admission control matter.
-Without a binding constraint every policy scores identically because the fleet
-never saturates.
+Because of those two, we call our implementation *Chronos-inspired*, never
+Chronos. It runs their algorithm; it does not reproduce their guarantee.
 
 ---
 
-## 4. The workload
+## 3. What we compared, and why
 
-No public trace was replayed. We generated a synthetic multi-class workload,
-characterised here because its properties determine what the results can show.
+This is the part worth being explicit about, since it decides what the numbers
+can mean.
 
-**Arrival process.** Poisson, exponential inter-arrival gaps. Measured over the
-150-request instance: mean gap 0.047 s, standard deviation 0.052 s — consistent
-with an exponential distribution, where standard deviation equals the mean.
-Achieved rate 21.2/s over a 7.1 s span. Bursts are the point; a policy that
-only ever sees evenly-spaced traffic is never tested.
+Every approach below ran against **the same GPU, the same server, the same
+settings, and the same traffic**. We start the server once, then run each
+approach against it in turn. Nothing is re-provisioned in between, so the only
+thing that differs between rows is the accept/refuse decision. That is the
+reason provisioning and benchmarking are separate commands in this tool.
 
-**SLO classes.** Three, with deliberately disagreeing deadlines, because a
-single deadline makes every policy look alike — the interesting question is
-which request a policy sacrifices.
+| Approach | What it is | Why it is here |
+|---|---|---|
+| **Accept everything** | No admission control at all | The paper's own baseline. It is what vLLM does out of the box, and it is the thing any admission control has to beat. |
+| **Queue-depth limit** | Refuse when more than 4 requests are already waiting | A deliberately simple contrast: refuse based on *how busy the server looks*, ignoring what each request needs. It answers "how much of the benefit comes from just refusing traffic at all?" |
+| **Chronos-inspired** | The paper's test, parameters measured live | The thing under study. |
+| **Chronos-inspired, cautious** | Same, with a 2× safety margin | Our numbers are estimated rather than derived, so we wanted to see what extra caution buys. |
 
-| Class | Share | `D_TTFT` | `D_TBT` | Median input tokens |
+### Is this a fair comparison?
+
+**Fair on everything infrastructural.** Same GPU, same model, same capacity
+limit, same traffic, same seed, three repeats each. Nothing about the
+environment favours one approach.
+
+**Not fair on tuning, and this cuts against Chronos.** The queue-depth limit has
+one knob, and we picked a sensible value for this server. Chronos has several
+inputs, one of which — the fixed per-step overhead — we know is wrong for this
+hardware (§2.3). A wrong overhead inflates the estimated cost of every request,
+which inflates the estimated load, which makes the test refuse more. So Chronos
+is running with a handicap we can name but have not yet removed.
+
+**One comparison is missing, and it is the important one.** The paper's
+strongest claim is against a *rate limiter tuned to accept the same number of
+requests*. That isolates whether picking the right requests beats simply picking
+fewer. We have not built it. Until we do, we cannot test the paper's central
+argument — only observe that Chronos refuses a lot.
+
+---
+
+## 4. The traffic we generated
+
+We did not replay a production trace. We generated traffic, and its shape
+determines what the results can show, so here it is.
+
+**Timing.** Requests arrive randomly, the way real traffic does — clustered
+into bursts rather than evenly spaced. Over the 150-request run: average gap
+47ms, and the variation in gaps is about the same size as the average, which is
+the signature of genuinely random arrivals. Achieved rate 21 per second over
+about 7 seconds. Bursts are the point; an approach that only ever sees smooth
+traffic is never really tested.
+
+**Three kinds of request**, with deliberately different promises, because if
+every request wants the same thing then every approach looks identical. The
+interesting question is *which* request an approach sacrifices.
+
+| Kind | Share | First token within | Gap between tokens | Typical prompt |
 |---|---|---|---|---|
-| interactive | 54.0% | 500 ms | 50 ms | 304 |
-| streaming | 26.0% | 2,000 ms | 100 ms | 1,352 |
-| batch | 20.0% | 30,000 ms | — | 2,395 |
+| Interactive | 54% | 500ms | 50ms | 304 tokens |
+| Streaming | 26% | 2,000ms | 100ms | 1,352 tokens |
+| Batch | 20% | 30,000ms | — | 2,395 tokens |
 
-**Scale.** Input tokens 79 / 431 / 4,042 (min / median / max); output tokens
-34 / 244 / 2,041. Three tenants, roughly balanced (47 / 55 / 48).
+**Size range.** Prompts from 79 to 4,042 tokens (median 431); answers from 34 to
+2,041 tokens (median 244). Three tenants, roughly evenly split.
 
-**Reproducibility.** Fully determined by seed. The generator uses a private
-`random.Random` instance rather than the module-level one, so a policy or
-engine calling `random()` cannot shift the workload and make two runs
-incomparable.
+**Repeatable.** Fully determined by the seed. The generator uses its own private
+random number source, so a policy or server that happens to call `random()`
+cannot shift the traffic and make two runs incomparable.
 
-**Divergence from the paper.** The paper replays Azure traces with
-`D_TTFT` = 2,000 ms uniformly. Our interactive class demands 500 ms — four
-times tighter — on a workload whose median request already takes longer than
-that to serve at this concurrency. This matters for interpreting §5.
+**Where this differs from the paper, and it matters.** The paper gives every
+request 2,000ms for the first token. Our interactive class demands 500ms — four
+times tighter — on a smaller, slower setup. A good chunk of the gap in §5 may
+simply be that we set a harder exam.
 
 ---
 
 ## 5. Results
 
-### 5.1 Headline
+### 5.1 The numbers
 
-12 runs, 4 policies × 3 repeats. Medians across repeats; ± is half the observed
-range, not a confidence interval.
+12 runs: 4 approaches × 3 repeats. Middle value shown; ± is the spread we
+actually observed, not a statistical confidence interval.
 
-| Policy | Admit % | TTFT p95 | Goodput | TTFT miss (admitted) |
+| Approach | Accepted | Slow-request latency (95th pct) | Useful work | Missed deadlines |
 |---|---|---|---|---|
-| `no_admission` (FCFS) | 100.0% | 4750 ms ±853 | 0.113 | 84.4% |
-| `queue_depth[max_waiting=4]` | 66.0% | 1618 ms ±219 | **0.180** | 59.3% |
-| `chronos_inspired` | 23.3% | 1216 ms ±494 | 0.080 | 64.5% |
-| `chronos_inspired[safety=2.0]` | 5.3% | **515 ms ±162** | 0.027 | **36.8%** |
+| Accept everything | 100% | 4,750ms ±853 | 0.113 | 84.4% |
+| Queue-depth limit | 66% | 1,618ms ±219 | **0.180** | 59.3% |
+| Chronos-inspired | 23% | 1,216ms ±494 | 0.080 | 64.5% |
+| Chronos-inspired, cautious | 5% | **515ms ±162** | 0.027 | **36.8%** |
 
-Reject reasons:
+*"Slow-request latency" is the 95th percentile time to first token — only 1 in
+20 requests waited longer. "Useful work" counts requests that both completed
+and met their deadline, divided by everything offered, so an approach cannot
+score well by refusing nearly everything. "Missed deadlines" is among accepted
+requests only.*
+
+Why each approach refused:
 
 ```
-chronos_inspired               deadline_unmeetable=150, overloaded=204
-chronos_inspired[safety=2.0]   deadline_unmeetable=245, overloaded=183
-queue_depth[max_waiting=4]     queue_depth=156
+Chronos-inspired             150 × "can't meet the deadline",  204 × "server oversubscribed"
+Chronos-inspired, cautious   245 × "can't meet the deadline",  183 × "server oversubscribed"
+Queue-depth limit            156 × "too many already waiting"
 ```
 
-### 5.2 Reading it
+### 5.2 What it means
 
-**The ordering is monotone and sensible.** Tail latency falls strictly as
-admission tightens: 4750 → 1618 → 1216 → 515 ms. Deadline attainment among
-admitted requests improves in the same direction, 84.4% → 36.8% miss. The
-mechanism works: refusing traffic protects what is admitted.
+**The basic mechanism works.** Latency falls steadily as acceptance tightens:
+4,750 → 1,618 → 1,216 → 515ms. Deadline misses fall the same way, 84% → 37%.
+Refusing traffic does protect the traffic you keep. That is the thing admission
+control is supposed to do, and it did it.
 
-**But no configuration is good.** The best deadline attainment is 36.8% *missed*
-— at 5.3% admission. The paper reports 0.00% miss at 53.9% admission. We are
-not reproducing its result; we are reproducing its *shape*.
+**But nothing here is good.** The best result still misses 37% of deadlines, and
+only by accepting 5% of traffic. The paper reports missing *zero* while
+accepting 54%. We are reproducing the paper's *shape*, not its results.
 
-**Goodput peaks in the middle.** `queue_depth` wins on goodput (0.180) because
-goodput counts SLO-meeting completions against *all* offered load. Chronos
-sheds so aggressively that even a high per-request success rate cannot
-compensate. This is the metric working as intended — a policy cannot win by
-refusing everything — and it is the clearest evidence that our Chronos
-configuration is mistuned rather than merely strict.
+**The simple approach wins on useful work.** The queue-depth limit scores 0.180
+against Chronos's 0.080. Chronos refuses so much that even a better per-request
+success rate cannot make up for it. This is the metric behaving correctly — you
+cannot win by refusing everything — and it is the clearest sign our Chronos
+setup is mistuned rather than merely strict.
 
-**Over half of Chronos's rejections are `overloaded`, not `deadline_unmeetable`
-** (204 vs 150). That is check (a) firing: our estimated `ρ_P ≥ 1`. The
-admission test barely reaches Theorem 1 before the utilization gate refuses the
-request. Chronos in these runs is behaving closer to a rate limiter than to a
-feasibility test — which is precisely the AC-FCFS baseline the paper designed
-to argue against.
+**The most telling detail:** more of Chronos's refusals were *"server
+oversubscribed"* (204) than *"this request can't make it"* (150). Check 1 is
+firing before check 2 is even consulted. That means our implementation is
+mostly behaving like a **blunt rate limiter** — which is precisely the thing the
+paper designed its experiments to argue *against*.
 
-### 5.3 Why the utilization estimate saturates
+### 5.3 Why the load estimate maxes out
 
-`ρ_P = λ · E[C_pre]`. With λ ≈ 21/s measured at the peak sub-window and
-`C_pre` ≈ 48 ms for a single-chunk request, `ρ_P ≈ 1.0` at the operating point
-— the boundary. Two causes compound:
+Load is arrival rate multiplied by prefill cost. With arrivals measured at the
+busiest second (~21/s) and prefill cost estimated around 48ms, load lands right
+at 100% — the boundary where the test refuses everyone. Two causes compound:
 
-1. **Peak-window λ against a bursty arrival process.** Exponential gaps produce
-   sub-second bursts well above the nominal 20/s. Taking the peak is faithful
-   to the algorithm and correct for its purpose, but combined with a 1-second
-   bucket it reports the burst rate as the sustained rate.
-2. **`C_pre` is calibrated for an A100 serving 7B, applied to an A10G serving
-   0.5B.** α is fitted from telemetry; γ = 7.0 ms is not, and for a 0.5B model
-   at chunk size 512 the fixed term is a large fraction of `C_pre`.
+1. **Measuring the busiest second against bursty traffic.** Random arrivals
+   produce short bursts well above the average rate. Taking the peak is faithful
+   to the algorithm and right in principle, but with a one-second window it
+   reports a momentary burst as if it were sustained.
+2. **The prefill cost is calibrated for the wrong hardware.** We kept the
+   paper's fixed per-step overhead, measured on an A100 running a 7B model, and
+   applied it to an A10G running a 0.5B model. For a model this small that fixed
+   term is a large share of the total, so the estimate is likely well off.
 
-Check (c), decode capacity, never fired — consistent with §1.4's note that the
-772-vs-731 discrepancy does not affect these results.
+The streaming-capacity check never triggered, which is consistent with §1.4's
+note that the 772-vs-731 discrepancy did not affect anything.
 
-### 5.4 Threats to validity
+### 5.4 What could be wrong with all of this
 
-- **Single hardware configuration, single model, 150 requests, 3 repeats.**
-  Nothing here generalises.
-- **Our deadlines are tighter than the paper's** (500 ms interactive vs
-  2,000 ms uniform) on a slower effective operating point. This alone could
-  account for much of the gap in absolute miss rates.
-- **γ unfitted** (§2.3) directly inflates `C_pre` and therefore `ρ_P`, biasing
-  Chronos toward rejection. The comparison is unfair to Chronos in a way we can
-  name but have not yet corrected.
-- **Only one of four baselines.** EDF, SLAI and especially AC-FCFS are absent;
-  AC-FCFS is the paper's most informative comparison and its absence means we
-  cannot test its central claim.
-- **Goodput is compressed by our deadline distribution.** At this operating
-  point most requests miss the interactive deadline regardless of policy, which
-  narrows the differences between policies.
+- **One GPU, one model, 150 requests, three repeats.** Nothing generalises.
+- **Our deadlines are four times tighter than the paper's** on slower hardware.
+  That alone could explain much of the gap.
+- **The unmeasured overhead biases against Chronos** in a way we can name but
+  have not corrected.
+- **Three of the paper's four comparison approaches are missing**, including the
+  one that tests its main claim.
+- **The "useful work" score is squeezed** because at this load most requests
+  miss the interactive deadline no matter what, which compresses the differences
+  between approaches.
 
 ---
 
 ## 6. Conclusions
 
-**On the port.** Algorithm 1 transfers to a live engine without conceptual
-difficulty. The theorems are implementable in roughly 200 lines of pure
-arithmetic against a Prometheus endpoint, and the pipeline — provision, run
-four policies against one deployment, compare with spread — executes end to end
-for about $0.40 of GPU time.
+**On porting it.** The algorithm moves to a real server without difficulty —
+about 200 lines of arithmetic reading the server's own metrics. The whole
+pipeline, from renting a GPU to a comparison table, runs end to end for roughly
+40 cents.
 
-**On the reproduction.** We did not reproduce the paper's numbers and do not
-claim to. The dominant obstacle is not the algorithm but its *parameterisation*:
-`ρ_P` is the input the whole test pivots on, and estimating it from a real
-engine is a harder problem than the paper — which controls its own arrival
-process — needs to confront. That is a genuine finding about deploying formal
-admission control, and it is invisible in simulation.
+**On reproducing it.** We did not, and do not claim to. The obstacle is not the
+algorithm but *feeding it correct numbers*. Load is the single input everything
+pivots on, and estimating it from a live server turns out to be a harder problem
+than a paper that controls its own traffic ever has to face. That is a real
+finding about deploying this kind of admission control, and it is invisible in
+simulation.
 
-**On what this establishes.** A reproduction pipeline, not a verdict. Every
-number traces to a bundle; every bundle records the config that produced it.
+**What this establishes.** A working reproduction pipeline, not a verdict. Every
+number traces back to a saved run; every run records the exact settings that
+produced it.
 
-### Next steps, in order of expected value
+### What to do next, most valuable first
 
-1. **Fit γ** by measuring at several batch sizes. Until then `C_pre` is
-   systematically wrong and every Chronos result is biased toward rejection.
-2. **Implement AC-FCFS** — a token-bucket matched to Chronos's admission
-   volume. It is the paper's sharpest claim and the cheapest to test.
-3. **Run the paper's operating point**: uniform `D_TTFT` = 2,000 ms, TBT =
-   200 ms, so the comparison is against its actual configuration.
-4. **Replay Azure traces** instead of synthetic Poisson, removing the workload
-   as a confound.
-5. **Cross-validate against the published simulator** at identical parameters.
-   If our implementation and theirs disagree in simulation, the port is wrong;
-   if they agree, the gap is the substrate, which is the interesting answer.
+1. **Measure the fixed per-step overhead** by testing at several batch sizes.
+   Until then the cost estimate is wrong and every Chronos result is biased
+   toward refusing.
+2. **Build the rate limiter comparison** — same number of requests accepted, but
+   chosen blindly. It is the paper's sharpest claim and the cheapest to test.
+3. **Use the paper's settings**: 2,000ms for every request, so we are answering
+   the same exam.
+4. **Replay the Azure traces** instead of generated traffic, removing one more
+   difference.
+5. **Run our implementation against their simulator** at identical settings. If
+   they disagree there, our port is wrong. If they agree, the difference is the
+   real hardware — which is the interesting answer.
 
 ---
 
-## References
+## Sources
 
 Marref, A., Tarmissi, K., & Chaibi, H. (2026). Formal schedulability analysis
 for LLM inference: TTFT and TBT deadline guarantees via response-time theory.
-*Frontiers in Computer Science*, 8. DOI
-[10.3389/fcomp.2026.1873627](https://doi.org/10.3389/fcomp.2026.1873627).
-Artifact: `github.com/am-research/rtss-ttft-tbt`.
+*Frontiers in Computer Science*, 8.
+[doi.org/10.3389/fcomp.2026.1873627](https://doi.org/10.3389/fcomp.2026.1873627).
+Their code: `github.com/am-research/rtss-ttft-tbt`.
 
-Reading notes: `../../survey/notes/chronos.md`.
-Implementation: `../src/admitperf/policies/chronos/`.
-Bundles: `results/chronos/`.
+Our reading notes: `../../survey/notes/chronos.md`.
+Our implementation: `../src/admitperf/policies/chronos/`.
+Saved runs: `results/chronos/`.
