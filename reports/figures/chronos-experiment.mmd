@@ -1,0 +1,35 @@
+---
+title: "Experiment design - what is held fixed, what varies"
+---
+flowchart LR
+  subgraph FIXED["Held fixed for every run"]
+    direction TB
+    gpu["<b>One A10G</b><br/>started once, never re-provisioned"]
+    engine["<b>vLLM 0.29</b> - Qwen2.5-0.5B<br/>4 concurrent max, FCFS<br/>prefix caching off"]
+    traffic["<b>Same traffic</b><br/>150 requests, ~20/s, seed 0<br/>54% interactive / 26% streaming / 20% batch"]
+  end
+
+  subgraph VARIES["The only thing that varies"]
+    direction TB
+    p1["Accept everything<br/><i>the baseline to beat</i>"]
+    p2["Queue-depth limit<br/><i>refuse when 4+ are waiting</i>"]
+    p3["Chronos-inspired<br/><i>the paper's test</i>"]
+    p4["Chronos-inspired, cautious<br/><i>2x safety margin</i>"]
+  end
+
+  out[/"3 repeats each = 12 runs<br/>accepted % · latency · deadlines met"/]
+
+  FIXED --> VARIES --> out
+
+  note["Fair on infrastructure: identical server and traffic throughout.<br/>NOT fair on tuning: the queue-depth knob was set sensibly for this server,<br/>while Chronos runs with a per-step overhead measured on different hardware."]
+  out -.-> note
+
+  classDef fixed fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
+  classDef varies fill:#dbeafe,stroke:#1e40af,color:#1e3a8a,stroke-width:2px
+  classDef result fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
+  classDef caveat fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+
+  class gpu,engine,traffic fixed
+  class p1,p2,p3,p4 varies
+  class out result
+  class note caveat

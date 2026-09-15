@@ -1,12 +1,12 @@
 .PHONY: diagrams diagrams-check test lint
 
-MMD := $(wildcard docs/architecture/*.mmd)
+MMD := $(wildcard docs/architecture/*.mmd) $(wildcard reports/figures/*.mmd)
 PNG := $(MMD:.mmd=.png)
 
 ## Render every docs/architecture/*.mmd to a matching .png
 diagrams: $(PNG)
 
-docs/architecture/%.png: docs/architecture/%.mmd
+%.png: %.mmd
 	mmdc -i $< -o $@ -b white -s 3
 
 ## Fail if any .png is older than its .mmd source (use in CI)

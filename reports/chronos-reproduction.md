@@ -108,7 +108,13 @@ because this rule never triggered in our tests.
 
 ### 1.5 The test itself
 
-Three checks on every arrival, in order:
+Three checks on every arrival, in order. The first two questions are about the
+*server*; only the third is about the request in front of you:
+
+<p align="center">
+  <img src="figures/chronos-decision.png" alt="How Chronos decides, per request" width="70%"/>
+</p>
+
 
 | Check | Refuses when | Plain meaning |
 |---|---|---|
@@ -212,6 +218,10 @@ reason provisioning and benchmarking are separate commands in this tool.
 | **Queue-depth limit** | Refuse when more than 4 requests are already waiting | A deliberately simple contrast: refuse based on *how busy the server looks*, ignoring what each request needs. It answers "how much of the benefit comes from just refusing traffic at all?" |
 | **Chronos-inspired** | The paper's test, parameters measured live | The thing under study. |
 | **Chronos-inspired, cautious** | Same, with a 2× safety margin | Our numbers are estimated rather than derived, so we wanted to see what extra caution buys. |
+
+<p align="center">
+  <img src="figures/chronos-experiment.png" alt="Experiment design" width="100%"/>
+</p>
 
 ### Is this a fair comparison?
 
@@ -396,6 +406,8 @@ for LLM inference: TTFT and TBT deadline guarantees via response-time theory.
 *Frontiers in Computer Science*, 8.
 [doi.org/10.3389/fcomp.2026.1873627](https://doi.org/10.3389/fcomp.2026.1873627).
 Their code: `github.com/am-research/rtss-ttft-tbt`.
+
+Figures: `figures/*.mmd` are the source; `make diagrams` re-renders them.
 
 Our reading notes: `../../survey/notes/chronos.md`.
 Our implementation: `../src/admitperf/policies/chronos/`.

@@ -1,0 +1,43 @@
+---
+title: "How Chronos decides, per request"
+---
+flowchart TB
+  req(["Request arrives<br/><i>prompt length + what it was promised</i>"])
+
+  subgraph MEASURE["Measured in the background"]
+    direction LR
+    scrape["vLLM /metrics<br/>how fast prompts are read,<br/>how fast tokens come out"]
+    window["Arrival window<br/>busiest second in the last 60"]
+  end
+
+  load{"<b>Check 1 - Load</b><br/>Is the server already asking for<br/>100% of its prompt-reading capacity?"}
+  wait{"<b>Check 2 - Wait</b><br/>Worst-case wait =<br/>load/(1-load) x deadline + own prefill<br/>Does it fit THIS request's deadline?"}
+  stream{"<b>Check 3 - Streaming</b><br/>Would one more response<br/>break the token rhythm?"}
+
+  admit(["<b>Admit</b><br/>forward to vLLM"])
+  r1(["Refuse<br/><i>server oversubscribed</i>"])
+  r2(["Refuse<br/><i>cannot meet the deadline</i>"])
+  r3(["Refuse<br/><i>too many streams</i>"])
+
+  req --> load
+  scrape -. "prefill cost" .-> load
+  window -. "arrival rate" .-> load
+
+  load -- "yes, at capacity" --> r1
+  load -- "no, headroom left" --> wait
+  wait -- "wait is too long" --> r2
+  wait -- "fits" --> stream
+  stream -- "no room" --> r3
+  stream -- "room" --> admit
+
+  classDef entry fill:#fef3c7,stroke:#b45309,color:#7c2d12,stroke-width:2px
+  classDef check fill:#dbeafe,stroke:#1e40af,color:#1e3a8a,stroke-width:2px
+  classDef good fill:#ccfbf1,stroke:#0f766e,color:#134e4a,stroke-width:2px
+  classDef bad fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d,stroke-width:2px
+  classDef signal fill:#f1f5f9,stroke:#64748b,color:#334155
+
+  class req entry
+  class load,wait,stream check
+  class admit good
+  class r1,r2,r3 bad
+  class scrape,window signal
