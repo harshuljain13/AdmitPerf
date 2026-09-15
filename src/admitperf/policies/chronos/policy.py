@@ -32,12 +32,12 @@ reports/chronos-reproduction.md.
 from __future__ import annotations
 
 from admitperf.core.api import AdmissionPolicy, Decision, Request, SystemState
-from admitperf_policies.chronos.estimator import (
+from admitperf.policies.chronos.estimator import (
     ArrivalRateWindow,
     ServiceRateEstimator,
     fit_cost_model,
 )
-from admitperf_policies.chronos.wcrt import CostModel, admission_test
+from admitperf.policies.chronos.wcrt import CostModel, admission_test
 
 #: Algorithm 1's failure modes, mapped onto AdmitPerf reject reasons so a
 #: results bundle records which of the three checks refused the request.

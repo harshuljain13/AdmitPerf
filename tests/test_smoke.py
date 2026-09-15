@@ -11,7 +11,7 @@ from admitperf import (
     __version__,
     get_policy,
 )
-from admitperf.baseline import NoAdmission
+from admitperf.policies import NoAdmission
 
 
 def test_version() -> None:

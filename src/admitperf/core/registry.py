@@ -26,7 +26,7 @@ from admitperf.core.api import AdmissionPolicy
 #: against, and a silent change makes every installed policy vanish.
 ENTRY_POINT_GROUP = "admitperf.policies"
 
-# Built-in policies, populated by admitperf.baseline at import time to avoid a
+# Built-in policies, populated by admitperf.policies at import time to avoid a
 # circular import (core must not depend on the policies subpackage).
 _BUILTINS: dict[str, type[AdmissionPolicy]] = {}
 _discovered: dict[str, type[AdmissionPolicy]] | None = None
@@ -86,13 +86,13 @@ def _discover() -> dict[str, type[AdmissionPolicy]]:
 def _ensure_builtins() -> None:
     """Import the built-in policy package so it can self-register.
 
-    Deferred to call time rather than module scope: `admitperf.baseline`
+    Deferred to call time rather than module scope: `admitperf.policies`
     imports from `core`, so a top-level import here would be circular. This is
     not a layering violation — `baseline` is part of the light decision path,
     unlike bench/engines/runtime.
     """
     if not _BUILTINS:
-        import admitperf.baseline  # noqa: F401  (import registers them)
+        import admitperf.policies  # noqa: F401  (import registers them)
 
 
 def available() -> dict[str, type[AdmissionPolicy]]:

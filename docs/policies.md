@@ -1,7 +1,7 @@
 # Policies — the roster
 
 > **Looking for what each policy actually does?**
-> [`../policies/README.md`](../policies/README.md) is the catalogue: what each
+> [`../src/admitperf/policies/README.md`](../src/admitperf/policies/README.md) is the catalogue: what each
 > one decides on, its parameters, and which regime it suits. This document is
 > the research roster — what is planned, what is portable, and the rules for
 > claiming fidelity to a published algorithm.

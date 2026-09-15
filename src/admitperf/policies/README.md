@@ -1,25 +1,20 @@
 # AdmitPerf policies
 
-The admission-control policies under study, packaged as `admitperf-policies`.
-Shipped separately from the library so someone putting admission control in front of a fleet installs
-`admitperf` and gets the decision path — not four research ports and the
-assumptions baked into them.
+What each policy decides on, what signal it needs, and where it misleads — so
+you do not have to read the source to answer those questions.
 
 ```bash
-pip install -e .          # the library
-pip install -e policies   # this zoo
-admitperf policies        # lists whatever is installed
+admitperf policies        # the same list, from the CLI
 ```
 
-These register through the `admitperf.policies` entry-point group, which is the
-same mechanism any third-party package uses. Nothing in the library knows they
-exist.
+To add one of your own **without touching this repo**, see [Adding your
+own](#adding-your-own) at the bottom.
 
 ---
 
 ## What is here
 
-### `no_admission` — *(in the library, not here)*
+### `no_admission`
 
 Accepts everything. The baseline every other policy has to beat, and what vLLM
 does out of the box.
@@ -78,7 +73,7 @@ larger than a handful of short sequences can fill. We measured it never
 exceeding **0.005** while the queue was 24 deep — the policy read a flat line
 near zero and silently behaved as "accept everything", scoring identically to
 the baseline while appearing to work. Check that your signal actually moves
-before trusting a result. See [`../docs/results.md`](../docs/results.md).
+before trusting a result. See [`../../../docs/results.md`](../../../docs/results.md).
 
 ---
 
@@ -109,7 +104,7 @@ speeds calculated on paper. Ours are measured from a live server, and one of
 them — the fixed per-step overhead — we could not measure at all. It runs their
 algorithm; it does not reproduce their guarantee. Full write-up, including a
 run where it was beaten by `queue_depth`:
-[`../reports/chronos-reproduction.md`](../reports/chronos-reproduction.md).
+[`../../../reports/chronos-reproduction.md`](../../../reports/chronos-reproduction.md).
 
 Internally it is three separable pieces, because the first two are reusable by
 any policy that predicts rather than thresholds:
@@ -140,7 +135,8 @@ cannot catch a signal that is present but never moves.
 
 ## Adding your own
 
-Nothing needs to change in this repo. In your own package:
+Nothing needs to change in this repo — that is what the entry-point group is
+for. In your own package:
 
 ```python
 from admitperf import AdmissionPolicy, Decision, Request, SystemState
@@ -163,4 +159,4 @@ my_policy = "my_pkg:MyPolicy"
 
 `pip install -e .` and it appears in `admitperf policies`. Conventions and the
 fidelity rule for porting published algorithms are in
-[`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+[`../../../CONTRIBUTING.md`](../../../CONTRIBUTING.md).

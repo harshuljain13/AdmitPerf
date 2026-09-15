@@ -102,7 +102,7 @@ def _runner(policy: AdmissionPolicy, engine: FakeEngine, **kw) -> Runner:
 
 
 async def test_admitted_requests_reach_the_engine() -> None:
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     engine = FakeEngine()
     result = await _runner(NoAdmission(), engine).run()
@@ -130,7 +130,7 @@ async def test_reject_reason_carries_an_http_status() -> None:
 
 async def test_decisions_record_the_state_they_were_made_on() -> None:
     """Without this, "why was this rejected" is unanswerable after the run."""
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     result = await _runner(NoAdmission(), FakeEngine(kv=0.42)).run()
 
@@ -164,7 +164,7 @@ async def test_endless_defer_becomes_a_reject() -> None:
 async def test_stale_state_sheds_rather_than_guessing() -> None:
     """An ancient snapshot is not signal. Deciding on it and recording the
     result would corrupt the comparison the run exists to produce."""
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     engine = FakeEngine()
     runner = _runner(NoAdmission(), engine, max_state_age_s=-1.0)
@@ -180,7 +180,7 @@ async def test_policy_needing_an_absent_signal_fails_at_construction() -> None:
 
 
 async def test_scrape_failures_do_not_end_the_run() -> None:
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     engine = FakeEngine()
     runner = _runner(NoAdmission(), engine)
@@ -196,7 +196,7 @@ async def test_scrape_failures_do_not_end_the_run() -> None:
 
 
 async def test_run_without_a_reachable_engine_says_so() -> None:
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     engine = FakeEngine()
     engine.fail_scrape = True
@@ -208,7 +208,7 @@ async def test_run_without_a_reachable_engine_says_so() -> None:
 
 
 async def test_decision_kinds_are_recorded_verbatim() -> None:
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     result = await _runner(NoAdmission(), FakeEngine()).run()
     assert {d.kind for d in result.decisions} == {DecisionKind.ADMIT.value}
@@ -229,7 +229,7 @@ async def test_signal_health_reflects_scrape_success() -> None:
 async def test_scrape_error_is_remembered_for_the_report() -> None:
     """Counting failures is not enough — a run that measured nothing has to be
     able to say why."""
-    from admitperf.baseline import NoAdmission
+    from admitperf.policies import NoAdmission
 
     engine = FakeEngine()
     runner = _runner(NoAdmission(), engine)

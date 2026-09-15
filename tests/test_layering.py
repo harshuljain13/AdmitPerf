@@ -18,11 +18,6 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "admitperf"
 # core may not import these sibling packages.
 FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines"}
 
-#: The library must never import the policy package. The zoo depends on the library, so
-#: the reverse would be a cycle — and it would defeat the split, since
-#: installing admitperf would drag in every research policy again.
-ZOO = "admitperf_policies"
-
 
 def _imports_of(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
@@ -63,19 +58,3 @@ def test_core_imports_without_optional_dependencies() -> None:
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, f"core needs an optional dep:\n{proc.stderr}"
     assert "ok" in proc.stdout
-
-
-def test_the_library_never_imports_the_zoo() -> None:
-    """Installing the library must not pull in the research policies.
-
-    They depend on it, so the reverse is a cycle; and the whole point of
-    shipping them separately is that a production install does not carry
-    four ports and their assumptions.
-    """
-    offenders = [
-        f"{py.relative_to(SRC)} imports {mod}"
-        for py in SRC.rglob("*.py")
-        for mod in _imports_of(py)
-        if mod == ZOO or mod.startswith(ZOO + ".")
-    ]
-    assert not offenders, "library must not depend on the policy package:\n" + "\n".join(offenders)
