@@ -61,7 +61,7 @@ async def run_one(
         result = await runner.run()
     finally:
         await engine.aclose()
-    return summarize(result), result
+    return summarize(result, result.requests), result
 
 
 async def run_experiment(
@@ -103,7 +103,8 @@ async def run_experiment(
             print(
                 f"admitted {summary['admitted']}/{summary['offered']}  "
                 f"TTFT p95 {_ms(summary['ttft_ms']['p95'])}  "
-                f"goodput {summary['goodput_under_admission']}"
+                f"offered {summary['offered_attainment']}  "
+                f"served {summary['served_attainment']}"
             )
             if not summary["signal_was_healthy"]:
                 # Worth interrupting for. The run completes and the numbers

@@ -445,6 +445,6 @@ Their code: `github.com/am-research/rtss-ttft-tbt`.
 
 Figures: `figures/*.mmd` are the source; `make diagrams` re-renders them.
 
-Our reading notes: `../../survey/notes/chronos.md`.
+Our reading notes on the paper are held with the companion survey.
 Our implementation: `../src/admitperf/policies/chronos/`.
 Saved runs: `results/chronos/`.

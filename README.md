@@ -8,7 +8,7 @@
 
 AdmitPerf is two things in one repository: an **admission control library** you put in front of vLLM / SGLang (it decides admit / defer / reject per request), and a **benchmark harness** that runs any policy against a real engine on real hardware and reports what it cost. Same code path in production and in the benchmark, so the numbers are trustworthy because you can also deploy them.
 
-> **Why this exists** — Across 14 admission-primary papers in the [companion survey](../survey/), no two share a baseline, engine version, workload, or SLO definition. AdmitPerf makes head-to-head comparison possible. See [`docs/motivation.md`](docs/motivation.md).
+> **Why this exists** — Across 14 admission-primary papers surveyed, no two share a baseline, engine version, workload, or SLO definition. AdmitPerf makes head-to-head comparison possible. See [`docs/motivation.md`](docs/motivation.md).
 
 **Status**: working MVP, verified on real hardware. First results in [`docs/results.md`](docs/results.md); honest gaps in [`docs/status.md`](docs/status.md).
 
@@ -227,9 +227,8 @@ All independent researchers. Co-first-author ordering resolved at freeze.
 
 ## Related
 
-- Companion survey: [`../survey/`](../survey/)
-- Working gateway this derives from: `../../llm-inference-experiments/module7-admission-and-routing/`
-- Umbrella roadmap: [`../Roadmap.md`](../Roadmap.md)
+- Companion survey of admission-control literature — preprint pending
+- The working vLLM gateway this design derives from, described in [`docs/lineage.md`](docs/lineage.md)
 
 ## License
 

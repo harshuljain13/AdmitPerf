@@ -2,7 +2,7 @@
 
 *Proposal v0.5 — 2026-09-14*
 *Authors: Harshul Jain, Dr. Tanmay Sah, Tanya Sah, Parv Khatri (all independent researchers)*
-*Companion to: `../../survey/paper.tex` (systematic review, arXiv preprint pending)*
+*Companion to a systematic review of the admission-control literature (preprint pending).*
 
 This document owns the **plan**: goals, workloads, milestones, compute, venues, risks.
 

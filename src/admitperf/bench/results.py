@@ -20,6 +20,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from admitperf.bench.slo import Attainment, judge
+from admitperf.core.api import Request
 from admitperf.core.runner import RunResult
 
 
@@ -45,15 +47,38 @@ def percentiles(values: list[float]) -> dict[str, float | None]:
     return {"p50": at(0.50), "p95": at(0.95), "p99": at(0.99)}
 
 
-def summarize(result: RunResult) -> dict[str, Any]:
+def _round(value: float | None, places: int = 4) -> float | None:
+    return None if value is None else round(value, places)
+
+
+def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> dict[str, Any]:
     completed = [o for o in result.outcomes if o.status == "completed"]
     ttfts = [o.ttft_ms for o in completed if o.ttft_ms is not None]
     tbts = [gap for o in completed for gap in o.tbt_ms]
-    judged = [o for o in completed if o.met_deadline is not None]
-    met = [o for o in judged if o.met_deadline]
 
     offered = result.admitted + result.rejected
     wall = result.wall_s or 1.0
+
+    # Judge each outcome against what its request was actually promised, so
+    # TTFT and inter-token latency are assessed jointly rather than TTFT alone.
+    att = Attainment(arrived=offered, admitted=result.admitted, rejected=result.rejected)
+    per_request = requests or {}
+    for outcome in result.outcomes:
+        req = per_request.get(outcome.request_id)
+        if req is None:
+            continue
+        att.add(judge(req, outcome), outcome)
+
+    # A refusal is only useful if it is fast, and the arrival loop falling
+    # behind would inflate this — so it doubles as a coordinated-omission check.
+    reject_latency = [
+        d.decision_latency_ms
+        for d in result.decisions
+        if d.kind == "reject" and d.decision_latency_ms is not None
+    ]
+    decision_lag = [
+        d.decision_latency_ms for d in result.decisions if d.decision_latency_ms is not None
+    ]
 
     return {
         "offered": offered,
@@ -65,14 +90,36 @@ def summarize(result: RunResult) -> dict[str, Any]:
         "reject_reasons": dict(result.reject_reasons),
         "wall_s": round(result.wall_s, 3),
         "throughput_rps": round(result.completed / wall, 3),
-        # The headline. Unlike goodput, the denominator is everything offered,
-        # so a policy cannot win by refusing most of the traffic.
-        "goodput_under_admission": round(len(met) / offered, 4) if offered else None,
+        # The headline. Denominator is everything that arrived, so a policy
+        # cannot improve it by refusing more — only by refusing better.
+        "offered_attainment": _round(att.offered),
+        # How well it served what it took. Flatters shedding, so it is never
+        # meaningful without the line above.
+        "served_attainment": _round(att.served),
+        # A rate, as published work reports it. The sustainable rate — the
+        # highest load holding attainment above a target — needs a load sweep,
+        # not a single run.
+        "goodput_rps": round(att.met / wall, 3),
         "admit_rate": round(result.admitted / offered, 4) if offered else None,
         "ttft_ms": percentiles([float(v) for v in ttfts]),
         "tbt_ms": percentiles([float(v) for v in tbts]),
-        "deadline_met": len(met),
-        "deadline_judged": len(judged),
+        "slo": {
+            "judged": att.judged,
+            "met": att.met,
+            "missed_ttft": att.missed_ttft,
+            "missed_itl": att.missed_itl,
+            "failed_outright": att.failed_outright,
+        },
+        # What the policy saved: tokens generated for requests that missed
+        # their promise anyway.
+        "wasted_output_tokens": att.wasted_output_tokens,
+        "useful_output_tokens": att.useful_output_tokens,
+        "wasted_fraction": _round(att.wasted_fraction),
+        "reject_latency_ms": percentiles([float(v) for v in reject_latency]),
+        # p95 of how late every decision was against its scheduled arrival.
+        # Large values mean the load generator could not keep up and the run
+        # understates real latency.
+        "decision_lag_p95_ms": _round(percentiles([float(v) for v in decision_lag])["p95"], 2),
         "scrapes": result.scrapes,
         "scrape_failures": result.scrape_failures,
         "scrape_error": result.scrape_error,
@@ -81,8 +128,10 @@ def summarize(result: RunResult) -> dict[str, Any]:
         "signal_was_healthy": result.signal_was_healthy,
         "sources": {
             "ttft_ms": "client",
+            "offered_attainment": "client+harness",
+            "served_attainment": "client+harness",
+            "goodput_rps": "client+harness",
             "tbt_ms": "client",
-            "goodput_under_admission": "client+harness",
             "admit_rate": "harness",
             "reject_reasons": "harness",
             "throughput_rps": "client",
@@ -109,7 +158,7 @@ def write_bundle(
     look: diff two runs, grep the decisions, see why a request was refused.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    summary = summarize(result)
+    summary = summarize(result, result.requests)
 
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

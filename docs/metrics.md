@@ -7,6 +7,11 @@ metrics arrive here first (see [`../CONTRIBUTING.md`](../CONTRIBUTING.md)).
 
 - **TTFT** — Time To First Token. p50 / p95 / p99.
 - **TBT** — Time Between Tokens (inter-token latency). p50 / p95 / p99.
+
+**A request meets its SLO only if both hold.** Admission control has two jobs — get the
+first token out in time, and keep the stream smooth afterwards — and a request that starts
+promptly then stalls mid-answer has not been served well. Per-request **p95** inter-token
+latency is judged, not the mean, because a mean hides exactly the stalls preemption causes.
 - **Throughput** — completed requests per second, regardless of SLO.
 - **Goodput** — completed requests per second that met their SLO.
 - **GPU utilization** — from engine `/metrics` and, optionally, DCGM.
@@ -19,9 +24,23 @@ as novel** — prior art for each is noted below, and
 [`prior-art/adversarial_review.md`](prior-art/adversarial_review.md) argues the novelty case
 is weak. The contribution is reporting them *together, on one substrate*, not inventing them.
 
-- **Goodput-under-admission** *(primary)* — SLO-meeting admitted requests / total offered
-  load. Unlike goodput, the denominator includes everything rejected and deferred, so a
-  policy cannot win by refusing most traffic.
+- **Offered attainment** *(primary)* — SLO-meeting requests / everything that arrived.
+  Rejections count as misses, so a policy cannot improve this by refusing more — only by
+  refusing *better*.
+- **Served attainment** — SLO-meeting requests / admitted. This flatters shedding: a policy
+  refusing 95% and serving the rest perfectly scores 1.00. It is never reported without
+  offered attainment beside it. Measured on a real run, a queue-depth limit scored 0.942
+  served against 0.400 offered — worse than the uncontrolled baseline's 0.475.
+- **Goodput** — SLO-meeting requests per second, as published work reports it. The
+  *sustainable* rate, meaning the highest load at which attainment stays above a target,
+  needs a load sweep rather than a single run.
+- **Wasted output tokens** — tokens generated for requests that missed their promise
+  anyway. The clearest statement of what a policy saved by refusing.
+- **Reject latency** — p95 time to return a refusal. A fast fail is the point; a slow one
+  costs the caller the wait and gives them nothing.
+- **Decision lag** — p95 delay between a request being due and its verdict. Doubles as a
+  coordinated-omission check: if the load generator falls behind, recorded latencies
+  understate what a client would have seen.
 - **Admission-decision histogram** — fraction of arrivals that got `ADMIT` / `DEFER` /
   `REJECT`, broken down by `reason`.
 - **Defer latency** — wall-clock time a request spent held before its terminal decision.

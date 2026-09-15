@@ -6,7 +6,7 @@ When an LLM serving fleet is offered more load than it can serve at SLO, somethi
 
 The open question is not *whether* admission control helps. It is **which admission signal wins under which workload** — queue depth, KV pressure, deadline slack, tenant credit, or agent-session state.
 
-Nobody can answer that today. The [companion survey](../../survey/) found, across 14 admission-primary papers: **zero shared baselines** — no two papers agree on baseline system, engine version, workload, or SLO definition — and **one** released implementation. Every paper reports a win against a different opponent on a different field.
+Nobody can answer that today. A companion survey of the literature (preprint pending) found, across 14 admission-primary papers: **zero shared baselines** — no two papers agree on baseline system, engine version, workload, or SLO definition — and **one** released implementation. Every paper reports a win against a different opponent on a different field.
 
 ```mermaid
 flowchart LR
