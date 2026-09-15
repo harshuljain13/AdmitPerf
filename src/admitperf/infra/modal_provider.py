@@ -44,6 +44,10 @@ class ModalSpec:
     max_num_seqs: int = 8
     max_model_len: int = 16384
     gpu_memory_utilization: float = 0.90
+    #: Name of a Modal secret holding HF_TOKEN, for gated weights only. Empty
+    #: means no secret is attached, which is correct for ungated models and
+    #: avoids failing the deploy on a secret the user never needed.
+    hf_secret: str = ""
 
 
 class ModalProvider:
@@ -69,6 +73,7 @@ class ModalProvider:
             "ADMITPERF_MAX_NUM_SEQS": str(self.spec.max_num_seqs),
             "ADMITPERF_MAX_MODEL_LEN": str(self.spec.max_model_len),
             "ADMITPERF_GPU_MEM_UTIL": str(self.spec.gpu_memory_utilization),
+            "ADMITPERF_HF_SECRET": self.spec.hf_secret,
         }
 
         proc = subprocess.run(

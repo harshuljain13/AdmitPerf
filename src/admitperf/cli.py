@@ -66,12 +66,18 @@ def infra() -> None:
     help="Engine concurrency cap. Small on purpose: this is the bottleneck "
     "that creates queueing, and without queueing every policy scores alike.",
 )
-def infra_up(provider: str, model: str, gpu: str, max_num_seqs: int) -> None:
+@click.option(
+    "--hf-secret",
+    default=lambda: __import__("os").environ.get("ADMITPERF_HF_SECRET", ""),
+    help="Name of a Modal secret holding HF_TOKEN. Only needed for gated "
+    "weights (Llama, Gemma). Create with: modal secret create huggingface HF_TOKEN=...",
+)
+def infra_up(provider: str, model: str, gpu: str, max_num_seqs: int, hf_secret: str) -> None:
     """Start an engine and remember where it is."""
     from admitperf.infra.modal_provider import ModalProvider, ModalSpec, ProvisionError
     from admitperf.infra.session import SessionStore
 
-    spec = ModalSpec(model=model, gpu=gpu, max_num_seqs=max_num_seqs)
+    spec = ModalSpec(model=model, gpu=gpu, max_num_seqs=max_num_seqs, hf_secret=hf_secret)
     click.echo(f"deploying {model} on {gpu} via {provider} (this takes a few minutes)...")
     try:
         session = ModalProvider(spec).up()
