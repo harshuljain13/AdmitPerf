@@ -74,3 +74,47 @@ def test_bundles_without_a_manifest_are_skipped(tmp_path: Path) -> None:
     orphan.mkdir()
     (orphan / "summary.json").write_text(json.dumps({"offered": 1}))
     assert load_runs(tmp_path) == []
+
+
+def _deployed(root: Path, deployment: str, name: str, label: str, *, ttft: float, admitted: int):
+    d = root / deployment / name
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(
+        json.dumps({"policy_label": label, "policy": label, "deployment": deployment})
+    )
+    (d / "summary.json").write_text(
+        json.dumps(
+            {
+                "offered": 100,
+                "admitted": admitted,
+                "goodput_under_admission": admitted / 100,
+                "ttft_ms": {"p50": ttft / 2, "p95": ttft, "p99": ttft},
+                "reject_reasons": {},
+            }
+        )
+    )
+
+
+def test_deployments_are_compared_separately(tmp_path: Path) -> None:
+    """A single table mixing hardware would report the machine as if it were
+    the policy."""
+    _deployed(tmp_path, "a10g", "p1", "no_admission", ttft=400, admitted=100)
+    _deployed(tmp_path, "a10g", "p2", "queue_depth", ttft=150, admitted=60)
+    _deployed(tmp_path, "a100", "p1", "no_admission", ttft=120, admitted=100)
+    _deployed(tmp_path, "a100", "p2", "queue_depth", ttft=90, admitted=80)
+
+    out = compare_dir(tmp_path) or ""
+
+    assert "2 deployments" in out
+    assert "=== a10g ===" in out
+    assert "=== a100 ===" in out
+    assert "not" in out and "pooled" in out
+
+
+def test_a_single_ungrouped_run_keeps_the_plain_table(tmp_path: Path) -> None:
+    """Runs from `bench run` carry no deployment, and their output must not
+    change just because sweeps exist."""
+    _run(tmp_path, "r1", "no_admission", ttft_p95=200, admitted=100, goodput=1.0)
+    out = compare_dir(tmp_path) or ""
+    assert "deployments" not in out
+    assert "no_admission" in out

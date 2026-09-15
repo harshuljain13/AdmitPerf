@@ -26,6 +26,20 @@ admitperf bench compare results/                 # who won, and by how much
 admitperf infra down                             # stop paying for it
 ```
 
+Every policy faces the **same deployment** — the server is started once and
+nothing is re-provisioned between policies, so the accept/refuse decision is
+the only thing that varies. That is what makes the comparison mean anything.
+
+To vary the hardware or engine settings too, add a `matrix:` and use
+`bench sweep`, which provisions each entry in turn and runs every policy
+against it. Results stay grouped per deployment and are never pooled across
+them — a table mixing an A10G row with an A100 row would be reporting the
+machine rather than the policy.
+
+```bash
+admitperf bench sweep -c experiments/sweep.yaml   # provisions and tears down per entry
+```
+
 `infra up` writes the endpoint to `.admitperf/session.json`; `bench run` reads it. They are separate commands because loading a model takes minutes and every policy must face the *same* deployment — re-provisioning between policies would change the thing being controlled for. Already have an engine running? Skip provisioning with `--engine-url`.
 
 Everything lives in one config file; flags override it for one-offs:
@@ -129,8 +143,10 @@ admitperf/
 │   ├── engines/       vLLM adapter: scrape /metrics, run requests, time the stream
 │   ├── infra/         provision a GPU and remember where it is
 │   ├── bench/         load generation and results
-│   └── policies/      built-in policies
-├── experiments/       example configs (demo.yaml, multi-gpu.yaml)
+│   └── baseline/      the null baseline only
+├── policies/          the policies under study — separate package, see its README
+├── experiments/       example configs (demo, chronos, sweep, multi-gpu)
+├── reports/           written studies, each backed by a run bundle
 ├── docs/              motivation, scope, design, metrics, results, architecture
 ├── scripts/           fake_vllm.py — a pretend engine for testing without a GPU
 ├── tests/
@@ -176,8 +192,10 @@ See `.env.example`.
 | See the C4 architecture | [`docs/architecture/`](docs/architecture/) |
 | Read the data-flow + reproducibility contract | [`docs/design.md`](docs/design.md) |
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
+| See what each policy does, without reading code | [`src/admitperf/policies/README.md`](src/admitperf/policies/README.md) |
 | Read the candidate policy list + fidelity rules | [`docs/policies.md`](docs/policies.md) |
 | See the first real-hardware results | [`docs/results.md`](docs/results.md) |
+| Read the written studies | [`reports/`](reports/) |
 | Read the plan | [`docs/PROPOSAL.md`](docs/PROPOSAL.md) |
 | Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](docs/prior-art/adversarial_review.md) |
 | See what exists and what does not | [`docs/status.md`](docs/status.md) |

@@ -1,0 +1,57 @@
+# The same comparison, across several deployments.
+#
+#   admitperf bench sweep -c experiments/sweep.yaml
+#
+# Each matrix entry is provisioned, every policy runs against it, then it is
+# torn down before the next. Comparisons stay INSIDE a deployment: policies are
+# only comparable when they faced the same engine on the same hardware, so
+# `bench compare` prints one table per deployment and never pools them. A row
+# mixing an A10G with an A100 would be reporting the machine, not the policy.
+#
+# This exists because of a specific open question. On a small model the KV
+# cache never fills and the concurrency cap binds instead, so a KV-pressure
+# policy reads a flat line. Chronos also carries a hardware-specific cost
+# parameter we could not measure. Both need more than one operating point
+# before anything can be concluded — see reports/chronos-reproduction.md §6.
+name: capacity-sweep
+
+# Shared by every entry below; the matrix states only what differs.
+infra:
+  provider: modal
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  max_concurrent_inputs: 256
+  engine:
+    max_model_len: 2048
+    gpu_memory_utilization: 0.55
+    enable_prefix_caching: false
+    scheduling_policy: fcfs
+
+matrix:
+  # Tight: the concurrency cap binds long before memory does.
+  - engine: {max_num_seqs: 4}
+  # Looser: more room, so queueing starts later.
+  - engine: {max_num_seqs: 16}
+  # Prefix caching on. Expected to distort the comparison rather than improve
+  # it — repeated prompts skip prefill, so pressure stops tracking offered
+  # load. Included deliberately to measure how badly.
+  - engine: {max_num_seqs: 4, enable_prefix_caching: true}
+
+workload:
+  kind: poisson
+  n: 120
+  rate: 15
+  seed: 0
+
+policies:
+  - no_admission
+  - name: queue_depth
+    max_waiting: 4
+  - name: kv_threshold
+    threshold: 0.85
+  - name: chronos_inspired
+    chunk_tokens: 512
+
+bench:
+  repeats: 3

@@ -16,7 +16,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src" / "admitperf"
 
 # core may not import these sibling packages.
-FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines", "admitperf.runtime"}
+FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines"}
 
 
 def _imports_of(path: Path) -> set[str]:

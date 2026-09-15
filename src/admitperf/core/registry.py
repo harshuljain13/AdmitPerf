@@ -21,6 +21,9 @@ from importlib.metadata import entry_points
 
 from admitperf.core.api import AdmissionPolicy
 
+#: The published plugin group. Renaming the baseline package must never
+#: change this — it is the public contract third-party packages declare
+#: against, and a silent change makes every installed policy vanish.
 ENTRY_POINT_GROUP = "admitperf.policies"
 
 # Built-in policies, populated by admitperf.policies at import time to avoid a
@@ -85,7 +88,7 @@ def _ensure_builtins() -> None:
 
     Deferred to call time rather than module scope: `admitperf.policies`
     imports from `core`, so a top-level import here would be circular. This is
-    not a layering violation — `policies` is part of the light decision path,
+    not a layering violation — `baseline` is part of the light decision path,
     unlike bench/engines/runtime.
     """
     if not _BUILTINS:
@@ -103,7 +106,19 @@ def get_policy(name: str, **kwargs: object) -> AdmissionPolicy:
     registry = available()
     if name not in registry:
         raise KeyError(f"unknown policy {name!r}; registered: {sorted(registry)}")
-    return registry[name](**kwargs)
+    cls = registry[name]
+    try:
+        return cls(**kwargs)
+    except TypeError as exc:
+        # A bare TypeError from a dataclass constructor names neither the
+        # policy nor the accepted parameters, and the usual cause is a config
+        # file written against an older version of a policy.
+        import inspect
+
+        accepted = [p for p in inspect.signature(cls.__init__).parameters if p != "self"]
+        raise TypeError(
+            f"policy {name!r} rejected these settings: {exc}. It accepts: {accepted or '(none)'}"
+        ) from exc
 
 
 def requirements_of(policy: AdmissionPolicy) -> frozenset[str]:

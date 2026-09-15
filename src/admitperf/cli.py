@@ -278,6 +278,83 @@ def bench_run(
         raise SystemExit("interrupted") from None
 
 
+@bench.command("sweep")
+@click.option("-c", "--config", required=True, help="Experiment YAML with a `matrix:` section")
+@click.option("--out", default=None, help="Output directory")
+@click.option("--keep-up", is_flag=True, help="Leave the last deployment running")
+def bench_sweep(config: str, out: str | None, keep_up: bool) -> None:
+    """Provision each deployment in the matrix and run every policy against it.
+
+    Comparisons stay inside a deployment. The sweep varies the hardware or
+    engine settings; it never pools results across them, because that would
+    measure the machine rather than the policy.
+    """
+    import asyncio as _asyncio
+
+    from admitperf.bench.experiment import run_sweep
+    from admitperf.core.config import Deployment
+    from admitperf.engines.vllm import VllmConfig, VllmEngine
+    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
+    from admitperf.infra.session import Session, SessionStore
+
+    try:
+        cfg = ExperimentConfig.load(config)
+    except ConfigError as exc:
+        raise SystemExit(f"config error: {exc}") from exc
+
+    store = SessionStore()
+    live: list[tuple[ModalProvider, Session]] = []
+
+    async def provision(dep: Deployment) -> tuple[str, str]:
+        entry = ExperimentConfig(name=cfg.name, infra=dep.infra)
+        i = dep.infra
+        click.echo(f"  deploying {i.model} on {i.modal_gpu} (seqs={i.engine.max_num_seqs})")
+        try:
+            session = ModalProvider(entry).up()
+        except ProvisionError as exc:
+            raise SystemExit(str(exc)) from exc
+        store.save(session)
+        live.clear()
+        live.append((ModalProvider(entry), session))
+
+        # A freshly deployed container is cold; the first request pays for the
+        # weights. Wait for readiness here so the run does not record a cold
+        # start as the policy's latency.
+        engine = VllmEngine(VllmConfig(base_url=session.primary, model=session.served_model_name))
+        try:
+            for _ in range(120):
+                if await engine.health():
+                    break
+                await _asyncio.sleep(5)
+            else:
+                raise SystemExit(f"engine never became ready at {session.primary}")
+        finally:
+            await engine.aclose()
+
+        click.echo(f"  ready: {session.primary}")
+        return session.primary, session.served_model_name
+
+    async def teardown() -> None:
+        if keep_up:
+            click.echo("  leaving deployment up (--keep-up)")
+            return
+        if not live:
+            return
+        provider, session = live[0]
+        try:
+            provider.down(session)
+            store.clear()
+            click.echo("  torn down")
+        except ProvisionError as exc:
+            # Report loudly but do not abort the sweep: a later deployment can
+            # still produce results, and a stranded app costs money either way.
+            click.echo(f"  WARNING: teardown failed: {exc}")
+
+    _asyncio.run(
+        run_sweep(cfg, provision=provision, teardown=teardown, out_dir=Path(out) if out else None)
+    )
+
+
 @bench.command("compare")
 @click.argument("path", default="results", required=False)
 def bench_compare(path: str) -> None:

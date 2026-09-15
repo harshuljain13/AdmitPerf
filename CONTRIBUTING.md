@@ -36,7 +36,7 @@ class YourPolicy(AdmissionPolicy):
     requires = frozenset({"kv_used_fraction"})
 ```
 
-If the policy lives **in this repo**, register it in `src/admitperf/policies/__init__.py`.
+If the policy belongs in this repo, add it to `src/admitperf/policies/` and register it there.
 If it lives in **your own package**, declare an entry point instead — no edit here needed:
 
 ```toml

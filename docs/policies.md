@@ -1,5 +1,11 @@
 # Policies — the roster
 
+> **Looking for what each policy actually does?**
+> [`../src/admitperf/policies/README.md`](../src/admitperf/policies/README.md) is the catalogue: what each
+> one decides on, its parameters, and which regime it suits. This document is
+> the research roster — what is planned, what is portable, and the rules for
+> claiming fidelity to a published algorithm.
+
 This document owns the **concrete policy roster** and the **fidelity contract** that governs
 ports. The taxonomy behind the `Class` column (what is portable and what is not, and the
 naming rule) is owned by [`scope.md`](scope.md) — read that first.
@@ -18,7 +24,7 @@ never under the paper's system name.
 | `QueueDepth` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
 | `QueueDepthDefer` ✅ built | derived | A | `num_requests_waiting` | request | ✗ | ✗ | ✗ |
 | `KVThreshold` ✅ built | derived | A | `kv_cache_usage_perc` | request | ✗ | ✗ | ✗ |
-| `ChronosThresholdWCRT` | Chronos, Frontiers Comp Sci 1873627 | A | TTFT/TBT deadline bound | request | ✓ | ✗ | ✗ |
+| `ChronosInspiredWCRT` ✅ built | Chronos, Frontiers CS 8 (2026) | **A → approximation** | Theorem 1 WCRT bound vs deadline | request | **✓** | ✗ | ✗ |
 | `QLMInspired` | QLM, SoCC 2024 | A | KV pressure + virtual-queue LP | request | ✓ | ✗ | ✗ |
 | `FluidWaitThreshold` | Fluid-WAIT, arXiv:2504.11320 | A | queue + KV scalar threshold | request | partial | ✗ | ✗ |
 | `TokenBudget` | derived (survey Table 2) | A | offered tokens vs capacity | request | ✓ | ✗ | ✗ |
@@ -45,6 +51,32 @@ Excluded because porting them means maintaining a vLLM fork. See
 - **ProServe** (arXiv:2512.12928) — very recent, fidelity risk.
 - **SOLA** (MLSys 2025) — may overlap Chronos; revisit if a scheduled port fails fidelity.
 - **Flow-controlled scheduling** (arXiv:2604.11001) — theory; evaluate if a scheduled port fails fidelity.
+
+## Deadline-aware vs threshold
+
+`ChronosInspiredWCRT` is the first policy here that reads the *request* rather
+than only the fleet. Threshold policies refuse past a busyness level and cannot
+distinguish an interactive request from a batch one; this predicts how long
+*this* request would take and compares that to *its* deadline, so the same
+fleet state produces different answers for different SLO classes.
+
+It implements Algorithm 1 from the paper: a utilization check, a Theorem 1
+WCRT bound against the request's deadline, and a Theorem 3 decode-capacity
+check. Rejections are typed by which check refused — `overloaded`,
+`deadline_unmeetable`, `tbt_unmeetable` — so a bundle records not just that a
+request was refused but why.
+
+Measured on an A10G against an uncontrolled baseline, it cuts TTFT p95 from
+4750ms to 515ms but admits only 5.3% of offered load. Full study, including why
+that is far more conservative than the paper reports:
+[`../reports/chronos-reproduction.md`](../reports/chronos-reproduction.md).
+
+**It is named "inspired" deliberately.** The algorithm is the paper's, but two
+substitutions prevent a fidelity claim: the kernel parameters are fitted from
+engine telemetry rather than roofline-derived, and `gamma` is not fitted at all
+because separating it from the per-token slope needs measurements at several
+batch sizes. Utilization is therefore estimated rather than known, and Theorem
+1 inherits that error. Per the fidelity rule below, that forbids the bare name.
 
 ## Choosing a signal
 

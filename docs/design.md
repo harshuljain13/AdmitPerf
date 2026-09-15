@@ -80,6 +80,19 @@ will admit, so `max_num_seqs` is the only bottleneck. `max_concurrent_inputs`
 in the config exists for this, and a run records `signal_was_healthy` so a
 degraded one is flagged rather than read as a result.
 
+## The unit of comparison is the deployment
+
+Policies are comparable only when they faced the same engine on the same
+hardware. The harness enforces that by construction: `infra up` and `bench run`
+are separate commands, the server is started once, and every policy runs
+against it without re-provisioning.
+
+A sweep (`bench sweep`) varies the deployment rather than breaking that rule.
+Each matrix entry is provisioned, every policy runs against it, and it is torn
+down before the next. Results are filed per deployment and `bench compare`
+prints one table each, refusing to pool them — a single table mixing hardware
+would report the machine as if it were the policy.
+
 ## Reproducibility contract
 
 - Every run pins, in `manifest.json`: policy, engine, endpoint, KV scale as probed,

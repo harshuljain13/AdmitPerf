@@ -154,3 +154,75 @@ def test_engine_env_carries_the_resolved_config() -> None:
     assert blob["gpu"] == "A100:4"
     assert blob["engine"]["tensor_parallel_size"] == 4
     assert blob["engine"]["max_num_seqs"] == 32
+
+
+# --- matrix ---------------------------------------------------------------
+
+
+def test_no_matrix_means_exactly_one_deployment() -> None:
+    """The common case, and the only one where a single table is meaningful."""
+    assert len(ExperimentConfig().deployments()) == 1
+
+
+def test_matrix_entries_inherit_the_base_infra() -> None:
+    """A sweep should state only what varies, not repeat the whole config."""
+    cfg = ExperimentConfig.from_dict(
+        {
+            "infra": {
+                "model": "m/x",
+                "served_model_name": "lab",
+                "engine": {"max_model_len": 4096},
+            },
+            "matrix": [{"gpu": "A10G"}, {"gpu": "A100"}],
+        }
+    )
+    for dep in cfg.deployments():
+        assert dep.infra.model == "m/x"
+        assert dep.infra.engine.max_model_len == 4096  # inherited
+    assert [d.infra.gpu for d in cfg.deployments()] == ["A10G", "A100"]
+
+
+def test_matrix_entries_override_the_base_engine_settings() -> None:
+    cfg = ExperimentConfig.from_dict(
+        {
+            "infra": {"engine": {"max_num_seqs": 4, "max_model_len": 2048}},
+            "matrix": [{"engine": {"max_num_seqs": 32}}],
+        }
+    )
+    engine = cfg.deployments()[0].infra.engine
+    assert engine.max_num_seqs == 32  # overridden
+    assert engine.max_model_len == 2048  # inherited
+
+
+def test_deployment_labels_describe_what_differs() -> None:
+    cfg = ExperimentConfig.from_dict(
+        {
+            "infra": {"model": "Qwen/Qwen2.5-0.5B-Instruct"},
+            "matrix": [
+                {"gpu": "A10G", "engine": {"max_num_seqs": 4}},
+                {
+                    "gpu": "A100",
+                    "gpu_count": 4,
+                    "engine": {"max_num_seqs": 16, "tensor_parallel_size": 4},
+                },
+            ],
+        }
+    )
+    labels = [d.label for d in cfg.deployments()]
+    assert labels[0] == "Qwen2.5-0.5B-Instruct-A10G-seqs4"
+    assert "A100x4" in labels[1] and "tp4" in labels[1]
+
+
+def test_indistinguishable_matrix_entries_are_refused() -> None:
+    """Two deployments with the same label would file results into the same
+    directory and silently overwrite each other."""
+    with pytest.raises(ConfigError, match="duplicate labels"):
+        ExperimentConfig.from_dict({"matrix": [{"gpu": "A10G"}, {"gpu": "A10G"}]})
+
+
+def test_every_matrix_entry_is_validated() -> None:
+    """An impossible entry must fail at load, not ten minutes into the sweep."""
+    with pytest.raises(ConfigError, match="gpu_count"):
+        ExperimentConfig.from_dict(
+            {"matrix": [{"gpu": "A10G", "gpu_count": 1, "engine": {"tensor_parallel_size": 8}}]}
+        )

@@ -1,12 +1,12 @@
-"""Built-in admission-control policies.
+"""Admission-control policies.
 
-The frozen adapter API lives in ``admitperf.core.api`` and the registry in
-``admitperf.core.registry``; both are re-exported here so that pre-split
-imports keep working.
+See README.md in this directory for what each one decides on, what signal it
+needs, and which regime it suits — that is the catalogue, and it exists so
+nobody has to read the source to answer those questions.
 
-To add a policy *inside* this package, import it below and call ``register``.
-To add one from your **own** package, use the ``admitperf.policies`` entry-point
-group — no edit to this file is needed (spec D3). See CONTRIBUTING.md.
+Policies shipped here are registered below. A policy in *your own* package
+registers through the ``admitperf.policies`` entry-point group instead, with no
+edit to this file; see ../../../CONTRIBUTING.md.
 """
 
 from __future__ import annotations
@@ -19,33 +19,30 @@ from admitperf.core.api import (
     SystemState,
 )
 from admitperf.core.registry import available, get_policy, register
+from admitperf.policies.chronos import ChronosInspiredWCRT
 from admitperf.policies.kv_threshold import KVThreshold
 from admitperf.policies.no_admission import NoAdmission
 from admitperf.policies.queue_depth import QueueDepth, QueueDepthDefer
 
-register(NoAdmission.name, NoAdmission)
-register(KVThreshold.name, KVThreshold)
-register(QueueDepth.name, QueueDepth)
-register(QueueDepthDefer.name, QueueDepthDefer)
+for _policy in (NoAdmission, KVThreshold, QueueDepth, QueueDepthDefer, ChronosInspiredWCRT):
+    register(_policy.name, _policy)
 
-#: Built-in policies. Retained for backward compatibility; prefer
-#: ``admitperf.core.registry.available()``, which also includes plugins.
+#: Built-ins. Prefer ``admitperf.core.registry.available()``, which also
+#: includes anything installed as a plugin.
 POLICIES: dict[str, type[AdmissionPolicy]] = {
-    NoAdmission.name: NoAdmission,
-    KVThreshold.name: KVThreshold,
-    QueueDepth.name: QueueDepth,
-    QueueDepthDefer.name: QueueDepthDefer,
+    p.name: p for p in (NoAdmission, KVThreshold, QueueDepth, QueueDepthDefer, ChronosInspiredWCRT)
 }
 
 __all__ = [
     "POLICIES",
     "AdmissionPolicy",
+    "ChronosInspiredWCRT",
     "Decision",
     "DecisionKind",
     "KVThreshold",
+    "NoAdmission",
     "QueueDepth",
     "QueueDepthDefer",
-    "NoAdmission",
     "Request",
     "SystemState",
     "available",

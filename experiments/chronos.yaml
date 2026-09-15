@@ -1,0 +1,50 @@
+# Chronos Algorithm 1 against the uncontrolled baseline, on a real engine.
+#
+# The paper evaluates in its own discrete-event simulator with roofline-derived
+# kernel parameters. This runs the same algorithm against vLLM with parameters
+# fitted from live telemetry — the substitution the paper's limitations section
+# flags as future work.
+#
+#   admitperf infra up   -c experiments/chronos.yaml
+#   admitperf bench run  -c experiments/chronos.yaml
+#   admitperf bench compare results/
+name: chronos-vs-naive
+
+infra:
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  max_concurrent_inputs: 256
+  engine:
+    # Deliberately tight: this is the capacity limit that makes admission
+    # control matter at all.
+    max_num_seqs: 4
+    max_model_len: 2048
+    gpu_memory_utilization: 0.55
+    enable_prefix_caching: false
+    # FCFS is the paper's uncontrolled baseline.
+    scheduling_policy: fcfs
+
+workload:
+  kind: poisson
+  n: 150
+  rate: 20
+  seed: 0
+
+policies:
+  # The paper's FCFS baseline: arrival order, no admission control.
+  - no_admission
+  # A threshold policy, for contrast: refuses on busyness, blind to deadlines.
+  - name: queue_depth
+    max_waiting: 4
+  # Algorithm 1 with parameters fitted from engine telemetry.
+  - name: chronos_inspired
+    chunk_tokens: 512
+  # Same, pessimistic. The paper's bound is sound by construction; ours is
+  # fitted from noisy counters, so the margin is a knob.
+  - name: chronos_inspired
+    chunk_tokens: 512
+    safety_factor: 2.0
+
+bench:
+  repeats: 3

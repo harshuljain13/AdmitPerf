@@ -14,14 +14,14 @@
 
 **Residual novelty: Weak.** The word "neutral" does no work when MLPerf exists.
 
-**Reframing:** Drop "first" and "neutral." Reframe as *"an admission-policy-focused extension to Etalon, with a policy zoo not covered by MLPerf's multi-turn track."*
+**Reframing:** Drop "first" and "neutral." Reframe as *"an admission-policy-focused extension to Etalon, with a policy package not covered by MLPerf's multi-turn track."*
 
 ### Claim 2: "Faithful re-implementations of 6 policies in a common framework"
 **Strongest prior:** Re-implementation is engineering, not a research contribution. Worse, "faithful" is unfalsifiable without the original authors' sign-off, and you have neither the time nor the standing to obtain it.
 
 **Residual novelty: None.** Re-implementation is a *method*, not a *contribution*.
 
-**Reframing:** Reposition as an *artifact release* (policy zoo repo), not a paper claim.
+**Reframing:** Reposition as an *artifact release* (policy package repo), not a paper claim.
 
 ### Claim 3: "Head-to-head across 3 workloads × 2 model sizes"
 **Strongest prior:** SLOs-Serve already does head-to-head admission comparisons. Etalon covers multiple workloads. A 3×2 grid on Qwen2.5 is a *measurement study*, not a benchmark — benchmarks are defined by community adoption, not by the authors running a matrix.
