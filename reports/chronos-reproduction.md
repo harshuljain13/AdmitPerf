@@ -22,8 +22,10 @@ Three things came out of it:
 2. **It was far more cautious than the paper reports** — it accepted 23% of
    traffic where the paper accepts 54–89%. We traced why, and it is a problem
    with how we feed it numbers, not with the algorithm.
-3. **At the load we tested, nothing performed well.** So this is a working
-   pipeline for reproducing the paper, not a verdict on whether Chronos is good.
+3. **At the load we tested, nothing performed well** — and our Chronos was
+   beaten on its own terms by a four-line queue-depth rule, which says the
+   configuration is wrong rather than the idea. So this is a working pipeline
+   for reproducing the paper, not a verdict on whether Chronos is good.
 
 ---
 
@@ -284,8 +286,7 @@ simply be that we set a harder exam.
 
 ### 5.1 The numbers
 
-12 runs: 4 approaches × 3 repeats. Middle value shown; ± is the spread we
-actually observed, not a statistical confidence interval.
+12 runs: 4 approaches × 3 repeats.
 
 | Approach | Accepted | Slow-request latency (95th pct) | Useful work | Missed deadlines |
 |---|---|---|---|---|
@@ -294,11 +295,34 @@ actually observed, not a statistical confidence interval.
 | Chronos-inspired | 23% | 1,216ms ±494 | 0.080 | 64.5% |
 | Chronos-inspired, cautious | 5% | **515ms ±162** | 0.027 | **36.8%** |
 
+**How to read the columns.** The first three are the middle of the three runs,
+with ± showing the spread actually observed — not a statistical confidence
+interval. The last column is different: it **pools all three runs together**
+rather than taking the middle one.
+
+That inconsistency is deliberate, and worth explaining rather than hiding. The
+deadline figure only counts *accepted* requests, so the tighter an approach is,
+the fewer requests it has to be judged on. The cautious variant accepted 6, 7
+and 6 requests across its three runs; a "middle run" out of samples that small
+is noise, not a measurement. Pooling gives 19 requests instead of 6. For
+comparison, here is what both look like:
+
+| Approach | Per-run missed % | Middle run | **Pooled (used above)** |
+|---|---|---|---|
+| Accept everything | 84.7 · 92.5 · 76.1 | 84.7% | 84.4% (276/327) |
+| Queue-depth limit | 61.8 · 60.3 · 55.9 | 60.3% | 59.3% (121/204) |
+| Chronos-inspired | 30.4 · 85.3 · 66.7 | 66.7% | 64.5% (60/93) |
+| Chronos-inspired, cautious | 0.0 · 71.4 · 33.3 | 33.3% | 36.8% (7/19) |
+
+Neither choice changes the ordering, but note how wide the per-run values are —
+Chronos ranges from 30% to 85% missed across three identical runs. **On these
+sample sizes the deadline column should be read as a rough indication, not a
+measurement.**
+
 *"Slow-request latency" is the 95th percentile time to first token — only 1 in
 20 requests waited longer. "Useful work" counts requests that both completed
 and met their deadline, divided by everything offered, so an approach cannot
-score well by refusing nearly everything. "Missed deadlines" is among accepted
-requests only.*
+score well by refusing nearly everything.*
 
 Why each approach refused:
 
@@ -319,11 +343,23 @@ control is supposed to do, and it did it.
 only by accepting 5% of traffic. The paper reports missing *zero* while
 accepting 54%. We are reproducing the paper's *shape*, not its results.
 
-**The simple approach wins on useful work.** The queue-depth limit scores 0.180
-against Chronos's 0.080. Chronos refuses so much that even a better per-request
-success rate cannot make up for it. This is the metric behaving correctly — you
-cannot win by refusing everything — and it is the clearest sign our Chronos
-setup is mistuned rather than merely strict.
+**The simple approach wins on useful work, and it wins twice over.** The
+queue-depth limit scores 0.180 against Chronos's 0.080 — and it is not merely
+that Chronos accepts fewer requests. Of the requests each one *did* accept,
+queue-depth met 40.7% of deadlines against Chronos's 35.5%. Chronos accepted a
+third as much traffic and still served it slightly worse.
+
+That is the clearest evidence our Chronos setup is **mistuned rather than
+merely strict**. A correctly-tuned feasibility test should be *more* accurate
+per request than a threshold that ignores what each request asked for; that is
+the entire premise. Ours is not, which points at the inputs rather than the
+algorithm (§5.3).
+
+The cautious variant is the exception that supports this reading: it met 63.2%
+of deadlines among accepted requests — genuinely better per-request than
+anything else here — but accepted so little that it still scores worst on
+useful work. The mechanism can pick good requests; our default configuration is
+not picking them.
 
 **The most telling detail:** more of Chronos's refusals were *"server
 oversubscribed"* (204) than *"this request can't make it"* (150). Check 1 is
