@@ -144,7 +144,7 @@ admitperf/
 │   ├── infra/         provision a GPU and remember where it is
 │   ├── bench/         load generation and results
 │   └── baseline/      the null baseline only
-├── policies/          the policy zoo — a separate package (see its README)
+├── policies/          the policies under study — separate package, see its README
 ├── experiments/       example configs (demo, chronos, sweep, multi-gpu)
 ├── reports/           written studies, each backed by a run bundle
 ├── docs/              motivation, scope, design, metrics, results, architecture

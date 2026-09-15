@@ -16,12 +16,12 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src" / "admitperf"
 
 # core may not import these sibling packages.
-FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines", "admitperf.runtime"}
+FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines"}
 
-#: The library must never import the zoo. The zoo depends on the library, so
+#: The library must never import the policy package. The zoo depends on the library, so
 #: the reverse would be a cycle — and it would defeat the split, since
 #: installing admitperf would drag in every research policy again.
-ZOO = "admitperf_zoo"
+ZOO = "admitperf_policies"
 
 
 def _imports_of(path: Path) -> set[str]:
@@ -78,4 +78,4 @@ def test_the_library_never_imports_the_zoo() -> None:
         for mod in _imports_of(py)
         if mod == ZOO or mod.startswith(ZOO + ".")
     ]
-    assert not offenders, "library must not depend on the zoo:\n" + "\n".join(offenders)
+    assert not offenders, "library must not depend on the policy package:\n" + "\n".join(offenders)

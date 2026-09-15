@@ -1,7 +1,7 @@
-# AdmitPerf policy zoo
+# AdmitPerf policies
 
-The admission-control policies under study. Shipped separately from the
-library, so someone putting admission control in front of a fleet installs
+The admission-control policies under study, packaged as `admitperf-policies`.
+Shipped separately from the library so someone putting admission control in front of a fleet installs
 `admitperf` and gets the decision path — not four research ports and the
 assumptions baked into them.
 

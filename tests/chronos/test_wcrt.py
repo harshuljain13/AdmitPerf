@@ -9,7 +9,7 @@ implementation's output.
 from __future__ import annotations
 
 import pytest
-from admitperf_zoo.chronos.wcrt import (
+from admitperf_policies.chronos.wcrt import (
     CostModel,
     admission_test,
     prefill_utilization,

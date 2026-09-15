@@ -446,5 +446,5 @@ Their code: `github.com/am-research/rtss-ttft-tbt`.
 Figures: `figures/*.mmd` are the source; `make diagrams` re-renders them.
 
 Our reading notes: `../../survey/notes/chronos.md`.
-Our implementation: `../policies/admitperf_zoo/chronos/`.
+Our implementation: `../policies/admitperf_policies/chronos/`.
 Saved runs: `results/chronos/`.

@@ -1,4 +1,4 @@
-"""AdmitPerf policy zoo — the policies under study.
+"""AdmitPerf policies — the policies under study.
 
 Shipped separately from the library on purpose. Someone putting admission
 control in front of a fleet installs `admitperf` and gets the decision path;
@@ -15,8 +15,8 @@ group, exactly as a third-party package would.
 reports/policy-catalogue.md for what each one decides on.
 """
 
-from admitperf_zoo.chronos import ChronosInspiredWCRT
-from admitperf_zoo.kv_threshold import KVThreshold
-from admitperf_zoo.queue_depth import QueueDepth, QueueDepthDefer
+from admitperf_policies.chronos import ChronosInspiredWCRT
+from admitperf_policies.kv_threshold import KVThreshold
+from admitperf_policies.queue_depth import QueueDepth, QueueDepthDefer
 
 __all__ = ["ChronosInspiredWCRT", "KVThreshold", "QueueDepth", "QueueDepthDefer"]

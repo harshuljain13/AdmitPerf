@@ -8,7 +8,7 @@ and would make a predictive policy optimistic exactly when the fleet is busy.
 from __future__ import annotations
 
 import pytest
-from admitperf_zoo.chronos.estimator import ServiceRateEstimator, ServiceRates
+from admitperf_policies.chronos.estimator import ServiceRateEstimator, ServiceRates
 
 from admitperf.core.api import SystemState
 

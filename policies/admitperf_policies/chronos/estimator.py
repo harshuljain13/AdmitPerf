@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 
 from admitperf.core.api import SystemState
-from admitperf_zoo.chronos.wcrt import CostModel
+from admitperf_policies.chronos.wcrt import CostModel
 
 #: Counter pairs, named once so a vLLM rename shows up in one place.
 PREFILL_TIME = ("vllm:request_prefill_time_seconds_sum", "vllm:request_prefill_time_seconds_count")

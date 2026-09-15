@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from admitperf_zoo.chronos.estimator import ArrivalRateWindow
+from admitperf_policies.chronos.estimator import ArrivalRateWindow
 
 from admitperf.core.api import DecisionKind, Request, SystemState
 from admitperf.core.registry import get_policy, requirements_of

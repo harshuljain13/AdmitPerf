@@ -168,7 +168,11 @@ def test_matrix_entries_inherit_the_base_infra() -> None:
     """A sweep should state only what varies, not repeat the whole config."""
     cfg = ExperimentConfig.from_dict(
         {
-            "infra": {"model": "m/x", "served_model_name": "lab", "engine": {"max_model_len": 4096}},
+            "infra": {
+                "model": "m/x",
+                "served_model_name": "lab",
+                "engine": {"max_model_len": 4096},
+            },
             "matrix": [{"gpu": "A10G"}, {"gpu": "A100"}],
         }
     )
@@ -196,7 +200,11 @@ def test_deployment_labels_describe_what_differs() -> None:
             "infra": {"model": "Qwen/Qwen2.5-0.5B-Instruct"},
             "matrix": [
                 {"gpu": "A10G", "engine": {"max_num_seqs": 4}},
-                {"gpu": "A100", "gpu_count": 4, "engine": {"max_num_seqs": 16, "tensor_parallel_size": 4}},
+                {
+                    "gpu": "A100",
+                    "gpu_count": 4,
+                    "engine": {"max_num_seqs": 16, "tensor_parallel_size": 4},
+                },
             ],
         }
     )
