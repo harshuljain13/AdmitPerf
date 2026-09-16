@@ -274,3 +274,34 @@ def test_page_file_title_and_url_are_the_same_word() -> None:
         assert title.lower().replace(" ", "") == filename, f"{filename}.py is titled {title!r}"
         assert title[0].isupper(), f"{title!r} does not start with a capital"
         assert (DASHBOARD / "pages" / f"{filename}.py").exists()
+
+
+def test_the_entry_point_renders() -> None:
+    """app.py itself, not just the pages it routes to.
+
+    Navigation is declared here, and a bad icon or a missing page file raises
+    only when it is rendered. The server still returns 200, so nothing short of
+    rendering catches it — which is how an invalid icon shipped.
+    """
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "app.py"), default_timeout=120)
+    app.run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+
+
+def test_page_icons_are_material_names_not_unicode_symbols() -> None:
+    """st.Page accepts an emoji or a Material icon. A plain Unicode glyph like
+    "✎" looks like an icon in an editor and is rejected at render."""
+    import re
+
+    source = (DASHBOARD / "app.py").read_text()
+    # st.Page icons only. set_page_config takes page_icon, where a plain emoji
+    # is valid, so the two must not be checked by the same rule.
+    icons = re.findall(r'(?<!page_)icon="([^"]+)"', source)
+
+    assert icons, "no page icons found"
+    for icon in icons:
+        assert icon.startswith(":material/") and icon.endswith(":"), (
+            f"{icon!r} is not a Material icon name; st.Page will reject it at render"
+        )

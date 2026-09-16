@@ -39,6 +39,10 @@ except AttributeError:  # pragma: no cover - altair < 5.5
 
 # Grouped in the order the work happens: set something up, measure it, then
 # look things up when a term or a policy is unfamiliar.
+# Icons are Material names, not emoji. st.Page rejects plain Unicode symbols
+# such as "✎", and the failure only surfaces when the page is rendered — the
+# server still returns 200.
+#
 # File name, page title and URL all match. Anything else is a trap for whoever
 # reads the sidebar and then goes looking for the file.
 st.navigation(
@@ -47,26 +51,33 @@ st.navigation(
             st.Page(
                 HERE / "pages" / "experiments.py",
                 title="Experiments",
-                icon="✎",
+                icon=":material/science:",
                 url_path="experiments",
                 default=True,
             ),
             st.Page(
                 HERE / "pages" / "algorithms.py",
                 title="Algorithms",
-                icon="⚙",
+                icon=":material/tune:",
                 url_path="algorithms",
             ),
         ],
         "Measure": [
-            st.Page(HERE / "pages" / "run.py", title="Run", icon="▸", url_path="run"),
-            st.Page(HERE / "pages" / "results.py", title="Results", icon="▤", url_path="results"),
+            st.Page(
+                HERE / "pages" / "run.py", title="Run", icon=":material/play_arrow:", url_path="run"
+            ),
+            st.Page(
+                HERE / "pages" / "results.py",
+                title="Results",
+                icon=":material/bar_chart:",
+                url_path="results",
+            ),
         ],
         "Reference": [
             st.Page(
                 HERE / "pages" / "terminology.py",
                 title="Terminology",
-                icon="≡",
+                icon=":material/menu_book:",
                 url_path="terminology",
             ),
         ],
