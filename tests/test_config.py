@@ -226,3 +226,16 @@ def test_every_matrix_entry_is_validated() -> None:
         ExperimentConfig.from_dict(
             {"matrix": [{"gpu": "A10G", "gpu_count": 1, "engine": {"tensor_parallel_size": 8}}]}
         )
+
+
+# --- duration, warmup, relative SLOs --------------------------------------
+
+
+def test_warmup_must_leave_something_to_measure() -> None:
+    with pytest.raises(ConfigError, match="warmup_s"):
+        ExperimentConfig.from_dict({"workload": {"duration_s": 60, "warmup_s": 60}})
+
+
+def test_slo_mode_is_restricted() -> None:
+    with pytest.raises(ConfigError, match="slo_mode"):
+        ExperimentConfig.from_dict({"workload": {"slo_mode": "whatever"}})

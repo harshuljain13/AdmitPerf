@@ -25,6 +25,7 @@ from pathlib import Path
 import click
 
 from admitperf import __version__
+from admitperf.bench.workloads.poisson import Baseline
 from admitperf.core.config import ConfigError, ExperimentConfig
 from admitperf.core.registry import available
 
@@ -45,6 +46,27 @@ def _resolve_endpoint(engine_url: str | None) -> tuple[str, str]:
     except FileNotFoundError as exc:
         raise SystemExit(str(exc)) from exc
     return session.primary, session.served_model_name
+
+
+def _baseline_for(cfg: ExperimentConfig, engine_url: str | None) -> Baseline | None:
+    """The measured baseline relative SLOs scale from, if one is needed."""
+    from admitperf.infra.session import SessionStore
+
+    if cfg.workload.slo_mode != "relative":
+        return None
+
+    store = SessionStore()
+    saved = store.load().baseline if store.exists() else None
+    if not saved:
+        raise SystemExit(
+            "slo_mode is 'relative' but no baseline has been measured. "
+            "Run `admitperf infra calibrate` first, or set slo_mode: absolute."
+        )
+    return Baseline(
+        ttft_p50_ms=saved["ttft_p50_ms"],
+        itl_p50_ms=saved["itl_p50_ms"],
+        samples=int(saved.get("samples", 0)),
+    )
 
 
 @click.group()
@@ -214,6 +236,51 @@ def infra_smoke(engine_url: str | None) -> None:
     click.echo("SMOKE PASS")
 
 
+@infra.command("calibrate")
+@click.option("--engine-url", default=None, help="Override the session endpoint")
+@click.option("--samples", default=12, show_default=True)
+def infra_calibrate(engine_url: str | None, samples: int) -> None:
+    """Measure unloaded latency, so SLOs can be set relative to it.
+
+    Fixed millisecond deadlines do not transfer between regimes — 500ms is
+    generous for a small model and impossible for a large one — so a comparison
+    across hardware needs deadlines expressed as multiples of what the engine
+    does when nothing is queued.
+    """
+    from admitperf.bench.calibrate import calibrate
+    from admitperf.engines.vllm import VllmConfig, VllmEngine
+    from admitperf.infra.session import SessionStore
+
+    url, served = _resolve_endpoint(engine_url)
+
+    async def go() -> Baseline:
+        engine = VllmEngine(VllmConfig(base_url=url, model=served))
+        try:
+            return await calibrate(engine, samples=samples)
+        finally:
+            await engine.aclose()
+
+    click.echo(f"sending {samples} requests one at a time against {url}...")
+    baseline = asyncio.run(go())
+
+    click.echo(f"  unloaded TTFT p50 : {baseline.ttft_p50_ms:.0f}ms")
+    click.echo(f"  unloaded ITL  p50 : {baseline.itl_p50_ms:.1f}ms")
+    click.echo(f"  samples           : {baseline.samples}")
+
+    store = SessionStore()
+    if store.exists():
+        session = store.load()
+        session.baseline = {
+            "ttft_p50_ms": baseline.ttft_p50_ms,
+            "itl_p50_ms": baseline.itl_p50_ms,
+            "samples": float(baseline.samples),
+        }
+        store.save(session)
+        click.echo("saved to the session; `slo_mode: relative` will use it")
+    else:
+        click.echo("no session to save into — pass these as absolute deadlines instead")
+
+
 @infra.command("down")
 def infra_down() -> None:
     """Stop the engine and forget the session."""
@@ -264,6 +331,7 @@ def bench_run(
         raise SystemExit(f"config error: {exc}") from exc
 
     url, served = _resolve_endpoint(engine_url)
+    baseline = _baseline_for(cfg, engine_url)
 
     try:
         asyncio.run(
@@ -272,6 +340,7 @@ def bench_run(
                 engine_url=url,
                 served_model=served,
                 out_dir=Path(out) if out else None,
+                baseline=baseline,
             )
         )
     except KeyboardInterrupt:

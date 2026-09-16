@@ -162,11 +162,42 @@ class WorkloadConfig:
     rate: float = 10.0
     seed: int = 0
 
+    #: Run for a fixed time instead of a fixed request count. Preferred for
+    #: comparisons: with a fixed count, a policy that refuses most traffic
+    #: finishes early and is measured over a different window than the baseline
+    #: it is being compared against.
+    duration_s: float | None = None
+
+    #: Requests arriving in this opening window are sent but excluded from the
+    #: results. They pay for cold caches, CUDA graph capture and a cold prefix
+    #: cache, none of which is the policy's doing.
+    warmup_s: float = 0.0
+
+    #: "absolute" takes the deadlines in the SLO classes as milliseconds.
+    #: "relative" multiplies them by the engine's unloaded latency, measured by
+    #: `admitperf infra calibrate`. Fixed milliseconds do not transfer between
+    #: a 0.5B model on an A10G and a 70B on four GPUs, so a comparison across
+    #: hardware needs the relative form to mean the same thing in both places.
+    slo_mode: str = "absolute"
+
     def validate(self) -> None:
         if self.n < 1:
             raise ConfigError(f"workload.n must be >= 1, got {self.n}")
         if self.rate <= 0:
             raise ConfigError(f"workload.rate must be > 0, got {self.rate}")
+        if self.duration_s is not None and self.duration_s <= 0:
+            raise ConfigError(f"workload.duration_s must be > 0, got {self.duration_s}")
+        if self.warmup_s < 0:
+            raise ConfigError(f"workload.warmup_s must be >= 0, got {self.warmup_s}")
+        if self.duration_s is not None and self.warmup_s >= self.duration_s:
+            raise ConfigError(
+                f"workload.warmup_s ({self.warmup_s}) must be less than "
+                f"duration_s ({self.duration_s}), or nothing is measured"
+            )
+        if self.slo_mode not in {"absolute", "relative"}:
+            raise ConfigError(
+                f"workload.slo_mode must be absolute or relative, got {self.slo_mode!r}"
+            )
 
 
 @dataclass
@@ -202,6 +233,11 @@ class BenchConfig:
     scrape_interval_s: float = 0.1
     max_state_age_s: float = 5.0
     max_defers: int = 100
+
+    #: Shuffle which policy runs first within each repeat. A fixed order lets
+    #: thermal drift, cache warming and any slow leak accumulate against
+    #: whichever policy always runs last.
+    randomize_policy_order: bool = True
 
     def validate(self) -> None:
         if self.repeats < 1:

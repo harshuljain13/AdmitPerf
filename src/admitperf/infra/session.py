@@ -37,6 +37,9 @@ class Session:
     #: later `bench run` records what the engine was actually configured with
     #: rather than what the caller assumed.
     config: dict[str, Any] = field(default_factory=dict)
+    #: Unloaded latency, from `admitperf infra calibrate`. Relative SLOs are
+    #: multiples of this, so it belongs with the deployment that produced it.
+    baseline: dict[str, float] | None = None
 
     @property
     def primary(self) -> str:

@@ -22,6 +22,7 @@ from typing import Any
 
 from admitperf.bench.slo import Attainment, judge
 from admitperf.core.api import Request
+from admitperf.core.ports import RequestOutcome
 from admitperf.core.runner import RunResult
 
 
@@ -52,18 +53,35 @@ def _round(value: float | None, places: int = 4) -> float | None:
 
 
 def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> dict[str, Any]:
-    completed = [o for o in result.outcomes if o.status == "completed"]
+    per_request = requests or {}
+
+    def _measured(outcome: RequestOutcome) -> bool:
+        """Warmup requests are load, not evidence. They are sent so the engine
+        faces realistic pressure, but they pay for cold caches and graph
+        capture, which is not the policy's doing."""
+        req = per_request.get(outcome.request_id)
+        return not (req and req.metadata.get("warmup"))
+
+    outcomes = [o for o in result.outcomes if _measured(o)]
+    completed = [o for o in outcomes if o.status == "completed"]
     ttfts = [o.ttft_ms for o in completed if o.ttft_ms is not None]
     tbts = [gap for o in completed for gap in o.tbt_ms]
 
-    offered = result.admitted + result.rejected
+    warm_ids = {rid for rid, r in per_request.items() if r.metadata.get("warmup")}
+    # Every count comes from the same filtered set. Mixing a warmup-inclusive
+    # numerator with a warmup-excluding denominator produced admit rates above
+    # 100%, which is how the inconsistency announced itself.
+    measured = [d for d in result.decisions if d.request_id not in warm_ids]
+    admitted = sum(1 for d in measured if d.kind == "admit")
+    rejected = sum(1 for d in measured if d.kind == "reject")
+    deferred = sum(1 for d in measured if d.kind == "defer")
+    offered = admitted + rejected
     wall = result.wall_s or 1.0
 
     # Judge each outcome against what its request was actually promised, so
     # TTFT and inter-token latency are assessed jointly rather than TTFT alone.
-    att = Attainment(arrived=offered, admitted=result.admitted, rejected=result.rejected)
-    per_request = requests or {}
-    for outcome in result.outcomes:
+    att = Attainment(arrived=offered, admitted=admitted, rejected=rejected)
+    for outcome in outcomes:
         req = per_request.get(outcome.request_id)
         if req is None:
             continue
@@ -71,9 +89,10 @@ def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> 
 
     # A refusal is only useful if it is fast, and the arrival loop falling
     # behind would inflate this — so it doubles as a coordinated-omission check.
+
     reject_latency = [
         d.decision_latency_ms
-        for d in result.decisions
+        for d in measured
         if d.kind == "reject" and d.decision_latency_ms is not None
     ]
     decision_lag = [
@@ -82,9 +101,10 @@ def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> 
 
     return {
         "offered": offered,
-        "admitted": result.admitted,
-        "deferred": result.deferred,
-        "rejected": result.rejected,
+        "admitted": admitted,
+        "deferred": deferred,
+        "rejected": rejected,
+        "warmup_excluded": len(warm_ids),
         "completed": result.completed,
         "failed": result.failed,
         "reject_reasons": dict(result.reject_reasons),
@@ -100,7 +120,7 @@ def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> 
         # highest load holding attainment above a target — needs a load sweep,
         # not a single run.
         "goodput_rps": round(att.met / wall, 3),
-        "admit_rate": round(result.admitted / offered, 4) if offered else None,
+        "admit_rate": round(admitted / offered, 4) if offered else None,
         "ttft_ms": percentiles([float(v) for v in ttfts]),
         "tbt_ms": percentiles([float(v) for v in tbts]),
         "slo": {

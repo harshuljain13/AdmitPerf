@@ -14,6 +14,7 @@ between policies would change the thing being controlled for.
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from admitperf.bench.results import summarize, write_bundle
-from admitperf.bench.workloads.poisson import PoissonWorkload
+from admitperf.bench.workloads.poisson import Baseline, PoissonWorkload
 from admitperf.core.config import Deployment, ExperimentConfig, PolicySpec
 from admitperf.core.registry import get_policy
 from admitperf.core.runner import Runner, RunnerConfig, RunResult
@@ -39,6 +40,7 @@ async def run_one(
     engine_url: str,
     served_model: str,
     seed: int,
+    baseline: Baseline | None = None,
 ) -> tuple[dict[str, Any], RunResult]:
     """One policy, one repeat."""
     engine = VllmEngine(VllmConfig(base_url=engine_url, model=served_model))
@@ -46,6 +48,9 @@ async def run_one(
         n_requests=cfg.workload.n,
         rate_per_s=cfg.workload.rate,
         seed=seed,
+        duration_s=cfg.workload.duration_s,
+        warmup_s=cfg.workload.warmup_s,
+        baseline=baseline if cfg.workload.slo_mode == "relative" else None,
     )
     runner = Runner(
         workload=workload,
@@ -71,6 +76,7 @@ async def run_experiment(
     served_model: str,
     out_dir: Path | None = None,
     deployment: Deployment | None = None,
+    baseline: Baseline | None = None,
 ) -> Path:
     """Every policy × every repeat against one deployment.
 
@@ -84,13 +90,24 @@ async def run_experiment(
     print(
         f"experiment '{cfg.name}': {len(cfg.policies)} "
         f"{'policy' if len(cfg.policies) == 1 else 'policies'} × "
-        f"{cfg.bench.repeats} repeat(s), {cfg.workload.n} requests at "
-        f"{cfg.workload.rate}/s against {engine_url}"
+        f"{cfg.bench.repeats} repeat(s), "
+        + (
+            f"{cfg.workload.duration_s:.0f}s (warmup {cfg.workload.warmup_s:.0f}s)"
+            if cfg.workload.duration_s
+            else f"{cfg.workload.n} requests"
+        )
+        + f" at {cfg.workload.rate}/s against {engine_url}"
     )
 
     index: list[dict[str, Any]] = []
-    for spec in cfg.policies:
-        for repeat in range(cfg.bench.repeats):
+    for repeat in range(cfg.bench.repeats):
+        # Shuffle within each repeat. A fixed order lets thermal drift, cache
+        # warming and any slow leak accumulate against whichever policy always
+        # runs last — it would look worse for reasons that are not its own.
+        order = list(cfg.policies)
+        if cfg.bench.randomize_policy_order:
+            random.Random(cfg.workload.seed + repeat).shuffle(order)
+        for spec in order:
             # Vary the seed per repeat, or every repeat replays identical
             # traffic and the spread measures nothing but engine jitter.
             seed = cfg.workload.seed + repeat
@@ -98,7 +115,12 @@ async def run_experiment(
             print(f"  {label} ... ", end="", flush=True)
 
             summary, result = await run_one(
-                cfg, spec, engine_url=engine_url, served_model=served_model, seed=seed
+                cfg,
+                spec,
+                engine_url=engine_url,
+                served_model=served_model,
+                seed=seed,
+                baseline=baseline,
             )
             print(
                 f"admitted {summary['admitted']}/{summary['offered']}  "
@@ -129,6 +151,8 @@ async def run_experiment(
                     "repeat": repeat + 1,
                     "repeats": cfg.bench.repeats,
                     "seed": seed,
+                    "slo_mode": cfg.workload.slo_mode,
+                    "baseline": asdict(baseline) if baseline else None,
                     "engine_url": engine_url,
                     "deployment": deployment.label if deployment else None,
                     "deployment_infra": asdict(deployment.infra) if deployment else None,

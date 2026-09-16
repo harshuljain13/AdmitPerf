@@ -106,3 +106,52 @@ def test_events_view_matches_requests_view() -> None:
 def test_rejects_nonsense_configuration(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         PoissonWorkload(**kwargs)  # type: ignore[arg-type]
+
+
+# --- duration, warmup, relative deadlines ---------------------------------
+
+
+def test_duration_mode_stops_on_time_not_on_count() -> None:
+    """Preferred for comparisons: with a fixed count a heavy-shedding policy
+    finishes early and is measured over a different window."""
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
+
+    reqs = list(W(duration_s=5.0, rate_per_s=20.0, seed=0).requests())
+    assert reqs[-1].arrival_time <= 5.0
+    assert len(reqs) > 50  # not the default n
+
+
+def test_warmup_requests_are_marked_not_dropped() -> None:
+    """They are still sent — they are part of the load the engine faces — but
+    flagged so the summary can exclude them."""
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
+
+    reqs = list(W(duration_s=5.0, warmup_s=2.0, rate_per_s=20.0, seed=0).requests())
+    warm = [r for r in reqs if r.metadata["warmup"]]
+
+    assert warm, "warmup window produced no requests"
+    assert all(r.arrival_time < 2.0 for r in warm)
+    assert all(not r.metadata["warmup"] for r in reqs if r.arrival_time >= 2.0)
+
+
+def test_relative_deadlines_scale_off_the_measured_baseline() -> None:
+    """500ms is generous for a small model and impossible for a large one, so a
+    fixed threshold measures the model rather than the policy."""
+    from admitperf.bench.workloads.poisson import Baseline
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
+
+    slow = list(W(n_requests=200, seed=1, baseline=Baseline(400.0, 40.0)).requests())
+    fast = list(W(n_requests=200, seed=1, baseline=Baseline(100.0, 10.0)).requests())
+
+    slow_i = next(r for r in slow if r.slo_class == "interactive")
+    fast_i = next(r for r in fast if r.slo_class == "interactive")
+
+    # Same 3x multiplier, four times the allowance on the slower engine.
+    assert slow_i.deadline_ttft_ms == pytest.approx(fast_i.deadline_ttft_ms * 4)
+
+
+def test_absolute_deadlines_are_used_when_no_baseline_is_given() -> None:
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
+
+    req = next(r for r in W(n_requests=200, seed=1).requests() if r.slo_class == "interactive")
+    assert req.deadline_ttft_ms == 500.0

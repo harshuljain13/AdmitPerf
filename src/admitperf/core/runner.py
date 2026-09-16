@@ -191,6 +191,10 @@ class Runner:
         if decision.kind is DecisionKind.DEFER and attempt >= self.config.max_defers:
             decision = Decision.reject(reason="defer_exhausted")
 
+        # Every request is retained, warmup included: the summary needs to know
+        # which were warmup in order to exclude them, and a request absent from
+        # the map is simply invisible.
+        self.result.requests.setdefault(req.request_id, req)
         self._record(req, decision, state)
 
         if decision.kind is DecisionKind.ADMIT:
