@@ -79,7 +79,7 @@ cannot improve it by refusing more, only by refusing better.
 
 ## Terminology
 
-A searchable glossary, grouped from concepts through to engine settings. It
+A searchable reference, grouped from concepts through to engine settings. It
 exists because the pair that causes the most confusion —"on time" versus "of
 admitted, on time" — looks interchangeable and is not. A test asserts that
 every term used in the results pages is explained here, so a chart label
@@ -92,3 +92,14 @@ near-black ground, admit-yellow, white, grey, Helvetica 900. The wordmark spells
 *Admit* in yellow, which is why yellow also means admitted in every chart. A
 test asserts the palette against the SVG, so editing the banner fails the suite
 rather than letting the app drift.
+
+## Naming
+
+File name, sidebar title and URL path are the same word for every page:
+`experiments.py` → **Experiments** → `/experiments`. A page titled one thing
+and filed under another is a trap for whoever reads the sidebar and then goes
+looking for the code.
+
+Every user-facing label — page titles, section headings, tab names, chart axes,
+tooltips — starts with a capital. A test asserts the three names stay aligned,
+so a rename cannot drift them apart.

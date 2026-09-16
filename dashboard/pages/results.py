@@ -49,7 +49,7 @@ def render() -> None:
 
     if not RESULTS.exists() or not any(RESULTS.rglob("summary.json")):
         empty_state(
-            "No results yet",
+            "No Results Yet",
             "Design an experiment, then run it. Results appear here automatically.",
         )
         return
@@ -70,7 +70,7 @@ def render() -> None:
     runs = discover(root)
     frame = runs_frame(runs)
     if frame.empty:
-        empty_state("Nothing readable in this folder", "The bundles may be incomplete.")
+        empty_state("Nothing Readable In This Folder", "The bundles may be incomplete.")
         return
 
     deployments = sorted(frame["deployment"].dropna().unique())
@@ -158,13 +158,13 @@ def render() -> None:
                 tone="flat",
             )
 
-    tabs = st.tabs(["Comparison", "What refusing cost", "Why refused", "Everything"])
+    tabs = st.tabs(["Comparison", "Cost Of Refusing", "Refusal Reasons", "All Runs"])
 
     # --- comparison -------------------------------------------------------
 
     with tabs[0]:
         section(
-            "How many arriving requests were served on time",
+            "Requests Served On Time",
             "Refusals count as misses, so a policy cannot improve this by "
             "refusing more — only by refusing better.",
         )
@@ -187,9 +187,9 @@ def render() -> None:
                         legend=None,
                     ),
                     tooltip=[
-                        alt.Tooltip("policy:N", title="policy"),
-                        alt.Tooltip("offered_attainment:Q", title="on time", format=".1%"),
-                        alt.Tooltip("admit_rate:Q", title="admitted", format=".1%"),
+                        alt.Tooltip("policy:N", title="Policy"),
+                        alt.Tooltip("offered_attainment:Q", title="On time", format=".1%"),
+                        alt.Tooltip("admit_rate:Q", title="Admitted", format=".1%"),
                         alt.Tooltip("ttft_p95:Q", title="TTFT p95", format=".0f"),
                     ],
                 )
@@ -200,7 +200,7 @@ def render() -> None:
             )
             st.altair_chart(bars + labels, use_container_width=True)
 
-        section("The table", "One row per policy, median across repeats.")
+        section("Summary Table", "One row per policy, median across repeats.")
         table = pd.DataFrame(
             {
                 "Policy": agg["policy"],
@@ -223,7 +223,7 @@ def render() -> None:
 
     with tabs[1]:
         section(
-            "Latency against requests served",
+            "Latency Against Requests Served",
             "Up and to the left is better. Far left but low means refusing "
             "traffic it could have served.",
         )
@@ -235,10 +235,10 @@ def render() -> None:
                 alt.Chart(pts)
                 .mark_circle(size=200, opacity=0.85)
                 .encode(
-                    x=alt.X("ttft_p95:Q", title="slow-request latency (ms) — lower better"),
+                    x=alt.X("ttft_p95:Q", title="Slow-request latency (ms) — lower is better"),
                     y=alt.Y(
                         "offered_attainment:Q",
-                        title="served on time — higher better",
+                        title="Served on time — higher is better",
                         axis=alt.Axis(format="%"),
                     ),
                     color=alt.Color(
@@ -254,7 +254,7 @@ def render() -> None:
             )
 
         section(
-            "Wasted work",
+            "Wasted Work",
             "Tokens generated for requests that missed their deadline anyway — "
             "the clearest statement of what refusing saved.",
         )
@@ -277,7 +277,7 @@ def render() -> None:
     # --- why refused ------------------------------------------------------
 
     with tabs[2]:
-        section("What each policy gave as its reason", "")
+        section("Reasons Given", "")
         rows = [
             {"policy": r.policy, "reason": reason, "count": count}
             for r in runs
@@ -296,7 +296,7 @@ def render() -> None:
                 .encode(
                     x=alt.X(
                         "count:Q",
-                        title="share of refusals",
+                        title="Share of refusals",
                         stack="normalize",
                         axis=alt.Axis(format="%"),
                     ),
@@ -327,7 +327,7 @@ def render() -> None:
                     alt.Chart(dec)
                     .mark_line(color=YELLOW, strokeWidth=2)
                     .encode(
-                        x=alt.X("t:Q", title="seconds into the run"),
+                        x=alt.X("t:Q", title="Seconds into the run"),
                         y=alt.Y(f"{signal}:Q", title=signal),
                     )
                     .properties(height=180)
@@ -369,7 +369,7 @@ def render() -> None:
     # --- everything -------------------------------------------------------
 
     with tabs[3]:
-        section("Every run", "Unaggregated — this is where the spread lives.")
+        section("Every Run", "Unaggregated — this is where the spread lives.")
         st.dataframe(frame, width="stretch", hide_index=True)
         st.download_button(
             "Download CSV", frame.to_csv(index=False).encode(), f"{chosen}.csv", "text/csv"
@@ -377,7 +377,7 @@ def render() -> None:
 
         missing = unavailable_metrics(runs)
         if missing:
-            section("Not measurable", "Named with the reason rather than estimated.")
+            section("Not Measurable", "Named with the reason rather than estimated.")
             for name, why in missing.items():
                 st.markdown(
                     f'<div style="color:{GREY};font-size:0.85rem;margin-bottom:0.3rem">'

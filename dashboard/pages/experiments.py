@@ -47,7 +47,7 @@ POLICY_PARAMS: dict[str, list[tuple[str, str, float, float, float, str]]] = {
 
 def render() -> None:
     st.markdown(HEADER, unsafe_allow_html=True)
-    st.markdown("## Design an experiment")
+    st.markdown("## Experiments")
     note(
         "Every policy will face the <b>same</b> deployment and the <b>same</b> "
         "seeded traffic, so the only thing that differs between them is the "
@@ -64,7 +64,7 @@ def render() -> None:
     # --- infrastructure ---------------------------------------------------
 
     with tab_infra:
-        section("What to run on", "The engine every policy will be measured against.")
+        section("What To Run On", "The engine every policy will be measured against.")
         c1, c2, c3 = st.columns(3)
         model = c1.text_input("Model", "Qwen/Qwen2.5-0.5B-Instruct")
         gpu = c2.selectbox("GPU", ["A10G", "A100", "H100", "L4", "T4"], index=0)
@@ -108,7 +108,7 @@ def render() -> None:
     # --- traffic ----------------------------------------------------------
 
     with tab_traffic:
-        section("How much traffic", "Arrivals are random and bursty, the way real traffic is.")
+        section("How Much Traffic", "Arrivals are random and bursty, the way real traffic is.")
         c1, c2 = st.columns(2)
         rate = c1.number_input(
             "Arrivals per second",
@@ -155,7 +155,7 @@ def render() -> None:
     # --- policies ---------------------------------------------------------
 
     with tab_policies:
-        section("Which policies to compare", "Include a baseline, or there is nothing to beat.")
+        section("Which Policies To Compare", "Include a baseline, or there is nothing to beat.")
         registry = sorted(available())
         chosen = st.multiselect(
             "Policies",

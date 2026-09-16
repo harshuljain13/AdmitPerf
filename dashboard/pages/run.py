@@ -42,7 +42,7 @@ def render() -> None:
     configs = sorted(EXPERIMENTS.glob("*.yaml")) if EXPERIMENTS.exists() else []
     if not configs:
         empty_state(
-            "No experiments yet",
+            "No Experiments Yet",
             "Design one first — the Design page writes a config here.",
             "",
         )
@@ -54,7 +54,7 @@ def render() -> None:
     chosen = st.selectbox("Experiment", names, index=default)
     config_path = EXPERIMENTS / chosen
 
-    section("Where to run it", "")
+    section("Where To Run It", "")
 
     target = st.radio(
         "Engine",
@@ -153,7 +153,7 @@ def render() -> None:
                 "config that cannot produce a working deployment."
             )
 
-    section("Recent results", "")
+    section("Recent Results", "")
     if RESULTS.exists():
         recent = sorted(
             (d for d in RESULTS.iterdir() if d.is_dir()),

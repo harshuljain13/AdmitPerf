@@ -100,7 +100,7 @@ def render() -> None:
 
     registry = available()
 
-    section("Choosing one", "")
+    section("Choosing One", "")
     st.markdown(
         """
 | If the bottleneck is… | Use | Because |
@@ -112,7 +112,7 @@ def render() -> None:
 """
     )
 
-    section("Every installed policy", f"{len(registry)} found in the registry.")
+    section("Every Installed Policy", f"{len(registry)} found in the registry.")
 
     for name in sorted(registry):
         cls = registry[name]
@@ -163,7 +163,7 @@ def render() -> None:
                 c1.markdown(
                     f'<div style="border-left:2px solid {YELLOW};padding-left:0.7rem">'
                     f'<div style="color:{WHITE};font-size:0.85rem;font-weight:600">'
-                    f"When it fits</div>"
+                    f"When It Fits</div>"
                     f'<div style="color:{GREY};font-size:0.83rem;margin-top:0.2rem">'
                     f"{info['fits']}</div></div>",
                     unsafe_allow_html=True,
@@ -172,7 +172,7 @@ def render() -> None:
                 c2.markdown(
                     f'<div style="border-left:2px solid #FF5A52;padding-left:0.7rem">'
                     f'<div style="color:{WHITE};font-size:0.85rem;font-weight:600">'
-                    f"When it misleads</div>"
+                    f"When It Misleads</div>"
                     f'<div style="color:{GREY};font-size:0.83rem;margin-top:0.2rem">'
                     f"{info['fails']}</div></div>",
                     unsafe_allow_html=True,
@@ -190,7 +190,7 @@ def render() -> None:
                 unsafe_allow_html=True,
             )
 
-    section("Adding your own", "No change to this repository is needed.")
+    section("Adding Your Own", "No change to this repository is needed.")
     st.code(
         """from admitperf import AdmissionPolicy, Decision, Request, SystemState
 

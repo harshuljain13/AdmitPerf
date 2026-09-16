@@ -22,7 +22,7 @@ TERMS: list[tuple[str, str, str, str]] = [
     # (term, group, short, why it matters)
     (
         "Admission control",
-        "The idea",
+        "Concepts",
         "Deciding, for each arriving request, whether to accept it, hold it, or "
         "refuse it — before the engine starts work.",
         "Under overload a server that accepts everything serves everyone badly. "
@@ -30,32 +30,32 @@ TERMS: list[tuple[str, str, str, str]] = [
     ),
     (
         "Prefill",
-        "The idea",
+        "Concepts",
         "Reading the prompt. Happens once per request, and costs more for longer prompts.",
         "This is what the caller waits through before seeing any output at all.",
     ),
     (
         "Decode",
-        "The idea",
+        "Concepts",
         "Generating the answer, one token at a time, after prefill.",
         "Every token has to arrive promptly or the response looks like it is stuttering.",
     ),
     (
         "KV cache",
-        "The idea",
+        "Concepts",
         "Memory the engine uses to hold what it already computed for each in-flight request.",
         "It is finite. When it fills, the engine must evict or preempt work, and "
         "requests get slower or restart.",
     ),
     (
         "TTFT",
-        "What we measure",
+        "What We Measure",
         "Time To First Token — how long the caller waits before seeing anything.",
         "The number admission control affects most, because queueing lands here.",
     ),
     (
         "ITL / TBT",
-        "What we measure",
+        "What We Measure",
         "Inter-Token Latency, also called Time Between Tokens — the gap between "
         "consecutive output tokens.",
         "We judge it at each request's <b>p95</b>, not its average. An average "
@@ -65,7 +65,7 @@ TERMS: list[tuple[str, str, str, str]] = [
     ),
     (
         "p95",
-        "What we measure",
+        "What We Measure",
         "The value 95% of samples fall below. p95 of 200ms means 1 request in 20 waited longer.",
         "Averages hide the bad tail, and the bad tail is what users complain about.",
     ),
@@ -110,25 +110,25 @@ TERMS: list[tuple[str, str, str, str]] = [
     ),
     (
         "kv_pressure",
-        "Rejection reasons",
+        "Rejection Reasons",
         "Refused because the KV cache was too full.",
         "",
     ),
     (
         "queue_depth",
-        "Rejection reasons",
+        "Rejection Reasons",
         "Refused because too many requests were already waiting.",
         "",
     ),
     (
         "deadline_unmeetable",
-        "Rejection reasons",
+        "Rejection Reasons",
         "Refused because the predicted wait exceeded what this request was promised.",
         "Only a deadline-aware policy can give this reason.",
     ),
     (
         "overloaded",
-        "Rejection reasons",
+        "Rejection Reasons",
         "Refused because the server was judged oversubscribed, before looking at "
         "the individual request.",
         "If most refusals carry this reason, the policy is acting as a blunt rate "
@@ -136,47 +136,47 @@ TERMS: list[tuple[str, str, str, str]] = [
     ),
     (
         "no_signal",
-        "Rejection reasons",
+        "Rejection Reasons",
         "Refused because the engine's state was too stale to decide on.",
         "The harness, not the policy. Deciding on an old snapshot is guessing.",
     ),
     (
         "Warmup",
-        "Running an experiment",
+        "Running An Experiment",
         "An opening window whose requests are sent but excluded from the results.",
         "They pay for cold caches and one-time setup, which is not the policy's doing.",
     ),
     (
         "Repeats",
-        "Running an experiment",
+        "Running An Experiment",
         "Running the same policy several times.",
         "A live engine gives a different number each time. One run per policy is "
         "a measurement, not a comparison.",
     ),
     (
         "Deployment",
-        "Running an experiment",
+        "Running An Experiment",
         "One provisioned engine: a specific model, on specific hardware, with specific settings.",
         "The unit of comparison. Policies are comparable only within one — a "
         "table mixing two machines reports the machine, not the policy.",
     ),
     (
         "Degraded run",
-        "Running an experiment",
+        "Running An Experiment",
         "A run where most attempts to read engine state failed.",
         "The policy was deciding on stale information, so the numbers describe "
         "the traffic rather than the policy. Hidden by default.",
     ),
     (
         "Concurrency cap (max_num_seqs)",
-        "Engine settings",
+        "Engine Settings",
         "How many requests the engine will work on at once.",
         "The setting that creates queueing. Raise it too far and nothing queues, "
         "so every policy scores the same and the experiment measures nothing.",
     ),
     (
         "Prefix caching",
-        "Engine settings",
+        "Engine Settings",
         "Reusing computation when prompts share a beginning.",
         "Turned off for benchmarking: with it on, repeated prompts skip prefill "
         "and pressure stops tracking offered load.",
@@ -184,13 +184,13 @@ TERMS: list[tuple[str, str, str, str]] = [
 ]
 
 GROUP_ORDER = [
-    "The idea",
-    "What we measure",
+    "Concepts",
+    "What We Measure",
     "Scoring",
     "Decisions",
-    "Rejection reasons",
-    "Running an experiment",
-    "Engine settings",
+    "Rejection Reasons",
+    "Running An Experiment",
+    "Engine Settings",
 ]
 
 

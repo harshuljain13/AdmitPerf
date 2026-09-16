@@ -192,7 +192,7 @@ def test_chart_theme_uses_the_brand_surface() -> None:
 # --- pages ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("page", ["design", "algorithms", "run", "results", "glossary"])
+@pytest.mark.parametrize("page", ["experiments", "algorithms", "run", "results", "terminology"])
 def test_every_page_renders(page: str) -> None:
     """Rendering is where the real failures live — a chart encoding that does
     not match the frame, or a column added to one page and not another. A
@@ -204,24 +204,24 @@ def test_every_page_renders(page: str) -> None:
     assert not app.exception, [str(e.value) for e in app.exception]
 
 
-def test_design_page_offers_every_registered_policy() -> None:
+def test_experiments_page_offers_every_registered_policy() -> None:
     """The form must not hard-code a policy list that drifts from the registry."""
     from streamlit.testing.v1 import AppTest
 
     from admitperf.core.registry import available
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "design.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "experiments.py"), default_timeout=120)
     app.run()
     offered = set(app.multiselect[0].options)
     assert set(available()) <= offered
 
 
-def test_design_page_validates_with_the_same_rules_as_the_cli() -> None:
+def test_experiments_page_validates_with_the_same_rules_as_the_cli() -> None:
     """A setting that would fail at deploy time should fail in the form, in
     milliseconds rather than ten minutes into provisioning."""
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "design.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "experiments.py"), default_timeout=120)
     app.run()
     text = " ".join(m.value for m in app.markdown) + " ".join(c.value for c in app.code)
     assert "policies" in text  # the generated YAML is shown for review
@@ -241,12 +241,12 @@ def test_the_algorithms_page_lists_every_installed_policy() -> None:
         assert name in text, f"{name} is installed but not shown"
 
 
-def test_the_glossary_covers_the_terms_that_appear_in_results() -> None:
+def test_terminology_covers_the_terms_that_appear_in_results() -> None:
     """A term shown in a chart and missing from the glossary is the case worth
     catching — that is exactly where someone goes looking."""
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "glossary.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "terminology.py"), default_timeout=120)
     app.run()
     text = " ".join(m.value for m in app.markdown).lower()
 
@@ -254,3 +254,23 @@ def test_the_glossary_covers_the_terms_that_appear_in_results() -> None:
         assert term in text, f"{term} is used in the app but not explained"
     for reason in ("kv_pressure", "queue_depth", "deadline_unmeetable", "no_signal"):
         assert reason in text, f"rejection reason {reason} is unexplained"
+
+
+def test_page_file_title_and_url_are_the_same_word() -> None:
+    """A page titled one thing and filed under another is a trap for whoever
+    reads the sidebar and then goes looking for the code."""
+    import re
+
+    app_source = (DASHBOARD / "app.py").read_text()
+    entries = re.findall(
+        r'"pages"\s*/\s*"(\w+)\.py".*?title="([^"]+)".*?url_path="([^"]+)"',
+        app_source,
+        re.S,
+    )
+    assert len(entries) >= 5, "expected every page to declare an explicit url_path"
+
+    for filename, title, url in entries:
+        assert filename == url, f"{filename}.py is served at /{url}"
+        assert title.lower().replace(" ", "") == filename, f"{filename}.py is titled {title!r}"
+        assert title[0].isupper(), f"{title!r} does not start with a capital"
+        assert (DASHBOARD / "pages" / f"{filename}.py").exists()
