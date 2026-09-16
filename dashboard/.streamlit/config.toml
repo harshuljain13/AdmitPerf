@@ -1,10 +1,12 @@
-# Palette shared with the C4 diagrams in docs/architecture, so figures in a
-# paper and screenshots of this app look like the same project.
+# Taken from docs/assets/banner.svg, not chosen here: near-black ground,
+# admit-yellow accent, grey secondary text. The wordmark spells "Admit" in
+# yellow, which is why yellow is also the admitted outcome throughout the app.
 [theme]
-primaryColor = "#0f766e"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f1f5f9"
-textColor = "#134e4a"
+base = "dark"
+primaryColor = "#F5C518"
+backgroundColor = "#0B0B0B"
+secondaryBackgroundColor = "#141414"
+textColor = "#FFFFFF"
 font = "sans serif"
 
 [server]

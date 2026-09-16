@@ -138,3 +138,51 @@ def test_unavailable_metrics_are_surfaced(tmp_path: Path) -> None:
 
 def test_empty_directory_yields_an_empty_frame(tmp_path: Path) -> None:
     assert runs_frame(discover(tmp_path)).empty
+
+
+# --- branding -------------------------------------------------------------
+
+
+def test_palette_matches_the_banner_asset() -> None:
+    """The brand lives in docs/assets/banner.svg. If someone edits the banner,
+    this fails rather than letting the app drift away from it."""
+    import re
+    from pathlib import Path
+
+    import theme
+
+    svg = (Path(__file__).resolve().parents[1] / "docs" / "assets" / "banner.svg").read_text()
+    in_banner = {c.upper() for c in re.findall(r"#[0-9a-fA-F]{6}", svg)}
+
+    assert theme.INK.upper() in in_banner
+    assert theme.YELLOW.upper() in in_banner
+    assert theme.WHITE.upper() in in_banner
+    assert theme.GREY.upper() in in_banner
+    assert "Helvetica" in theme.FONT
+
+
+def test_admitted_uses_the_brand_yellow() -> None:
+    """The wordmark spells "Admit" in yellow, so yellow means admitted
+    throughout — one less legend to learn."""
+    import theme
+
+    assert theme.DECISION_COLORS["admit"] == theme.YELLOW
+    assert theme.DECISION_COLORS["reject"] != theme.YELLOW
+
+
+def test_a_policy_keeps_its_colour_across_charts() -> None:
+    import theme
+
+    first = theme.policy_color_map(["a", "b", "c"])
+    again = theme.policy_color_map(["c", "b", "a"])
+    assert first == again
+
+
+def test_chart_theme_uses_the_brand_surface() -> None:
+    """Charts on a light ground inside a dark page look borrowed from another
+    application."""
+    import theme
+
+    cfg = theme.chart_theme()["config"]
+    assert cfg["background"] == "transparent"
+    assert theme.POLICY_COLORS[0] == theme.YELLOW

@@ -28,7 +28,25 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from theme import CSS, DECISION_COLORS, SLATE, TEAL, policy_color_map  # noqa: E402
+from theme import (  # noqa: E402
+    CSS,
+    DECISION_COLORS,
+    HEADER,
+    MUTED,
+    YELLOW,
+    chart_theme,
+    policy_color_map,
+)
+
+# Charts on a light ground inside a dark page look borrowed from another
+# application, so the brand surface is carried into Altair too. The theme API
+# moved in altair 5.5; both spellings are supported so the app runs against
+# whatever the lock resolves.
+try:
+    alt.theme.register("admitperf", enable=True)(chart_theme)
+except AttributeError:  # pragma: no cover - altair < 5.5
+    alt.themes.register("admitperf", chart_theme)
+    alt.themes.enable("admitperf")
 
 from data import (  # noqa: E402
     decisions_frame,
@@ -38,7 +56,7 @@ from data import (  # noqa: E402
     unavailable_metrics,
 )
 
-st.set_page_config(page_title="AdmitPerf", page_icon="🚦", layout="wide")
+st.set_page_config(page_title="AdmitPerf", page_icon="⚡", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
 
 
@@ -64,15 +82,7 @@ def _newest_mtime(root: Path) -> float:
 
 # --- header ---------------------------------------------------------------
 
-st.markdown(
-    """
-    <div class="ap-banner">
-      <h1>🚦 AdmitPerf</h1>
-      <p>Admission control for LLM inference — which policy wins, on what, and by how much.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(HEADER, unsafe_allow_html=True)
 
 root = _results_root()
 if not root.exists():
@@ -214,7 +224,7 @@ with tab_compare:
             color=alt.Color(
                 "measure:N",
                 title=None,
-                scale=alt.Scale(range=[TEAL, SLATE]),
+                scale=alt.Scale(range=[YELLOW, MUTED]),
                 legend=alt.Legend(orient="top"),
             ),
             yOffset="measure:N",
@@ -338,7 +348,7 @@ with tab_tradeoff:
     if not waste.empty:
         st.altair_chart(
             alt.Chart(waste)
-            .mark_bar()
+            .mark_bar(color=YELLOW)
             .encode(
                 x=alt.X(
                     "wasted_fraction:Q",
@@ -394,7 +404,7 @@ with tab_timeline:
 
             st.altair_chart(
                 alt.Chart(series)
-                .mark_line(color=TEAL, strokeWidth=2)
+                .mark_line(color=YELLOW, strokeWidth=2)
                 .encode(
                     x=alt.X("t:Q", title="seconds into the run"),
                     y=alt.Y(f"{signal}:Q", title=signal),
@@ -526,7 +536,7 @@ with tab_data:
 
 st.divider()
 st.markdown(
-    f'<p style="color:{SLATE};font-size:0.82rem">'
+    f'<p style="color:{MUTED};font-size:0.78rem">'
     f"Reading <code>{root}</code>. Every bundle records the resolved config that "
     "produced it, so a number can be traced back to the engine settings behind it."
     "</p>",

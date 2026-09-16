@@ -1,73 +1,201 @@
-"""Shared look, so the app and the diagrams read as one project.
+"""AdmitPerf branding, taken from the banner rather than invented.
 
-The palette is the one used by the C4 diagrams in docs/architecture: teal for
-things that exist and work, amber for the entry point, red for refusals, slate
-for context. Reusing it means a screenshot of this app sits beside a figure
-from the docs without looking borrowed from somewhere else.
+Every value here is read off `docs/assets/banner.svg`: near-black ground,
+admit-yellow wordmark, white second half, grey tagline, a thin yellow accent
+bar, Helvetica at weight 900 with tight tracking.
+
+One consequence worth stating, because it drives the chart palette: the
+wordmark spells *Admit* in yellow. So yellow means admitted everywhere in this
+app — the brand colour and the positive outcome are the same thing, which
+makes the legend one less thing to learn.
 """
 
 from __future__ import annotations
 
-TEAL = "#0f766e"
-TEAL_LIGHT = "#ccfbf1"
-AMBER = "#b45309"
-AMBER_LIGHT = "#fef3c7"
-RED = "#b91c1c"
-RED_LIGHT = "#fee2e2"
-BLUE = "#1e40af"
-BLUE_LIGHT = "#dbeafe"
-SLATE = "#64748b"
-SLATE_LIGHT = "#f1f5f9"
-INK = "#134e4a"
+# --- straight from banner.svg --------------------------------------------
 
-#: Categorical colours for policies. Ordered so the first few are
-#: distinguishable in greyscale, since papers still get printed.
-POLICY_COLORS = [TEAL, AMBER, BLUE, RED, "#7c3aed", "#0891b2", "#a16207", "#be185d"]
+INK = "#0B0B0B"  # bg
+YELLOW = "#F5C518"  # wordmark "Admit", accent bar
+WHITE = "#FFFFFF"  # wordmark "Perf"
+GREY = "#BFBFBF"  # tagline
+FONT = "Helvetica, Arial, sans-serif"
 
-#: Decision outcomes keep a fixed colour everywhere: admitted is the good case,
-#: rejected the refusal, deferred the middle. A reader should not have to
-#: re-learn the legend between charts.
-DECISION_COLORS = {"admit": TEAL, "defer": AMBER, "reject": RED}
+# Derived, staying inside the same family.
+SURFACE = "#141414"  # cards and sidebar, a shade off the ground
+LINE = "#2A2A2A"  # hairlines
+MUTED = "#8A8A8A"  # secondary text
+YELLOW_DIM = "#8A6F0E"  # yellow at rest, for non-highlighted bars
+
+# Outcomes. Red and amber are picked for legibility on near-black rather than
+# taken from the banner, which has no failure state to borrow.
+RED = "#FF5A52"
+AMBER = "#FFA23A"
+
+#: Admit is the brand yellow on purpose — see module docstring.
+DECISION_COLORS = {"admit": YELLOW, "defer": AMBER, "reject": RED}
+
+#: Categorical colours for policies, all checked against the near-black ground.
+#: Yellow leads so the first policy plotted carries the brand colour.
+POLICY_COLORS = [
+    YELLOW,
+    "#5AC8FA",
+    "#FF5A52",
+    "#7ED957",
+    "#C98BFF",
+    "#FFA23A",
+    "#4DD0C1",
+    "#FF7BB0",
+]
+
+
+def policy_color_map(labels: list[str]) -> dict[str, str]:
+    """Stable colour per policy, so one keeps its colour across every chart."""
+    return {label: POLICY_COLORS[i % len(POLICY_COLORS)] for i, label in enumerate(sorted(labels))}
+
+
+def chart_theme() -> dict:
+    """Altair defaults. Charts on a light ground inside a dark page look
+    borrowed from another application, so the whole surface is carried
+    through."""
+    return {
+        "config": {
+            "background": "transparent",
+            "font": FONT,
+            "title": {"color": WHITE, "fontSize": 14, "fontWeight": 600, "anchor": "start"},
+            "axis": {
+                "labelColor": GREY,
+                "titleColor": MUTED,
+                "gridColor": LINE,
+                "domainColor": LINE,
+                "tickColor": LINE,
+                "labelFontSize": 11,
+                "titleFontSize": 11,
+                "titleFontWeight": 400,
+            },
+            "legend": {
+                "labelColor": GREY,
+                "titleColor": MUTED,
+                "labelFontSize": 11,
+                "titleFontSize": 11,
+                "symbolType": "square",
+            },
+            "view": {"stroke": "transparent"},
+            "range": {"category": POLICY_COLORS},
+        }
+    }
+
 
 CSS = f"""
 <style>
-  .block-container {{ padding-top: 2.2rem; max-width: 1400px; }}
-  h1, h2, h3 {{ color: {INK}; letter-spacing: -0.01em; }}
-  [data-testid="stMetricValue"] {{ color: {INK}; font-size: 1.7rem; }}
-  [data-testid="stMetricLabel"] {{ color: {SLATE}; }}
-  .ap-banner {{
-    background: linear-gradient(90deg, {TEAL_LIGHT} 0%, #ffffff 70%);
-    border-left: 4px solid {TEAL};
-    padding: 0.9rem 1.2rem; border-radius: 6px; margin-bottom: 1.2rem;
+  html, body, [data-testid="stAppViewContainer"] {{
+    background: {INK};
+    font-family: {FONT};
   }}
-  .ap-banner h1 {{ margin: 0; font-size: 1.6rem; }}
-  .ap-banner p {{ margin: 0.25rem 0 0; color: {SLATE}; font-size: 0.92rem; }}
-  .ap-warn {{
-    background: {RED_LIGHT}; border-left: 4px solid {RED};
-    padding: 0.7rem 1rem; border-radius: 6px; font-size: 0.9rem; color: #7f1d1d;
+  .block-container {{ padding-top: 1.6rem; max-width: 1440px; }}
+
+  h1, h2, h3, h4 {{ color: {WHITE}; font-family: {FONT}; letter-spacing: -0.02em; }}
+  p, li, label, span {{ color: {GREY}; }}
+
+  [data-testid="stSidebar"] {{
+    background: {SURFACE};
+    border-right: 1px solid {LINE};
   }}
+  [data-testid="stSidebar"] h2 {{
+    color: {YELLOW}; font-weight: 900; letter-spacing: 0.04em;
+    text-transform: uppercase; font-size: 0.78rem;
+  }}
+
+  /* Metric cards: one thin yellow rule, echoing the banner's accent bar. */
+  [data-testid="stMetric"] {{
+    background: {SURFACE};
+    border: 1px solid {LINE};
+    border-top: 2px solid {YELLOW};
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+  }}
+  [data-testid="stMetricValue"] {{
+    color: {WHITE}; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em;
+  }}
+  [data-testid="stMetricLabel"] p {{
+    color: {MUTED}; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+  }}
+
+  .ap-header {{ margin: 0 0 0.4rem; }}
+  .ap-wordmark {{
+    font-family: {FONT}; font-weight: 900; font-size: 2.6rem;
+    letter-spacing: -0.055em; line-height: 1; margin: 0;
+  }}
+  .ap-wordmark .a {{ color: {YELLOW}; }}
+  .ap-wordmark .p {{ color: {WHITE}; }}
+  .ap-tagline {{
+    color: {GREY}; font-size: 0.74rem; letter-spacing: 0.22em;
+    text-transform: lowercase; margin: 0.45rem 0 0;
+  }}
+  .ap-accent {{
+    width: 160px; height: 4px; background: {YELLOW};
+    margin: 0.85rem 0 1.3rem; border-radius: 1px;
+  }}
+
   .ap-note {{
-    background: {SLATE_LIGHT}; border-left: 3px solid {SLATE};
-    padding: 0.6rem 0.9rem; border-radius: 5px; font-size: 0.86rem; color: #334155;
+    background: {SURFACE}; border-left: 3px solid {YELLOW};
+    padding: 0.65rem 0.95rem; border-radius: 3px;
+    font-size: 0.84rem; color: {GREY};
+  }}
+  .ap-warn {{
+    background: #1C1010; border-left: 3px solid {RED};
+    padding: 0.7rem 1rem; border-radius: 3px;
+    font-size: 0.84rem; color: #FFC9C5;
+  }}
+
+  .stTabs [data-baseweb="tab-list"] {{ gap: 1.6rem; border-bottom: 1px solid {LINE}; }}
+  .stTabs [data-baseweb="tab"] {{
+    color: {MUTED}; font-size: 0.86rem; font-weight: 600;
+    letter-spacing: 0.02em; padding: 0.4rem 0;
+  }}
+  .stTabs [aria-selected="true"] {{ color: {YELLOW}; }}
+  .stTabs [data-baseweb="tab-highlight"] {{ background: {YELLOW}; }}
+
+  [data-testid="stDataFrame"] {{ border: 1px solid {LINE}; border-radius: 4px; }}
+  hr {{ border-color: {LINE}; }}
+
+  .stButton>button, .stDownloadButton>button {{
+    background: transparent; color: {YELLOW};
+    border: 1px solid {YELLOW}; border-radius: 3px;
+    font-weight: 600; letter-spacing: 0.02em;
+  }}
+  .stButton>button:hover, .stDownloadButton>button:hover {{
+    background: {YELLOW}; color: {INK}; border-color: {YELLOW};
   }}
 </style>
 """
 
-
-def policy_color_map(labels: list[str]) -> dict[str, str]:
-    """Stable colour per policy, so a policy keeps its colour across charts."""
-    return {label: POLICY_COLORS[i % len(POLICY_COLORS)] for i, label in enumerate(sorted(labels))}
-
+#: The wordmark, rebuilt in HTML rather than inlining banner.svg. The SVG is a
+#: fixed 1280x260 lockup; this scales with the viewport and matches it
+#: glyph-for-glyph — same family, same weight, same tracking, same split.
+HEADER = """
+<div class="ap-header">
+  <p class="ap-wordmark"><span class="a">Admit</span><span class="p">Perf</span></p>
+  <p class="ap-tagline">benchmark-driven admission control layer for LLM inference</p>
+  <div class="ap-accent"></div>
+</div>
+"""
 
 __all__ = [
     "AMBER",
-    "BLUE",
     "CSS",
     "DECISION_COLORS",
+    "FONT",
+    "GREY",
+    "HEADER",
     "INK",
+    "LINE",
+    "MUTED",
     "POLICY_COLORS",
     "RED",
-    "SLATE",
-    "TEAL",
+    "SURFACE",
+    "WHITE",
+    "YELLOW",
+    "YELLOW_DIM",
+    "chart_theme",
     "policy_color_map",
 ]

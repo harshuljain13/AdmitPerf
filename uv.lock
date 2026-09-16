@@ -28,6 +28,21 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "altair" },
+    { name = "datasets" },
+    { name = "matplotlib" },
+    { name = "modal" },
+    { name = "mypy" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "streamlit" },
+    { name = "types-pyyaml" },
+]
 analysis = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -55,6 +70,7 @@ traces = [
 
 [package.metadata]
 requires-dist = [
+    { name = "admitperf", extras = ["dev", "dashboard", "modal", "analysis", "traces"], marker = "extra == 'all'" },
     { name = "altair", marker = "extra == 'dashboard'", specifier = ">=5.4" },
     { name = "click", specifier = ">=8.1" },
     { name = "datasets", marker = "extra == 'traces'", specifier = ">=2.19" },
@@ -73,7 +89,7 @@ requires-dist = [
     { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.40" },
     { name = "types-pyyaml", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "modal", "dashboard", "analysis", "traces"]
+provides-extras = ["dev", "modal", "dashboard", "analysis", "traces", "all"]
 
 [[package]]
 name = "aiohappyeyeballs"
