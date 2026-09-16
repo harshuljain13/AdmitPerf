@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from admitperf.bench.environment import engine_environment, local_environment
 from admitperf.bench.results import summarize, write_bundle
 from admitperf.bench.workloads.poisson import Baseline, PoissonWorkload
 from admitperf.core.config import Deployment, ExperimentConfig, PolicySpec
@@ -99,6 +100,15 @@ async def run_experiment(
         + f" at {cfg.workload.rate}/s against {engine_url}"
     )
 
+    # Captured once: the engine does not change mid-experiment, and asking it
+    # per run would add a round trip to every policy for the same answer.
+    env = {
+        "local": local_environment(),
+        "engine": await engine_environment(engine_url),
+    }
+    engine_version = (env["engine"] or {}).get("version")
+    print(f"  engine: vllm {engine_version or '(version not reported)'}")
+
     index: list[dict[str, Any]] = []
     for repeat in range(cfg.bench.repeats):
         # Shuffle within each repeat. A fixed order lets thermal drift, cache
@@ -158,6 +168,10 @@ async def run_experiment(
                     "deployment_infra": asdict(deployment.infra) if deployment else None,
                     "config": cfg.to_dict(),
                     "created_at": _stamp(),
+                    # Which software produced this number. design.md promises
+                    # it; without it a result cannot be reproduced or compared
+                    # against a later one.
+                    "environment": env,
                 },
             )
             index.append(

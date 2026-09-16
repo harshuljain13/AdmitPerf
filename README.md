@@ -176,11 +176,31 @@ Architecture in [`docs/architecture/`](docs/architecture/), following the [C4 mo
 ## Installing
 
 ```bash
+pip install -e '.[all]'          # everything, for working on the repo
+```
+
+Or just the parts you need:
+
+```bash
 pip install -e .                 # the decision path: click, httpx, pyyaml, rich
 pip install -e '.[modal]'        # + provisioning on Modal
 pip install -e '.[dashboard]'    # + the Streamlit results app
 pip install -e '.[dev]'          # + pytest, ruff, mypy
 ```
+
+There is no `requirements.txt`. `pyproject.toml` declares what the project
+needs, and `uv.lock` pins the exact versions that were resolved — a
+hand-maintained third list would only drift from both. To reproduce an
+environment exactly:
+
+```bash
+uv sync --all-extras            # installs from the lock, not the ranges
+```
+
+Every run also records the versions that produced it, in its `manifest.json`:
+Python, platform, the client packages that did the timing, and the engine's own
+reported version and resolved cache settings. A number that cannot say which
+vLLM built it cannot be compared against a later one.
 
 The runtime dependency list is deliberately short. Putting admission control in front of a fleet should not drag in a plotting stack.
 

@@ -79,7 +79,9 @@ def test_older_bundles_missing_new_fields_do_not_break(tmp_path: Path) -> None:
 
     frame = runs_frame(discover(tmp_path))
     assert len(frame) == 1
-    assert frame.iloc[0]["offered_attainment"] is None or pd_isna(frame.iloc[0]["offered_attainment"])
+    assert frame.iloc[0]["offered_attainment"] is None or pd_isna(
+        frame.iloc[0]["offered_attainment"]
+    )
 
 
 def pd_isna(v) -> bool:
@@ -128,7 +130,9 @@ def test_degraded_runs_are_marked(tmp_path: Path) -> None:
 
 def test_unavailable_metrics_are_surfaced(tmp_path: Path) -> None:
     """So a reader can tell a metric that is zero from one never obtainable."""
-    _bundle(tmp_path, "a", policy="p", unavailable={"preemption_loss_bytes": "no engine reports it"})
+    _bundle(
+        tmp_path, "a", policy="p", unavailable={"preemption_loss_bytes": "no engine reports it"}
+    )
     assert "preemption_loss_bytes" in unavailable_metrics(discover(tmp_path))
 
 

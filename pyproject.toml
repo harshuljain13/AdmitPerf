@@ -46,6 +46,12 @@ traces = [
     "datasets>=2.19",
 ]
 
+# Everything, for a working copy of the repo:
+#     pip install -e '.[all]'
+all = [
+    "admitperf[dev,dashboard,modal,analysis,traces]",
+]
+
 [project.scripts]
 admitperf = "admitperf.cli:main"
 

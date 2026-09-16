@@ -104,7 +104,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        if self.path == "/v1/models":
+        if self.path == "/version":
+            # Real vLLM publishes this; the harness records it in every run
+            # manifest so a result can say which engine produced it.
+            self._send(200, json.dumps({"version": "0.29.0-fake"}).encode(), "application/json")
+        elif self.path == "/v1/models":
             payload = json.dumps({"object": "list", "data": [{"id": "lab"}]}).encode()
             self._send(200, payload, "application/json")
         elif self.path == "/metrics":
