@@ -199,7 +199,7 @@ def test_every_page_renders(page: str) -> None:
     plain HTTP check would call all of those healthy."""
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / f"{page}.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "views" / f"{page}.py"), default_timeout=120)
     app.run()
     assert not app.exception, [str(e.value) for e in app.exception]
 
@@ -210,7 +210,7 @@ def test_experiments_page_offers_every_registered_policy() -> None:
 
     from admitperf.core.registry import available
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "experiments.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "views" / "experiments.py"), default_timeout=120)
     app.run()
     offered = set(app.multiselect[0].options)
     assert set(available()) <= offered
@@ -221,7 +221,7 @@ def test_experiments_page_validates_with_the_same_rules_as_the_cli() -> None:
     milliseconds rather than ten minutes into provisioning."""
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "experiments.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "views" / "experiments.py"), default_timeout=120)
     app.run()
     text = " ".join(m.value for m in app.markdown) + " ".join(c.value for c in app.code)
     assert "policies" in text  # the generated YAML is shown for review
@@ -234,7 +234,7 @@ def test_the_algorithms_page_lists_every_installed_policy() -> None:
 
     from admitperf.core.registry import available
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "algorithms.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "views" / "algorithms.py"), default_timeout=120)
     app.run()
     text = " ".join(e.label for e in app.expander)
     for name in available():
@@ -246,7 +246,7 @@ def test_terminology_covers_the_terms_that_appear_in_results() -> None:
     catching — that is exactly where someone goes looking."""
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_file(str(DASHBOARD / "pages" / "terminology.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "views" / "terminology.py"), default_timeout=120)
     app.run()
     text = " ".join(m.value for m in app.markdown).lower()
 
@@ -263,7 +263,7 @@ def test_page_file_title_and_url_are_the_same_word() -> None:
 
     app_source = (DASHBOARD / "app.py").read_text()
     entries = re.findall(
-        r'"pages"\s*/\s*"(\w+)\.py".*?title="([^"]+)".*?url_path="([^"]+)"',
+        r'"views"\s*/\s*"(\w+)\.py".*?title="([^"]+)".*?url_path="([^"]+)"',
         app_source,
         re.S,
     )
@@ -273,7 +273,7 @@ def test_page_file_title_and_url_are_the_same_word() -> None:
         assert filename == url, f"{filename}.py is served at /{url}"
         assert title.lower().replace(" ", "") == filename, f"{filename}.py is titled {title!r}"
         assert title[0].isupper(), f"{title!r} does not start with a capital"
-        assert (DASHBOARD / "pages" / f"{filename}.py").exists()
+        assert (DASHBOARD / "views" / f"{filename}.py").exists()
 
 
 def test_the_entry_point_renders() -> None:
@@ -305,3 +305,26 @@ def test_page_icons_are_material_names_not_unicode_symbols() -> None:
         assert icon.startswith(":material/") and icon.endswith(":"), (
             f"{icon!r} is not a Material icon name; st.Page will reject it at render"
         )
+
+
+def test_pages_are_not_in_streamlit_magic_directory() -> None:
+    """`pages/` is auto-discovered by Streamlit, which derives titles from
+    filenames. If explicit navigation ever fails, the app silently falls back
+    to that and the sidebar fills with lowercase filenames — which is exactly
+    what happened when an invalid icon broke st.navigation."""
+    assert not (DASHBOARD / "pages").exists(), (
+        "dashboard/pages/ shadows explicit navigation; keep views in dashboard/views/"
+    )
+    assert (DASHBOARD / "views").exists()
+
+
+def test_every_page_declares_an_explicit_title() -> None:
+    """Without one, Streamlit infers it from the filename and renders it in
+    lowercase."""
+    import re
+
+    source = (DASHBOARD / "app.py").read_text()
+    pages = re.findall(r"st\.Page\((.*?)\)", source, re.S)
+    assert pages, "no pages declared"
+    for page in pages:
+        assert "title=" in page, f"page without an explicit title: {page[:60]}"

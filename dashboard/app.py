@@ -39,6 +39,12 @@ except AttributeError:  # pragma: no cover - altair < 5.5
 
 # Grouped in the order the work happens: set something up, measure it, then
 # look things up when a term or a policy is unfamiliar.
+# Pages live in views/, not pages/. "pages/" is a magic directory: Streamlit
+# auto-discovers it and derives titles from filenames, so when st.navigation
+# below fails for any reason the app silently falls back to that — and the
+# sidebar fills with lowercase filenames instead of these titles. Two page
+# mechanisms competing over one directory is not worth the convenience.
+#
 # Icons are Material names, not emoji. st.Page rejects plain Unicode symbols
 # such as "✎", and the failure only surfaces when the page is rendered — the
 # server still returns 200.
@@ -49,14 +55,14 @@ st.navigation(
     {
         "Set Up": [
             st.Page(
-                HERE / "pages" / "experiments.py",
+                HERE / "views" / "experiments.py",
                 title="Experiments",
                 icon=":material/science:",
                 url_path="experiments",
                 default=True,
             ),
             st.Page(
-                HERE / "pages" / "algorithms.py",
+                HERE / "views" / "algorithms.py",
                 title="Algorithms",
                 icon=":material/tune:",
                 url_path="algorithms",
@@ -64,10 +70,10 @@ st.navigation(
         ],
         "Measure": [
             st.Page(
-                HERE / "pages" / "run.py", title="Run", icon=":material/play_arrow:", url_path="run"
+                HERE / "views" / "run.py", title="Run", icon=":material/play_arrow:", url_path="run"
             ),
             st.Page(
-                HERE / "pages" / "results.py",
+                HERE / "views" / "results.py",
                 title="Results",
                 icon=":material/bar_chart:",
                 url_path="results",
@@ -75,7 +81,7 @@ st.navigation(
         ],
         "Reference": [
             st.Page(
-                HERE / "pages" / "terminology.py",
+                HERE / "views" / "terminology.py",
                 title="Terminology",
                 icon=":material/menu_book:",
                 url_path="terminology",

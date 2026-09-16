@@ -95,6 +95,12 @@ rather than letting the app drift.
 
 ## Naming
 
+Pages live in `views/`, deliberately **not** `pages/`. That name is magic:
+Streamlit auto-discovers it and derives titles from filenames, so if explicit
+navigation ever fails the app silently falls back to it and the sidebar fills
+with lowercase filenames. Two page mechanisms competing over one directory is
+not worth the convenience, and a test asserts `dashboard/pages/` does not exist.
+
 File name, sidebar title and URL path are the same word for every page:
 `experiments.py` → **Experiments** → `/experiments`. A page titled one thing
 and filed under another is a trap for whoever reads the sidebar and then goes
