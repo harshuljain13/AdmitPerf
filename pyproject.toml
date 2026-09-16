@@ -32,6 +32,11 @@ dev = [
 modal = [
     "modal>=0.64",
 ]
+dashboard = [
+    "streamlit>=1.40",
+    "altair>=5.4",
+    "pandas>=2.2",
+]
 analysis = [
     "numpy>=1.26",
     "pandas>=2.2",

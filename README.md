@@ -75,6 +75,22 @@ results/<timestamp>-<experiment>/<policy>-r<n>/
 └── outcomes.jsonl    per-request TTFT, inter-token gaps, deadline verdict
 ```
 
+## Dashboard
+
+```bash
+pip install -e '.[dashboard]'
+streamlit run dashboard/app.py -- --results results/
+```
+
+Interactive comparison, latency-versus-attainment trade-off, decision timelines,
+and refusal breakdowns. It enforces the same two rules as the CLI: a deployment
+is the unit of comparison, and offered attainment is the headline with served
+shown beside it. Details in [`dashboard/README.md`](dashboard/README.md).
+
+It also flags what a table would not — degraded runs are hidden by default, a
+signal that never moved during a run is called out, and single-run policies are
+marked as having no spread.
+
 ## Try it without a GPU
 
 `scripts/fake_vllm.py` is a stdlib-only stand-in that speaks the three endpoints AdmitPerf touches. It gets busy under load — KV pressure rises with requests in flight and tokens slow down — so a policy has something real to react to.
@@ -148,6 +164,7 @@ admitperf/
 ├── experiments/       example configs (demo, chronos, sweep, multi-gpu)
 ├── reports/           written studies, each backed by a run bundle
 ├── docs/              motivation, scope, design, metrics, results, architecture
+├── dashboard/         Streamlit app for exploring results
 ├── scripts/           fake_vllm.py — a pretend engine for testing without a GPU
 ├── tests/
 ├── Makefile           make test · make lint · make diagrams
@@ -161,6 +178,7 @@ Architecture in [`docs/architecture/`](docs/architecture/), following the [C4 mo
 ```bash
 pip install -e .                 # the decision path: click, httpx, pyyaml, rich
 pip install -e '.[modal]'        # + provisioning on Modal
+pip install -e '.[dashboard]'    # + the Streamlit results app
 pip install -e '.[dev]'          # + pytest, ruff, mypy
 ```
 
@@ -192,6 +210,7 @@ See `.env.example`.
 | See the C4 architecture | [`docs/architecture/`](docs/architecture/) |
 | Read the data-flow + reproducibility contract | [`docs/design.md`](docs/design.md) |
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
+| Explore results interactively | [`dashboard/README.md`](dashboard/README.md) |
 | See what each policy does, without reading code | [`src/admitperf/policies/README.md`](src/admitperf/policies/README.md) |
 | Read the candidate policy list + fidelity rules | [`docs/policies.md`](docs/policies.md) |
 | See the first real-hardware results | [`docs/results.md`](docs/results.md) |

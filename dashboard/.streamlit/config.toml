@@ -1,0 +1,12 @@
+# Palette shared with the C4 diagrams in docs/architecture, so figures in a
+# paper and screenshots of this app look like the same project.
+[theme]
+primaryColor = "#0f766e"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f1f5f9"
+textColor = "#134e4a"
+font = "sans serif"
+
+[server]
+headless = true
+fileWatcherType = "auto"
