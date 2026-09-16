@@ -26,6 +26,19 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+# The wordmark, pinned above the navigation. Rendered from docs/assets/logo.svg
+# to PNG at build time: st.logo takes an image, and SVG text would depend on
+# Helvetica being present in whatever browser opens this. icon_image is the
+# collapsed-rail mark, where the full lockup does not fit.
+ASSETS = HERE.parent / "docs" / "assets"
+if (ASSETS / "logo.png").exists():
+    st.logo(
+        str(ASSETS / "logo.png"),
+        size="large",
+        icon_image=str(ASSETS / "icon.png"),
+        link="https://github.com/harshuljain13/AdmitPerf",
+    )
+
 st.markdown(CSS, unsafe_allow_html=True)
 
 # Charts on a light ground inside a dark page look borrowed from another

@@ -328,3 +328,55 @@ def test_every_page_declares_an_explicit_title() -> None:
     assert pages, "no pages declared"
     for page in pages:
         assert "title=" in page, f"page without an explicit title: {page[:60]}"
+
+
+# --- contrast and logo ----------------------------------------------------
+
+
+def _relative_luminance(hex_colour: str) -> float:
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    channels = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast(a: str, b: str) -> float:
+    high, low = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def test_text_on_the_brand_yellow_is_readable() -> None:
+    """Streamlit paints primary buttons with primaryColor and puts its own
+    foreground on top — white in a dark theme, which is 1.6:1 against this
+    yellow. The app overrides it to near-black."""
+    import theme
+
+    assert _contrast(theme.YELLOW, theme.INK) >= 4.5
+    assert _contrast(theme.YELLOW, theme.WHITE) < 3.0  # the default we override
+
+
+def test_every_yellow_fill_sets_a_text_colour() -> None:
+    """A rule that paints the brand yellow without stating a text colour
+    inherits the theme foreground, which is the unreadable case."""
+    import re
+
+    import theme
+
+    for block in re.findall(r"\{[^{}]*\}", theme.CSS):
+        if theme.YELLOW in block and "background" in block and "color:" in block:
+            # A block using yellow as a background must not also set a light
+            # foreground on it.
+            if f"background: {theme.YELLOW}" in block:
+                assert theme.INK in block, f"yellow fill without dark text: {block[:80]}"
+
+
+def test_the_sidebar_logo_exists_and_is_rendered_from_the_svg() -> None:
+    """st.logo takes an image. SVG text would depend on Helvetica being present
+    in whoever's browser, so the wordmark is rasterised from the source SVG."""
+    assets = DASHBOARD.parent / "docs" / "assets"
+    for name in ("logo.svg", "logo.png", "icon.svg", "icon.png"):
+        assert (assets / name).exists(), f"missing brand asset {name}"
+
+    svg = (assets / "logo.svg").read_text()
+    import theme
+
+    assert theme.YELLOW in svg and theme.WHITE in svg, "logo has drifted from the palette"

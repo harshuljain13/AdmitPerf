@@ -85,6 +85,23 @@ admitted, on time" — looks interchangeable and is not. A test asserts that
 every term used in the results pages is explained here, so a chart label
 cannot appear without a definition behind it.
 
+## Brand assets
+
+| File | Where it is used |
+|---|---|
+| `docs/assets/banner.svg` | The source of the palette. Repository header. |
+| `docs/assets/logo.svg` → `.png` | Sidebar wordmark, above the navigation |
+| `docs/assets/icon.svg` → `.png` | Collapsed sidebar, where the wordmark does not fit |
+
+The SVGs are the source; the PNGs are rendered from them because `st.logo`
+takes an image and SVG text would depend on Helvetica being installed in
+whoever's browser. Re-render after editing:
+
+```bash
+rsvg-convert -w 780 -h 156 docs/assets/logo.svg -o docs/assets/logo.png
+rsvg-convert -w 144 -h 144 docs/assets/icon.svg -o docs/assets/icon.png
+```
+
 ## Branding
 
 `theme.py` takes every colour and the typeface from `docs/assets/banner.svg` —
@@ -109,3 +126,11 @@ looking for the code.
 Every user-facing label — page titles, section headings, tab names, chart axes,
 tooltips — starts with a capital. A test asserts the three names stay aligned,
 so a rename cannot drift them apart.
+
+## Contrast
+
+Anything Streamlit fills with `primaryColor` — primary buttons, slider thumbs —
+gets its foreground from the theme, which in a dark theme is white. White on
+`#F5C518` is **1.63:1**, well under the 4.5:1 minimum. The app overrides it to
+near-black, at **12.07:1**, and a test asserts both numbers so the override
+cannot be dropped.

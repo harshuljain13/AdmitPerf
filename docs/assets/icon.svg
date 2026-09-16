@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BRIEF: AdmitPerf collapsed mark. Shown when the sidebar is collapsed, where
+     the full wordmark does not fit. The "A" of Admit in the brand yellow, over
+     the banner's near-black, with the accent bar kept as a base rule so the
+     mark still reads as the same family.
+     Size: 48x48. IDs: bg, mark, accent. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48"
+     role="img" aria-label="AdmitPerf">
+  <g id="bg">
+    <rect width="48" height="48" rx="8" fill="#0B0B0B"/>
+  </g>
+  <g id="mark" font-family="Helvetica, Arial, sans-serif" font-weight="900">
+    <text x="24" y="33" font-size="30" letter-spacing="-1.5" text-anchor="middle" fill="#F5C518">A</text>
+  </g>
+  <g id="accent">
+    <rect x="13" y="38" width="22" height="3" fill="#F5C518"/>
+  </g>
+</svg>

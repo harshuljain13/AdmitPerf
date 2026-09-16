@@ -123,6 +123,15 @@ CSS = f"""
     color: {MUTED}; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
   }}
 
+  /* The sidebar carries the wordmark, so pages lead with their own title
+     rather than repeating it. */
+  [data-testid="stSidebarHeader"] {{ padding-bottom: 0.4rem; }}
+  /* Fill the rail rather than float in it. Streamlit caps st.logo height, so
+     the width is set here and the height left to follow. */
+  [data-testid="stLogo"] {{
+    width: 200px; max-width: 88%; height: auto; margin: 0.35rem 0 0.2rem;
+  }}
+
   .ap-header {{ margin: 0 0 0.4rem; }}
   .ap-wordmark {{
     font-family: {FONT}; font-weight: 900; font-size: 2.6rem;
@@ -161,6 +170,7 @@ CSS = f"""
   [data-testid="stDataFrame"] {{ border: 1px solid {LINE}; border-radius: 4px; }}
   hr {{ border-color: {LINE}; }}
 
+  /* Secondary buttons: yellow outline on the dark ground. */
   .stButton>button, .stDownloadButton>button {{
     background: transparent; color: {YELLOW};
     border: 1px solid {YELLOW}; border-radius: 3px;
@@ -169,6 +179,38 @@ CSS = f"""
   .stButton>button:hover, .stDownloadButton>button:hover {{
     background: {YELLOW}; color: {INK}; border-color: {YELLOW};
   }}
+
+  /* Anything Streamlit fills with primaryColor needs near-black text on top.
+     Left alone it uses the theme's own foreground, which in a dark theme is
+     white — white on #F5C518 is barely readable. Several selectors because the
+     test id has changed across versions. */
+  .stButton>button[kind="primary"],
+  .stButton>button[kind="primaryFormSubmit"],
+  .stDownloadButton>button[kind="primary"],
+  button[data-testid="baseButton-primary"],
+  button[data-testid="stBaseButton-primary"],
+  [data-testid="stFormSubmitButton"] button {{
+    background: {YELLOW} !important;
+    color: {INK} !important;
+    border: 1px solid {YELLOW} !important;
+    font-weight: 700;
+  }}
+  .stButton>button[kind="primary"]:hover,
+  button[data-testid="baseButton-primary"]:hover,
+  button[data-testid="stBaseButton-primary"]:hover {{
+    background: #FFD84D !important;
+    color: {INK} !important;
+    border-color: #FFD84D !important;
+  }}
+
+  /* The slider's value bubble is also painted with primaryColor. */
+  [data-testid="stThumbValue"], [data-testid="stSliderThumbValue"] {{
+    color: {YELLOW};
+  }}
+  [data-baseweb="slider"] [role="slider"] {{ background: {YELLOW}; }}
+
+  /* Progress bars carry no text, but keep them on-brand. */
+  [data-testid="stProgress"] > div > div > div > div {{ background: {YELLOW}; }}
 </style>
 """
 
