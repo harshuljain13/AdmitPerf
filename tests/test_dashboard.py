@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dashboard"))
+DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
 
 from data import discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
 
@@ -186,3 +187,70 @@ def test_chart_theme_uses_the_brand_surface() -> None:
     cfg = theme.chart_theme()["config"]
     assert cfg["background"] == "transparent"
     assert theme.POLICY_COLORS[0] == theme.YELLOW
+
+
+# --- pages ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("page", ["design", "algorithms", "run", "results", "glossary"])
+def test_every_page_renders(page: str) -> None:
+    """Rendering is where the real failures live — a chart encoding that does
+    not match the frame, or a column added to one page and not another. A
+    plain HTTP check would call all of those healthy."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "pages" / f"{page}.py"), default_timeout=120)
+    app.run()
+    assert not app.exception, [str(e.value) for e in app.exception]
+
+
+def test_design_page_offers_every_registered_policy() -> None:
+    """The form must not hard-code a policy list that drifts from the registry."""
+    from streamlit.testing.v1 import AppTest
+
+    from admitperf.core.registry import available
+
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "design.py"), default_timeout=120)
+    app.run()
+    offered = set(app.multiselect[0].options)
+    assert set(available()) <= offered
+
+
+def test_design_page_validates_with_the_same_rules_as_the_cli() -> None:
+    """A setting that would fail at deploy time should fail in the form, in
+    milliseconds rather than ten minutes into provisioning."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "design.py"), default_timeout=120)
+    app.run()
+    text = " ".join(m.value for m in app.markdown) + " ".join(c.value for c in app.code)
+    assert "policies" in text  # the generated YAML is shown for review
+
+
+def test_the_algorithms_page_lists_every_installed_policy() -> None:
+    """It reads the live registry, so installing a policy makes it appear
+    without anyone editing the page."""
+    from streamlit.testing.v1 import AppTest
+
+    from admitperf.core.registry import available
+
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "algorithms.py"), default_timeout=120)
+    app.run()
+    text = " ".join(e.label for e in app.expander)
+    for name in available():
+        assert name in text, f"{name} is installed but not shown"
+
+
+def test_the_glossary_covers_the_terms_that_appear_in_results() -> None:
+    """A term shown in a chart and missing from the glossary is the case worth
+    catching — that is exactly where someone goes looking."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "pages" / "glossary.py"), default_timeout=120)
+    app.run()
+    text = " ".join(m.value for m in app.markdown).lower()
+
+    for term in ("ttft", "goodput", "warmup", "deployment", "kv cache", "p95"):
+        assert term in text, f"{term} is used in the app but not explained"
+    for reason in ("kv_pressure", "queue_depth", "deadline_unmeetable", "no_signal"):
+        assert reason in text, f"rejection reason {reason} is unexplained"

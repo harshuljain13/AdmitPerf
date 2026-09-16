@@ -100,6 +100,9 @@ CSS = f"""
     background: {SURFACE};
     border-right: 1px solid {LINE};
   }}
+  /* Navigation group headings ("Set up", "Measure", "Reference"). */
+  [data-testid="stSidebarNav"] span {{ font-size: 0.88rem; }}
+  [data-testid="stSidebarNavSeparator"] {{ border-color: {LINE}; }}
   [data-testid="stSidebar"] h2 {{
     color: {YELLOW}; font-weight: 900; letter-spacing: 0.04em;
     text-transform: uppercase; font-size: 0.78rem;

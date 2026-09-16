@@ -2,52 +2,93 @@
 
 ```bash
 pip install -e '.[dashboard]'
-streamlit run dashboard/app.py -- --results results/
+streamlit run dashboard/app.py
 ```
 
-Reads the bundles `bench run` writes. Needs no GPU and no running harness, so
-results can be copied off a machine that has since been torn down.
+Five pages, grouped by what you are doing.
 
-## What each tab is for
+| | Page | What it is for |
+|---|---|---|
+| **Set up** | Experiments | Build one — machine, traffic, policies, repeats — saved as YAML |
+| | Algorithms | What each policy decides on, when it fits, and when it misleads |
+| **Measure** | Run | Pick a config and an engine, watch it go |
+| | Results | Read what happened |
+| **Reference** | Terminology | Every term that appears in a chart or a rejection reason |
 
-| Tab | Question it answers |
-|---|---|
-| **Comparison** | Which policy won, and how much of that was just refusing traffic |
-| **The trade-off** | What refusing bought in latency, and what it cost in attainment |
-| **Over time** | What the policy could see, and what it did about it |
-| **Why refused** | Which check refused each request, and which promise was missed |
-| **Data** | Every run, unaggregated, downloadable as CSV |
+## Experiments
 
-## Two rules it enforces
+A form over the same four sections the config file has. It validates through
+the *same* `ExperimentConfig` the CLI uses, so a setting that would fail at
+deploy time fails here in milliseconds instead of ten minutes into
+provisioning. Output is plain YAML you can commit, edit, or run from the CLI —
+the form covers the common settings, not every one.
 
-Both carried over from the CLI, because they are what keep a comparison honest.
+## Algorithms
 
-**A deployment is the unit of comparison.** Policies are only comparable when
-they faced the same engine on the same hardware. The sidebar defaults to one
-deployment; selecting more is allowed but the page says plainly that
-differences between them may be the machine rather than the policy.
+Reads the live registry, so installing a policy makes it appear here without
+anyone editing the page. Each entry pairs the mechanics with the part a
+signature cannot tell you — **when it fits and when it misleads**. The
+`kv_threshold` entry carries the warning we earned: on a small model the cache
+never fills, so it reads a flat line near zero and silently becomes
+accept-everything while appearing to work.
 
-**Offered attainment is the headline, served is shown beside it.** Served alone
-flatters shedding — refuse 95% of traffic and serve the rest perfectly and it
-reads 1.00. The comparison chart puts both bars side by side for exactly this
-reason: a large gap means heavy refusal, and whether that was worthwhile is the
-offered bar.
+## Run
 
-## Things it will tell you that a table would not
+Shells out to `admitperf bench run` rather than importing the harness. The CLI
+is the supported path, so this page exercises it rather than a parallel one,
+and a long benchmark stays in a subprocess instead of blocking the app. Output
+streams as it goes.
 
-- **Degraded runs are hidden by default.** If most engine scrapes failed, the
-  policy was deciding on stale state and the numbers describe the workload, not
-  the policy. Unhiding them prints a warning.
-- **A flat signal is called out.** On the timeline, if the chosen signal never
-  changed during a run, the app says so — a policy reading a flat line looks
-  identical to one that decided everything was fine.
-- **Single-run policies are flagged.** No spread means no basis for trusting a
-  difference.
-- **Unmeasurable metrics are named with the reason**, so a reader can tell a
-  metric that is zero from one that was never obtainable.
+Three engine choices: the fake engine (free, no GPU, and the page tells you if
+it is not running), a URL you paste, or a provisioned session.
 
-## Theme
+## Results
 
-`theme.py` uses the same palette as the C4 diagrams in `docs/architecture/`, so
-a screenshot here sits beside a figure from the docs without looking borrowed.
-Streamlit's own colours are set in `.streamlit/config.toml`.
+Ordered by the questions a reader actually arrives with, not by what is easy to
+plot:
+
+1. **Which policy should I use, and by how much?** — stated in a sentence,
+   before any chart
+2. **Can I trust it?** — degraded runs, single-run policies and wide spread are
+   flagged *above* the answer, not in a footnote
+3. **What did refusing cost?** — latency against requests served, and wasted
+   work
+4. **Why did it refuse?** — reasons from the policy itself, and the signal it
+   was reading
+5. **Everything** — every run unaggregated, with CSV export
+
+### Two rules it will not let you break
+
+**A deployment is the unit of comparison.** Policies are comparable only when
+they faced the same engine on the same hardware, so results are grouped by
+deployment and never pooled across.
+
+**"Served on time" is shown beside "of admitted, on time", never alone.** The
+second flatters shedding — refuse 95% of traffic and serve the rest perfectly
+and it reads 100%. The headline counts everything that *arrived*, so a policy
+cannot improve it by refusing more, only by refusing better.
+
+### Things it says that a table would not
+
+- A signal that never moved during a run is called out — a policy reading a
+  flat line looks identical to one that decided everything was fine.
+- When nothing beats the baseline, it says so plainly and suggests raising the
+  load rather than leaving you to infer it.
+- Metrics that were never obtainable are named with the reason, so a zero is
+  distinguishable from an absence.
+
+## Terminology
+
+A searchable glossary, grouped from concepts through to engine settings. It
+exists because the pair that causes the most confusion —"on time" versus "of
+admitted, on time" — looks interchangeable and is not. A test asserts that
+every term used in the results pages is explained here, so a chart label
+cannot appear without a definition behind it.
+
+## Branding
+
+`theme.py` takes every colour and the typeface from `docs/assets/banner.svg` —
+near-black ground, admit-yellow, white, grey, Helvetica 900. The wordmark spells
+*Admit* in yellow, which is why yellow also means admitted in every chart. A
+test asserts the palette against the SVG, so editing the banner fails the suite
+rather than letting the app drift.
