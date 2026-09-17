@@ -34,13 +34,42 @@ accept-everything while appearing to work.
 
 ## Run
 
-Shells out to `admitperf bench run` rather than importing the harness. The CLI
+Shells out to the `admitperf` CLI rather than importing the harness. The CLI
 is the supported path, so this page exercises it rather than a parallel one,
 and a long benchmark stays in a subprocess instead of blocking the app. Output
 streams as it goes.
 
-Three engine choices: the fake engine (free, no GPU, and the page tells you if
-it is not running), a URL you paste, or a provisioned session.
+A configured experiment runs as a **pipeline**, and the page shows the whole
+plan before it starts — including what it will skip and why, so a missing step
+reads as a decision rather than an omission:
+
+| | Stage | Command | Skipped when |
+|---|---|---|---|
+| 1 | Provision | `infra up` | a session exists and you chose to reuse it, or you pointed at your own engine |
+| 2 | Check it answers | `infra smoke` | nothing was provisioned here |
+| 3 | Calibrate | `infra calibrate` | the config's SLOs are absolute, or a baseline is already saved |
+| 4 | Run the experiment | `bench run` | — |
+| 5 | Aggregate | `bench compare` | — |
+| 6 | Write the report | `bench report` | — |
+| 7 | Tear down | `infra down` | you asked to keep the deployment up |
+
+The plan is built once and used for both the preview and the run, so what the
+page promises and what it does cannot drift apart. Each stage is one CLI
+command streaming into its own box — anything you see here you can rerun in a
+terminal.
+
+Three engine choices decide how much of the plan applies: the mock engine
+(free, no GPU, and the page tells you if it is not running), a URL you paste,
+or provision a GPU.
+
+Two behaviours worth knowing. Provisioning takes minutes, so `modal deploy` is
+read line by line and shown while it happens — downloading a checkpoint and
+being wedged look identical behind a spinner. And teardown runs even when an
+earlier stage failed: a run that breaks part-way through is exactly when a GPU
+gets left running.
+
+It ends with the comparison table, a download for `report.html`, and a preview
+of it inline.
 
 ## Results
 

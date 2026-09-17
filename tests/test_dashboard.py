@@ -227,6 +227,60 @@ def test_experiments_page_validates_with_the_same_rules_as_the_cli() -> None:
     assert "policies" in text  # the generated YAML is shown for review
 
 
+def test_the_run_page_can_provision_before_it_measures() -> None:
+    """Running against a real GPU should be one button, not a terminal detour:
+    the page provisions, checks, measures and tears down itself."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
+    app.run()
+    assert any("Provision" in o for o in app.radio[0].options)
+
+    app.radio[0].set_value(next(o for o in app.radio[0].options if o.startswith("Provision"))).run()
+    labels = [c.label for c in app.checkbox]
+    assert any("Tear the deployment down" in label for label in labels)
+
+
+def test_the_run_page_shows_the_whole_pipeline_before_starting() -> None:
+    """Including the report stage: a run that produces no artifact is half a
+    result, and a plan that hides a stage cannot be checked before it costs
+    money."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
+    app.run()
+    text = " ".join(m.value for m in app.markdown)
+    for stage in ("Provision", "Run the experiment", "Aggregate", "Write the report", "Tear down"):
+        assert stage in text, f"pipeline stage {stage!r} not shown before starting"
+
+
+def test_the_plan_says_which_steps_will_actually_run() -> None:
+    """A step that will not run has to look different from one that has not run
+    yet, or the plan reads as a list of promises it is not making. Only the
+    steps that will run are numbered."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
+    app.run()
+    text = " ".join(m.value for m in app.markdown)
+
+    assert "steps will run" in text, "plan does not say how many steps will run"
+    assert "skipped —" in text, "a skipped step does not say why"
+    assert "will run<" in text, "a step that will run is not labelled as such"
+
+
+def test_the_run_page_tears_down_by_default() -> None:
+    """A GPU left running bills by the minute, and the page is the surface most
+    likely to be driven by someone who will not think to check."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
+    app.run()
+    app.radio[0].set_value(next(o for o in app.radio[0].options if o.startswith("Provision"))).run()
+    teardown = next(c for c in app.checkbox if "Tear the deployment down" in c.label)
+    assert teardown.value is True
+
+
 def test_the_algorithms_page_lists_every_installed_policy() -> None:
     """It reads the live registry, so installing a policy makes it appear
     without anyone editing the page."""
@@ -362,11 +416,26 @@ def test_every_yellow_fill_sets_a_text_colour() -> None:
     import theme
 
     for block in re.findall(r"\{[^{}]*\}", theme.CSS):
-        if theme.YELLOW in block and "background" in block and "color:" in block:
-            # A block using yellow as a background must not also set a light
-            # foreground on it.
-            if f"background: {theme.YELLOW}" in block:
-                assert theme.INK in block, f"yellow fill without dark text: {block[:80]}"
+        # A block using yellow as a background must not also set a light
+        # foreground on it.
+        if "color:" in block and f"background: {theme.YELLOW}" in block:
+            assert theme.INK in block, f"yellow fill without dark text: {block[:80]}"
+
+
+def test_the_button_label_is_coloured_not_just_the_button() -> None:
+    """Streamlit wraps a button's label in its own markdown container, which
+    carries a colour of its own and inherits nothing from the button. Colouring
+    only the <button> gives a correct yellow fill with an invisible label —
+    which is exactly how this was found."""
+    import re
+
+    import theme
+
+    rules = re.findall(r"([^{}]+)\{([^{}]*)\}", theme.CSS)
+    inner = [sel for sel, body in rules if "*" in sel and "utton" in sel and theme.INK in body]
+    assert inner, "nothing colours the label inside a button"
+    for selector in ('kind="primary"', "stBaseButton-primary"):
+        assert any(selector in sel for sel in inner), f"label inside {selector} left uncoloured"
 
 
 def test_the_sidebar_logo_exists_and_is_rendered_from_the_svg() -> None:

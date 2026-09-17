@@ -179,6 +179,12 @@ CSS = f"""
   .stButton>button:hover, .stDownloadButton>button:hover {{
     background: {YELLOW}; color: {INK}; border-color: {YELLOW};
   }}
+  /* The label sits in a child element with its own colour, so the fill above
+     would otherwise be yellow-on-white. Colour only — a background here would
+     paint a square inside the rounded button. */
+  .stButton>button:hover *, .stDownloadButton>button:hover * {{
+    color: {INK} !important; fill: {INK} !important;
+  }}
 
   /* Anything Streamlit fills with primaryColor needs near-black text on top.
      Left alone it uses the theme's own foreground, which in a dark theme is
@@ -195,6 +201,25 @@ CSS = f"""
     border: 1px solid {YELLOW} !important;
     font-weight: 700;
   }}
+  /* The label is not the button's own text node: Streamlit wraps it in a
+     markdown container that carries its own colour *and its own weight*, and
+     inherits neither from the button. Setting only the button leaves a thin
+     400-weight label that reads as washed out on this much yellow — so the
+     descendants get colour, weight and size as well. */
+  .stButton>button[kind="primary"] *,
+  .stButton>button[kind="primaryFormSubmit"] *,
+  .stDownloadButton>button[kind="primary"] *,
+  button[data-testid="baseButton-primary"] *,
+  button[data-testid="stBaseButton-primary"] *,
+  [data-testid="stFormSubmitButton"] button * {{
+    color: {INK} !important;
+    fill: {INK} !important;
+    font-weight: 700 !important;
+    font-size: 0.98rem !important;
+    letter-spacing: 0.01em;
+  }}
+  .stButton>button[kind="primary"],
+  button[data-testid="stBaseButton-primary"] {{ padding: 0.55rem 1rem; }}
   .stButton>button[kind="primary"]:hover,
   button[data-testid="baseButton-primary"]:hover,
   button[data-testid="stBaseButton-primary"]:hover {{
