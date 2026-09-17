@@ -1,7 +1,34 @@
 # experiments/
 
-Experiment configs. Each one is self-contained: what to run on, what traffic to
-send, which policies to compare, how many repeats.
+**One folder per experiment, holding everything about it.**
+
+```
+experiments/which-policy-when/
+├── experiment.yaml     what to run on, what traffic, which policies, how many repeats
+├── results/            every run this experiment has produced
+│   ├── <policy>-r<n>/    manifest.json + summary.json  (committed)
+│   │                     decisions.jsonl + outcomes.jsonl  (local only, large)
+│   ├── compare.txt       the table
+│   ├── report.html       the readable artifact
+│   └── figures/          PNGs for a paper
+└── README.md           (optional) what this experiment found
+```
+
+Pass the **folder**, not the file — results then land inside it by default, and
+an experiment stops being scattered across two trees:
+
+```bash
+admitperf bench run -c experiments/which-policy-when
+```
+
+A run refuses to write into a results directory that already holds runs. We
+lost a result to a silent overwrite once; a bundle is the only record of what a
+number meant. Move the old results aside, or pass `--force` if you truly want
+them replaced.
+
+What is committed: the manifest, the summary, the comparison table, the report
+and the figures — everything a paper cites. What is not: the per-request logs,
+which are large and regenerable.
 
 **Named for what they produce.** A file called `Experiment1` tells you nothing
 six weeks later, and neither does the results directory it writes — which takes
@@ -17,8 +44,8 @@ its name from the config. The name should be the answer you are going to quote.
 | `tensor-parallel-4x.yaml` | The same questions on a four-GPU tensor-parallel deployment. |
 
 ```bash
-admitperf infra up   -c experiments/shedding-vs-tail-latency.yaml
-admitperf bench run  -c experiments/shedding-vs-tail-latency.yaml
+admitperf infra up   -c experiments/shedding-vs-tail-latency
+admitperf bench run  -c experiments/shedding-vs-tail-latency
 admitperf bench compare results/
 admitperf infra down
 ```

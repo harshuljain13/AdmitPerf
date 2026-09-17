@@ -454,7 +454,7 @@ Saved runs: `results/chronos/`.
 
 ## Addendum, 2026-09-16 — a correction, and what it did not fix
 
-A second run on the same hardware (`experiments/half-capacity-headroom.yaml`, A10G,
+A second run on the same hardware (`experiments/half-capacity-headroom`, A10G,
 Qwen2.5-0.5B, 12 arrivals/s) produced something this report did not see: our
 Chronos-inspired policy admitted **zero of 1,452 requests**, three repeats
 running. Rejections were 1,748 x *"server oversubscribed"* against 14 x

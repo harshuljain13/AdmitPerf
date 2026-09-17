@@ -449,3 +449,16 @@ def test_the_sidebar_logo_exists_and_is_rendered_from_the_svg() -> None:
     import theme
 
     assert theme.YELLOW in svg and theme.WHITE in svg, "logo has drifted from the palette"
+
+
+def test_provenance_a_paper_would_need_is_recorded() -> None:
+    """A bundle that cannot say which code produced it is not evidence. The
+    package version reads 0.0.1 for months, so the commit is what matters —
+    a fix landed between two of our runs and we could not tell from disk which
+    side of it either bundle sat on."""
+    from admitperf.bench.environment import code_version
+
+    code = code_version()
+    assert "commit" in code and "dirty" in code
+    if code["commit"] is not None:
+        assert len(code["commit"]) >= 7, "a short sha still has to identify a commit"

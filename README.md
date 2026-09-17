@@ -37,9 +37,9 @@ down — one stage at a time. [`dashboard/README.md`](dashboard/README.md)
 Two command groups, matching the two jobs: `infra` provisions, `bench` measures.
 
 ```bash
-admitperf infra up   -c experiments/shedding-vs-tail-latency.yaml   # real vLLM on a real GPU
+admitperf infra up   -c experiments/shedding-vs-tail-latency   # real vLLM on a real GPU
 admitperf infra smoke                           # is it actually serving?
-admitperf bench run  -c experiments/shedding-vs-tail-latency.yaml   # every policy, repeated
+admitperf bench run  -c experiments/shedding-vs-tail-latency   # every policy, repeated
 admitperf bench compare results/                # who won, and by how much
 admitperf bench report  results/                # report.html you can attach
 admitperf infra down                            # stop paying for it

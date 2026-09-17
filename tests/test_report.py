@@ -182,3 +182,62 @@ def test_the_report_palette_matches_the_dashboard(tmp_path: Path) -> None:
     assert (report.INK, report.YELLOW, report.GREY) == (theme.INK, theme.YELLOW, theme.GREY)
     assert report.MUTED == theme.MUTED
     assert report.RED == theme.RED
+
+
+def test_signal_range_records_what_the_policy_could_see(tmp_path: Path) -> None:
+    """A policy that never fires looks identical to one that found conditions
+    fine. On a 0.5B, kv_used_fraction peaked at 0.005 against a 0.9 threshold —
+    establishing that took a manual dig through decision logs, which is one dig
+    too many for something a paper cites."""
+    from admitperf.bench.results import signal_ranges
+    from admitperf.core.ports import DecisionRecord
+    from admitperf.core.runner import RunResult
+
+    result = RunResult()
+    for kv, waiting in ((0.0, 0), (0.004, 3), (0.002, 11)):
+        result.decisions.append(
+            DecisionRecord(
+                request_id="r",
+                tenant_id="t",
+                decided_at=0.0,
+                kind="admit",
+                reason=None,
+                http_status=None,
+                state_age_s=0.0,
+                kv_used_fraction=kv,
+                waiting_requests=waiting,
+                running_requests=1,
+            )
+        )
+
+    ranges = signal_ranges(result)
+    assert ranges["kv_used_fraction"] == {"min": 0.0, "max": 0.004, "samples": 3}
+    assert ranges["waiting_requests"]["max"] == 11
+
+
+def test_a_signal_never_reported_is_absent_not_zero(tmp_path: Path) -> None:
+    """Zero claims the signal sat at the bottom of its range. Absent says the
+    engine never reported it. Those are different findings."""
+    from admitperf.bench.results import signal_ranges
+    from admitperf.core.ports import DecisionRecord
+    from admitperf.core.runner import RunResult
+
+    result = RunResult()
+    result.decisions.append(
+        DecisionRecord(
+            request_id="r",
+            tenant_id="t",
+            decided_at=0.0,
+            kind="admit",
+            reason=None,
+            http_status=None,
+            state_age_s=0.0,
+            kv_used_fraction=None,
+            waiting_requests=2,
+            running_requests=1,
+        )
+    )
+
+    ranges = signal_ranges(result)
+    assert "kv_used_fraction" not in ranges
+    assert "waiting_requests" in ranges

@@ -5,11 +5,11 @@
 # question this answers is not "which policy is best" — that question has no
 # answer — but "which policy is best *here*", four times over.
 #
-#     admitperf infra up   -c experiments/which-policy-when.yaml
+#     admitperf infra up   -c experiments/which-policy-when
 #     admitperf infra smoke
-#     admitperf bench run  -c experiments/which-policy-when.yaml --out results/regimes
-#     admitperf bench decide  results/regimes      # situation -> policy
-#     admitperf bench report  results/regimes      # the numbers behind it
+#     admitperf bench run  -c experiments/which-policy-when 
+#     admitperf bench decide  experiments/which-policy-when/results      # situation -> policy
+#     admitperf bench report  experiments/which-policy-when/results      # the numbers behind it
 #     admitperf infra down
 #
 # 4 situations x 5 policies x 3 repeats x 75s = about 75 minutes of A10G,
@@ -50,7 +50,7 @@ workload:
 # The situation axis. PLACEHOLDERS — replace them with what `bench capacity`
 # measures on the deployment you actually provisioned:
 #
-#     admitperf bench capacity -c experiments/which-policy-when.yaml
+#     admitperf bench capacity -c experiments/which-policy-when
 #
 # It walks the baseline up a ramp, finds where attainment falls through 90%,
 # and prints a `loads:` block as multiples of that rate. Round numbers picked

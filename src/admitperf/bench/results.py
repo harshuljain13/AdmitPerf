@@ -52,6 +52,29 @@ def _round(value: float | None, places: int = 4) -> float | None:
     return None if value is None else round(value, places)
 
 
+def signal_ranges(result: RunResult) -> dict[str, dict[str, float | int]]:
+    """What each signal actually did during the run.
+
+    A policy that never fires looks identical to one that found conditions fine.
+    The difference is whether its signal ever approached the threshold, and that
+    is a property of the run, not of the policy — so it is recorded rather than
+    argued about later. On a 0.5B model `kv_used_fraction` peaked at 0.005
+    against a 0.9 threshold, which is the whole explanation for one of our
+    results and took a manual dig through decision logs to establish.
+
+    A signal that was never observed is absent, not zero: zero is a claim that
+    it sat at the bottom of its range, which is a different statement from
+    "the engine never reported it".
+    """
+    fields = ("kv_used_fraction", "waiting_requests", "running_requests")
+    out: dict[str, dict[str, float | int]] = {}
+    for field in fields:
+        seen = [value for d in result.decisions if (value := getattr(d, field, None)) is not None]
+        if seen:
+            out[field] = {"min": min(seen), "max": max(seen), "samples": len(seen)}
+    return out
+
+
 def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> dict[str, Any]:
     per_request = requests or {}
 
@@ -140,6 +163,10 @@ def summarize(result: RunResult, requests: dict[str, Request] | None = None) -> 
         # Large values mean the load generator could not keep up and the run
         # understates real latency.
         "decision_lag_p95_ms": _round(percentiles([float(v) for v in decision_lag])["p95"], 2),
+        # What the policy could actually see. Read with `requires` from the
+        # manifest: a signal a policy needs that never moved means the run
+        # measured the workload, not the policy.
+        "signal_range": signal_ranges(result),
         "scrapes": result.scrapes,
         "scrape_failures": result.scrape_failures,
         "scrape_error": result.scrape_error,

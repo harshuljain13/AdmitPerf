@@ -1,0 +1,104 @@
+{
+  "experiment": "chronos-vs-naive",
+  "policy": "queue_depth",
+  "policy_params": {
+    "max_waiting": 4
+  },
+  "policy_label": "queue_depth[max_waiting=4]",
+  "repeat": 3,
+  "repeats": 3,
+  "seed": 2,
+  "slo_mode": "absolute",
+  "baseline": null,
+  "engine_url": "http://127.0.0.1:8000",
+  "deployment": null,
+  "deployment_infra": null,
+  "config": {
+    "name": "chronos-vs-naive",
+    "infra": {
+      "provider": "modal",
+      "gpu": "A10G",
+      "gpu_count": 1,
+      "model": "Qwen/Qwen2.5-0.5B-Instruct",
+      "served_model_name": "lab",
+      "scaledown_window_s": 300,
+      "startup_timeout_s": 900,
+      "max_concurrent_inputs": 256,
+      "engine": {
+        "max_num_seqs": 4,
+        "max_model_len": 2048,
+        "gpu_memory_utilization": 0.55,
+        "tensor_parallel_size": 1,
+        "pipeline_parallel_size": 1,
+        "enable_prefix_caching": false,
+        "scheduling_policy": "fcfs",
+        "dtype": "auto",
+        "quantization": null,
+        "max_num_batched_tokens": null,
+        "swap_space_gb": null,
+        "block_size": null,
+        "extra_args": []
+      }
+    },
+    "matrix": [],
+    "workload": {
+      "kind": "poisson",
+      "n": 80,
+      "rate": 20,
+      "seed": 0,
+      "duration_s": null,
+      "warmup_s": 0.0,
+      "slo_mode": "absolute"
+    },
+    "policies": [
+      {
+        "name": "no_admission",
+        "params": {}
+      },
+      {
+        "name": "queue_depth",
+        "params": {
+          "max_waiting": 4
+        }
+      },
+      {
+        "name": "chronos_inspired",
+        "params": {
+          "chunk_tokens": 512
+        }
+      },
+      {
+        "name": "chronos_inspired",
+        "params": {
+          "chunk_tokens": 512,
+          "safety_factor": 2.0
+        }
+      }
+    ],
+    "bench": {
+      "repeats": 3,
+      "warmup": 0,
+      "scrape_interval_s": 0.1,
+      "max_state_age_s": 5.0,
+      "max_defers": 100,
+      "randomize_policy_order": true
+    }
+  },
+  "created_at": "20260916T011728Z",
+  "environment": {
+    "local": {
+      "python": "3.11.13",
+      "platform": "macOS-26.5.1-arm64-arm-64bit",
+      "machine": "arm64",
+      "packages": {
+        "admitperf": "0.0.1",
+        "httpx": "0.28.1",
+        "modal": "1.5.5"
+      }
+    },
+    "engine": {
+      "version": "0.29.0-fake",
+      "cache_config": null
+    }
+  }
+}

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 
@@ -225,6 +225,11 @@ class PolicySpec:
 
 @dataclass
 class BenchConfig:
+    #: Measured serveable rate, from `bench capacity`, that the loads in this
+    #: config are expressed as multiples of. Recorded so a load figure can be
+    #: read as "1.5x capacity" rather than as a bare number that transfers to
+    #: no other machine.
+    capacity_ref: float | None = None
     #: A live engine gives a different number every run. One sample per policy
     #: is not a comparison, so repeats are first-class.
     repeats: int = 1
@@ -288,6 +293,10 @@ class ExperimentConfig:
     #: Traffic conditions to run every policy under, against the *same*
     #: deployment. Empty means one situation: `workload` as written.
     loads: list[WorkloadConfig] = field(default_factory=list)
+
+    #: The config file inside an experiment folder. Uniform, so the folder name
+    #: is the experiment's identity and the file never has to repeat it.
+    FILENAME: ClassVar[str] = "experiment.yaml"
     policies: list[PolicySpec] = field(default_factory=lambda: [PolicySpec("no_admission")])
     bench: BenchConfig = field(default_factory=BenchConfig)
 
@@ -397,7 +406,21 @@ class ExperimentConfig:
 
     @classmethod
     def load(cls, path: str | Path) -> ExperimentConfig:
+        """Load a config file, or an experiment folder containing one.
+
+        Passing the folder is the normal way: everything about one experiment —
+        the config, its results, its report — lives in that folder, so naming it
+        once is enough.
+        """
         p = Path(path)
+        if p.is_dir():
+            inside = p / cls.FILENAME
+            if not inside.exists():
+                raise ConfigError(
+                    f"{p} is a directory with no {cls.FILENAME} in it. An "
+                    "experiment folder holds its config under that name."
+                )
+            p = inside
         if not p.exists():
             raise ConfigError(f"no config at {p}")
         try:

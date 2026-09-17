@@ -55,10 +55,28 @@ htmlcov/
 
 # AdmitPerf-specific
 data/traces/*
-data/results/*
+data/# Scratch runs at the repo root. Anchored, so it does not also swallow the
+# results that live inside an experiment folder.
+/results/
+
+# Experiment folders keep their own results. The per-request logs are large and
+# regenerable; the records a paper cites — what was run, what came out, on which
+# commit — are small and are committed, so a cited number can always be traced.
+experiments/*/results/**/decisions.jsonl
+experiments/*/results/**/outcomes.jsonl
+experiments/*/results/**/trace.jsonl*
 data/cache/*
 !data/traces/.gitkeep
-!data/results/.gitkeep
+!data/# Scratch runs at the repo root. Anchored, so it does not also swallow the
+# results that live inside an experiment folder.
+/results/
+
+# Experiment folders keep their own results. The per-request logs are large and
+# regenerable; the records a paper cites — what was run, what came out, on which
+# commit — are small and are committed, so a cited number can always be traced.
+experiments/*/results/**/decisions.jsonl
+experiments/*/results/**/outcomes.jsonl
+experiments/*/results/**/trace.jsonl.gitkeep
 !data/cache/.gitkeep
 
 # Modal / cloud logs
@@ -75,7 +93,16 @@ Roadmap.md
 
 # AdmitPerf session state
 .admitperf/
-results/
+# Scratch runs at the repo root. Anchored, so it does not also swallow the
+# results that live inside an experiment folder.
+/results/
+
+# Experiment folders keep their own results. The per-request logs are large and
+# regenerable; the records a paper cites — what was run, what came out, on which
+# commit — are small and are committed, so a cited number can always be traced.
+experiments/*/results/**/decisions.jsonl
+experiments/*/results/**/outcomes.jsonl
+experiments/*/results/**/trace.jsonl
 
 # Spec-dev drafts stay local
 .spec-dev/
