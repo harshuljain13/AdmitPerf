@@ -21,6 +21,10 @@ further gaps are load-bearing:
   arrival process it controls. Here lambda comes from a sliding window over
   observed arrivals and E[C_pre] from a fitted cost model, so rho_P is an
   estimate and the bound inherits its error.
+- **E[C_pre] is a window mean, corrected 2026-09-16.** Until then this passed
+  the arriving request's own prefill cost into the utilization check, so a long
+  prompt read as system overload by itself. `reports/chronos-reproduction.md`
+  measured the uncorrected version; see its addendum.
 - **gamma is not fitted.** Separating fixed per-iteration overhead from the
   per-token slope needs measurements at two or more batch sizes; the engine's
   aggregate counters cannot provide that. The paper's value is used.
@@ -34,6 +38,7 @@ from __future__ import annotations
 from admitperf.core.api import AdmissionPolicy, Decision, Request, SystemState
 from admitperf.policies.chronos.estimator import (
     ArrivalRateWindow,
+    PrefillDemandWindow,
     ServiceRateEstimator,
     fit_cost_model,
 )
@@ -86,6 +91,10 @@ class ChronosInspiredWCRT(AdmissionPolicy):
 
         self.rates = ServiceRateEstimator()
         self.arrivals = ArrivalRateWindow(window_s=window_s)
+        #: E[C_pre] is an expectation over arrivals, so it needs the arrival
+        #: history, not the request in hand. See the note in the class
+        #: docstring about what this corrected.
+        self.demand = PrefillDemandWindow(window_s=window_s)
 
         #: Per-check tallies. A policy that admitted everything because it was
         #: never calibrated looks identical to one that found everything
@@ -103,6 +112,7 @@ class ChronosInspiredWCRT(AdmissionPolicy):
 
     def decide(self, req: Request, state: SystemState) -> Decision:
         self.arrivals.record(req.arrival_time)
+        self.demand.record(self.base_cost.prefill_chunks(req.input_tokens), req.arrival_time)
         rates = self.rates.update(state)
 
         if self.fit_from_telemetry and not rates.is_calibrated:
@@ -123,12 +133,21 @@ class ChronosInspiredWCRT(AdmissionPolicy):
             else self.base_cost
         )
 
+        # E[C_pre] = E[p] x per-chunk cost. Falls back to this request only
+        # when nothing has arrived yet, which is the first decision of a run.
+        mean_chunks = self.demand.mean_chunks(req.arrival_time)
+        mean_prefill_wcet_ms = (
+            mean_chunks * cost.per_chunk_ms
+            if mean_chunks is not None
+            else cost.prefill_wcet_ms(req.input_tokens)
+        )
+
         test = admission_test(
             input_tokens=req.input_tokens,
             deadline_ttft_ms=req.deadline_ttft_ms,
             deadline_tbt_ms=req.deadline_tbt_ms,
             arrival_rate_hz=self.arrivals.peak_rate_hz(req.arrival_time),
-            mean_prefill_wcet_ms=cost.prefill_wcet_ms(req.input_tokens),
+            mean_prefill_wcet_ms=mean_prefill_wcet_ms,
             active_decode_tasks=state.running_requests,
             cost=cost,
             safety_factor=self.safety_factor,

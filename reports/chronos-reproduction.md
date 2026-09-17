@@ -448,3 +448,67 @@ Figures: `figures/*.mmd` are the source; `make diagrams` re-renders them.
 Our reading notes on the paper are held with the companion survey.
 Our implementation: `../src/admitperf/policies/chronos/`.
 Saved runs: `results/chronos/`.
+
+
+---
+
+## Addendum, 2026-09-16 — a correction, and what it did not fix
+
+A second run on the same hardware (`experiments/half-capacity-headroom.yaml`, A10G,
+Qwen2.5-0.5B, 12 arrivals/s) produced something this report did not see: our
+Chronos-inspired policy admitted **zero of 1,452 requests**, three repeats
+running. Rejections were 1,748 x *"server oversubscribed"* against 14 x
+*"can't meet the deadline"* — check 1 firing essentially alone, the tendency
+§5.2 noticed, taken to its limit.
+
+Two findings came out of investigating it.
+
+### A defect in how we computed load
+
+Algorithm 1's first check is `rho_P = lambda * E[C_pre]`, where `E[C_pre]` is
+an expectation over the **arrival process** — a statement about offered load.
+We were passing the *arriving request's own* prefill cost instead. At a
+512-token chunk size, a 4,096-token request therefore scored eight times a
+512-token one, and a workload with a long tail tripped the overload check on
+its longest class however idle the fleet actually was.
+
+That is a port defect, not a modelling choice, and it is fixed: `E[C_pre]` is
+now `E[p]` over a 60-second window of arrivals multiplied by the per-chunk
+cost, which keeps the traffic term and the engine term separately estimated.
+On the mixed workload at 4 arrivals/s this moves `rho_P` from a per-request
+0.19–1.53 to roughly 0.38, so the feasibility test is reached rather than
+short-circuited.
+
+**Every number in §4 and §5 above describes the uncorrected version.** They are
+left as measured rather than restated, because the 23% acceptance rate is what
+the code did on 2026-09-15.
+
+### The correction is not why it refuses
+
+With the fix in place, a replay of the same mixed workload still admits 1–2%,
+and the refusals move from check 1 to check 2. The dominant term is the cost
+model, which is a cliff:
+
+| alpha (ms/token) | gamma (ms) | admitted | oversubscribed | can't meet deadline |
+|---|---|---|---|---|
+| 0.080 | 7.0 | 1.8% | 152 | 241 |
+| 0.080 | 1.0 | 3.2% | 0 | 387 |
+| 0.020 | 7.0 | **100%** | 0 | 0 |
+| 0.020 | 1.0 | **100%** | 0 | 0 |
+
+400 requests, 4 arrivals/s, default SLO classes, fitting disabled so the cost
+model is exactly as stated. `alpha = 0.080, gamma = 7.0` are the paper's
+roofline values for a 7B model on an A100-80GB.
+
+Between a 7B-on-A100 cost model and a plausible 0.5B-on-A10G one, the policy
+goes from refusing 98% to admitting everything, with nothing in between. Its
+behaviour is therefore a measurement of our calibration, not of the algorithm —
+which is what §5.3 suspected and this quantifies. `alpha` and `beta` are fitted
+from engine telemetry at run time; `gamma` is still the paper's constant, and
+for a model this small it is most of the per-chunk cost.
+
+**So the honest reading of the zero-admit run is: the load was far beyond what
+the deployment could serve (see `docs/results.md`), and our cost model was
+calibrated for different hardware. Neither tells you anything about Chronos.**
+Fitting `gamma` is the next thing that would make this experiment mean
+something.

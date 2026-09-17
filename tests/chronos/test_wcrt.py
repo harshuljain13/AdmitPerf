@@ -197,3 +197,78 @@ def test_the_test_reports_its_own_inputs() -> None:
     assert 0.0 < result.utilization < 1.0
     assert result.wcrt_ms is not None
     assert result.own_wcet_ms == pytest.approx(47.96)
+
+
+# --- rho_P is a statement about offered load, not about one request ---------
+
+
+def test_expected_prefill_cost_is_a_window_mean() -> None:
+    """E[p] over arrivals, so a long prompt cannot make the fleet look busy on
+    its own account."""
+    from admitperf.policies.chronos.estimator import PrefillDemandWindow
+
+    window = PrefillDemandWindow(window_s=60.0)
+    assert window.mean_chunks(now=0.0) is None, "nothing has arrived yet"
+
+    for chunks, t in ((1, 0.0), (1, 0.1), (1, 0.2), (8, 0.3)):
+        window.record(chunks, now=t)
+    assert window.mean_chunks(now=0.3) == pytest.approx((1 + 1 + 1 + 8) / 4)
+
+
+def test_old_arrivals_leave_the_window() -> None:
+    from admitperf.policies.chronos.estimator import PrefillDemandWindow
+
+    window = PrefillDemandWindow(window_s=10.0)
+    window.record(8, now=0.0)
+    window.record(1, now=100.0)
+    assert window.mean_chunks(now=100.0) == pytest.approx(1.0)
+
+
+def test_a_long_prompt_alone_does_not_trip_the_overload_check() -> None:
+    """The defect this corrected: at 512-token chunks a 4096-token request
+    scored eight times a 512-token one, so a mixed workload refused its longest
+    class however idle the fleet was."""
+    from admitperf.core.api import Request, SystemState
+    from admitperf.policies.chronos.policy import ChronosInspiredWCRT
+
+    policy = ChronosInspiredWCRT(fit_from_telemetry=False, chunk_tokens=512)
+    state = SystemState(
+        now=0.0,
+        kv_used_fraction=0.0,
+        running_requests=0,
+        waiting_requests=0,
+        running_agents=0,
+        per_tenant_running={},
+        per_tenant_admitted_recent={},
+        engine_metrics={},
+    )
+
+    # A stream of short prompts, then one long one at the same modest rate.
+    for i in range(20):
+        policy.decide(
+            Request(
+                request_id=f"short-{i}",
+                tenant_id="t",
+                arrival_time=i * 0.25,
+                input_tokens=256,
+                expected_output_tokens=64,
+                deadline_ttft_ms=5_000.0,
+            ),
+            state,
+        )
+    decision = policy.decide(
+        Request(
+            request_id="long",
+            tenant_id="t",
+            arrival_time=5.25,
+            input_tokens=4096,
+            expected_output_tokens=64,
+            deadline_ttft_ms=5_000.0,
+        ),
+        state,
+    )
+    assert policy.last_test is not None
+    assert policy.last_test.utilization < 1.0, (
+        f"one long prompt among short ones reported rho_P={policy.last_test.utilization:.2f}"
+    )
+    assert decision.kind != "reject" or policy.last_test.failed != "overloaded"

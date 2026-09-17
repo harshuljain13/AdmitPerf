@@ -70,10 +70,19 @@ class CostModel:
         """p_i = ceil(l_i / B)."""
         return max(1, math.ceil(input_tokens / self.chunk_tokens))
 
+    @property
+    def per_chunk_ms(self) -> float:
+        """alpha * B + gamma — the cost of one prefill chunk.
+
+        Exposed because E[C_pre] is E[p] * this: the expected chunk count is a
+        property of the arriving traffic, the per-chunk cost a property of the
+        engine, and they are estimated from different places.
+        """
+        return self.alpha_ms_per_token * self.chunk_tokens + self.gamma_ms
+
     def prefill_wcet_ms(self, input_tokens: int) -> float:
         """C_pre,i = p_i * (alpha * B + gamma)."""
-        per_chunk = self.alpha_ms_per_token * self.chunk_tokens + self.gamma_ms
-        return self.prefill_chunks(input_tokens) * per_chunk
+        return self.prefill_chunks(input_tokens) * self.per_chunk_ms
 
 
 def prefill_utilization(*, arrival_rate_hz: float, mean_prefill_wcet_ms: float) -> float:
