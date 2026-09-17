@@ -1,0 +1,62 @@
+# Experiment1 — Chronos-inspired vs KV pressure vs doing nothing.
+#
+# The first version of this config produced a run where both policies scored
+# nothing: chronos refused 100% of traffic, kv_threshold admitted 100%, and
+# offered attainment was 0.025 either way. Three things were wrong, all fixed
+# here:
+#
+#   max_model_len   2048 could not hold the default workload, which generates
+#                   up to 6144 tokens. A third of every run came back HTTP 400
+#                   and was counted as a failure. `bench run` now refuses to
+#                   start on this rather than letting it look like overload.
+#   rate            15/s against max_num_seqs=10 put TTFT p50 at 5.5s with a
+#                   500ms deadline. Nothing could be met, so no policy could
+#                   distinguish itself. Admission control is interesting when
+#                   the system can serve *some* of the load, not none of it.
+#   no baseline     without `no_admission` there is nothing to say "better
+#                   than" about.
+#
+# gpu_memory_utilization also went 0.25 -> 0.85: at 0.25 the KV cache is so
+# small that kv_used_fraction never approaches any useful threshold, which is
+# the trap already documented in docs/results.md.
+
+name: Experiment1
+infra:
+  provider: modal
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  max_concurrent_inputs: 256
+  engine:
+    # Small on purpose — this is the bottleneck that creates queueing, and
+    # without queueing every policy scores alike.
+    max_num_seqs: 10
+    # Must clear the workload's largest request: batch class is 4096 in +
+    # 2048 out.
+    max_model_len: 6144
+    gpu_memory_utilization: 0.85
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    enable_prefix_caching: false
+    scheduling_policy: fcfs
+workload:
+  kind: poisson
+  # ~3x what this deployment can serve on time: enough pressure that refusing
+  # well beats refusing nothing, without pushing every policy into the corner
+  # where the only options are "shed everything" and "meet nothing".
+  rate: 4.0
+  seed: 0
+  slo_mode: absolute
+  duration_s: 120
+  warmup_s: 20
+policies:
+  # The baseline. Without it, a comparison between two admission policies
+  # cannot say whether either of them helped.
+  - name: no_admission
+  - name: chronos_inspired
+    chunk_tokens: 512
+    safety_factor: 1.0
+  - name: kv_threshold
+    threshold: 0.9
+bench:
+  repeats: 3

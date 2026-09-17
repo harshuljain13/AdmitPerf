@@ -255,6 +255,22 @@ class Deployment:
 
 
 @dataclass
+class Situation:
+    """One traffic condition, against an unchanged deployment.
+
+    The second axis of a comparison. A deployment answers "on what hardware";
+    a situation answers "under what load" — and the two must not be confused,
+    because changing the machine invalidates a comparison while changing the
+    load is the comparison. Which policy wins is a function of the situation,
+    so a result that names a winner without naming the situation is not a
+    finding, it is an anecdote.
+    """
+
+    label: str
+    workload: WorkloadConfig
+
+
+@dataclass
 class ExperimentConfig:
     """Everything one experiment needs, in one object."""
 
@@ -269,6 +285,9 @@ class ExperimentConfig:
     #: would be measuring hardware, not admission control.
     matrix: list[InfraConfig] = field(default_factory=list)
     workload: WorkloadConfig = field(default_factory=WorkloadConfig)
+    #: Traffic conditions to run every policy under, against the *same*
+    #: deployment. Empty means one situation: `workload` as written.
+    loads: list[WorkloadConfig] = field(default_factory=list)
     policies: list[PolicySpec] = field(default_factory=lambda: [PolicySpec("no_admission")])
     bench: BenchConfig = field(default_factory=BenchConfig)
 
@@ -281,6 +300,23 @@ class ExperimentConfig:
         if not self.matrix:
             return [Deployment(label=self._label(self.infra), infra=self.infra)]
         return [Deployment(label=self._label(i), infra=i) for i in self.matrix]
+
+    def situations(self) -> list[Situation]:
+        """Every traffic condition this experiment runs, in order."""
+        if not self.loads:
+            return [Situation(label=self._load_label(self.workload), workload=self.workload)]
+        return [Situation(label=self._load_label(w), workload=w) for w in self.loads]
+
+    @staticmethod
+    def _load_label(workload: WorkloadConfig) -> str:
+        """Short and filesystem-safe. The rate is what varies in practice, so
+        it leads; anything else that differs is appended."""
+        bits = [f"{workload.rate:g}rps"]
+        if workload.duration_s:
+            bits.append(f"{workload.duration_s:g}s")
+        if workload.slo_mode != "absolute":
+            bits.append(workload.slo_mode)
+        return "-".join(bits)
 
     @staticmethod
     def _label(infra: InfraConfig) -> str:
@@ -307,6 +343,14 @@ class ExperimentConfig:
                 "would overwrite each other"
             )
         self.workload.validate()
+        for load in self.loads:
+            load.validate()
+        load_labels = [s.label for s in self.situations()]
+        if len(load_labels) != len(set(load_labels)):
+            raise ConfigError(
+                f"loads produce duplicate labels {load_labels}; two situations that "
+                "cannot be told apart would overwrite each other's results"
+            )
         self.bench.validate()
         if not self.policies:
             raise ConfigError("at least one policy is required")
@@ -340,6 +384,12 @@ class ExperimentConfig:
             infra=InfraConfig(**infra_raw, engine=EngineConfig(**engine_raw)),
             matrix=[_infra(e or {}) for e in matrix_raw],
             workload=WorkloadConfig(**(raw.get("workload") or {})),
+            # A load entry inherits the base workload and overrides parts of
+            # it, so a sweep states only what varies — usually just the rate.
+            loads=[
+                WorkloadConfig(**{**(raw.get("workload") or {}), **entry})
+                for entry in (raw.get("loads") or [])
+            ],
             policies=[PolicySpec.parse(p) for p in policies_raw],
             bench=BenchConfig(**(raw.get("bench") or {})),
         )
