@@ -1,0 +1,60 @@
+{
+  "offered": 80,
+  "admitted": 80,
+  "deferred": 0,
+  "rejected": 0,
+  "warmup_excluded": 0,
+  "completed": 80,
+  "failed": 0,
+  "reject_reasons": {},
+  "wall_s": 14.53,
+  "throughput_rps": 5.506,
+  "offered_attainment": 0.45,
+  "served_attainment": 0.45,
+  "goodput_rps": 2.478,
+  "admit_rate": 1.0,
+  "ttft_ms": {
+    "p50": 392.86787499440834,
+    "p95": 708.6777499644086,
+    "p99": 734.5834579900838
+  },
+  "tbt_ms": {
+    "p50": 82.76725001633167,
+    "p95": 153.46000000135973,
+    "p99": 168.01987501094118
+  },
+  "slo": {
+    "judged": 80,
+    "met": 36,
+    "missed_ttft": 12,
+    "missed_itl": 32,
+    "failed_outright": 0
+  },
+  "wasted_output_tokens": 2737,
+  "useful_output_tokens": 2304,
+  "wasted_fraction": 0.5429,
+  "reject_latency_ms": {
+    "p50": null,
+    "p95": null,
+    "p99": null
+  },
+  "decision_lag_p95_ms": 1.58,
+  "scrapes": 139,
+  "scrape_failures": 0,
+  "scrape_error": null,
+  "signal_was_healthy": true,
+  "sources": {
+    "ttft_ms": "client",
+    "offered_attainment": "client+harness",
+    "served_attainment": "client+harness",
+    "goodput_rps": "client+harness",
+    "tbt_ms": "client",
+    "admit_rate": "harness",
+    "reject_reasons": "harness",
+    "throughput_rps": "client"
+  },
+  "unavailable": {
+    "preemption_loss_bytes": "no engine reports KV bytes discarded to preemption; vllm:num_preemptions_total is a count, not a volume",
+    "gpu_utilization": "needs DCGM alongside the engine; not collected"
+  }
+}

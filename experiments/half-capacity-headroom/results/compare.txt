@@ -1,0 +1,14 @@
+9 run(s) across 3 policies under /Users/harshuljain/work/projects/experiments_and_courses/llm-inference/research/admitperf/results/Experiment1
+
+policy                                                runs    admit%        TTFT p95   offered   served   req/s
+----------------------------------------------------  ----  --------  --------------  --------  -------  ------
+chronos_inspired[chunk_tokens=512,safety_factor=1.0]     3      4.1%       354ms ±11     0.024    0.621    0.08
+kv_threshold[threshold=0.9]                              3    100.0%        346ms ±1     0.554    0.554    1.88
+no_admission                                             3    100.0%      352ms ±361     0.555    0.555    1.88
+
+medians across repeats; ± is half the observed range, not a CI.
+offered = met / arrived (rejections count as misses) — the headline. served = met / admitted,
+which flatters shedding and is shown only beside it. req/s is met per second of wall clock.
+
+reject reasons:
+  chronos_inspired[chunk_tokens=512,safety_factor=1.0]  deadline_unmeetable=685, overloaded=472

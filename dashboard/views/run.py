@@ -418,7 +418,13 @@ def render() -> None:
         "CLI command, so anything you see here you can rerun in a terminal."
     )
 
-    configs = sorted(EXPERIMENTS.glob("*.yaml")) if EXPERIMENTS.exists() else []
+    # An experiment is a folder holding `experiment.yaml`, so its results can
+    # live beside its config instead of in a separate tree.
+    configs = (
+        sorted(p for p in EXPERIMENTS.iterdir() if (p / "experiment.yaml").exists())
+        if EXPERIMENTS.exists()
+        else []
+    )
     if not configs:
         empty_state(
             "No Experiments Yet",
@@ -490,9 +496,14 @@ def render() -> None:
         )
 
     c1, c2 = st.columns(2)
-    out_name = c1.text_input("Results folder", config_path.stem)
+    out_name = c1.text_input("Results folder", config_path.name)
     repeats = int(c2.number_input("Override repeats (0 = use config)", 0, 10, 0))
-    out_dir = RESULTS / (out_name or config_path.stem)
+    # Inside the experiment folder by default: one experiment, one place.
+    out_dir = (
+        config_path / "results"
+        if out_name == config_path.name
+        else RESULTS / (out_name or config_path.name)
+    )
 
     stages = _plan(
         config_path=config_path,

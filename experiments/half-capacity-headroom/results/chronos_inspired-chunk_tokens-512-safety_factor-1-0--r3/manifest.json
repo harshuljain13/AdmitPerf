@@ -1,0 +1,145 @@
+{
+  "experiment": "Experiment1",
+  "policy": "chronos_inspired",
+  "policy_params": {
+    "chunk_tokens": 512,
+    "safety_factor": 1.0
+  },
+  "policy_label": "chronos_inspired[chunk_tokens=512,safety_factor=1.0]",
+  "repeat": 3,
+  "repeats": 3,
+  "seed": 2,
+  "slo_mode": "absolute",
+  "situation": "4rps-120s",
+  "offered_rate": 4.0,
+  "workload": {
+    "kind": "poisson",
+    "n": 200,
+    "rate": 4.0,
+    "seed": 0,
+    "duration_s": 120,
+    "warmup_s": 20,
+    "slo_mode": "absolute"
+  },
+  "baseline": null,
+  "engine_url": "https://harshuljain1393--admitperf-vllm-serve.modal.run",
+  "deployment": null,
+  "deployment_infra": null,
+  "config": {
+    "name": "Experiment1",
+    "infra": {
+      "provider": "modal",
+      "gpu": "A10G",
+      "gpu_count": 1,
+      "model": "Qwen/Qwen2.5-0.5B-Instruct",
+      "served_model_name": "lab",
+      "scaledown_window_s": 300,
+      "startup_timeout_s": 900,
+      "max_concurrent_inputs": 256,
+      "engine": {
+        "max_num_seqs": 10,
+        "max_model_len": 6144,
+        "gpu_memory_utilization": 0.85,
+        "tensor_parallel_size": 1,
+        "pipeline_parallel_size": 1,
+        "enable_prefix_caching": false,
+        "scheduling_policy": "fcfs",
+        "dtype": "auto",
+        "quantization": null,
+        "max_num_batched_tokens": null,
+        "swap_space_gb": null,
+        "block_size": null,
+        "extra_args": []
+      }
+    },
+    "matrix": [],
+    "workload": {
+      "kind": "poisson",
+      "n": 200,
+      "rate": 4.0,
+      "seed": 0,
+      "duration_s": 120,
+      "warmup_s": 20,
+      "slo_mode": "absolute"
+    },
+    "loads": [],
+    "policies": [
+      {
+        "name": "no_admission",
+        "params": {}
+      },
+      {
+        "name": "chronos_inspired",
+        "params": {
+          "chunk_tokens": 512,
+          "safety_factor": 1.0
+        }
+      },
+      {
+        "name": "kv_threshold",
+        "params": {
+          "threshold": 0.9
+        }
+      }
+    ],
+    "bench": {
+      "repeats": 3,
+      "warmup": 0,
+      "scrape_interval_s": 0.1,
+      "max_state_age_s": 5.0,
+      "max_defers": 100,
+      "randomize_policy_order": true
+    }
+  },
+  "created_at": "20260917T013011Z",
+  "environment": {
+    "local": {
+      "python": "3.11.13",
+      "platform": "macOS-26.5.1-arm64-arm-64bit",
+      "machine": "arm64",
+      "packages": {
+        "admitperf": "0.0.1",
+        "httpx": "0.28.1",
+        "modal": "1.5.5"
+      }
+    },
+    "engine": {
+      "version": "0.29.0",
+      "cache_config": {
+        "_block_size_resolved": "True",
+        "block_size": "16",
+        "cache_dtype": "auto",
+        "enable_prefix_caching": "False",
+        "engine": "0",
+        "gpu_memory_utilization": "0.85",
+        "is_attention_free": "False",
+        "kv_cache_dtype_skip_layers": "[]",
+        "kv_cache_layout": "None",
+        "kv_cache_max_concurrency": "243.45052083333334",
+        "kv_cache_memory_bytes": "None",
+        "kv_cache_size_tokens": "1495760",
+        "kv_offloading_backend": "native",
+        "kv_offloading_size": "None",
+        "kv_sharing_fast_prefill": "False",
+        "mamba_block_size": "None",
+        "mamba_cache_dtype": "auto",
+        "mamba_cache_mode": "none",
+        "mamba_page_size_padded": "None",
+        "mamba_ssm_cache_dtype": "auto",
+        "num_cpu_blocks": "None",
+        "num_gpu_blocks": "93485",
+        "num_gpu_blocks_override": "None",
+        "prefix_cache_retention_interval": "0",
+        "prefix_caching_hash_algo": "sha256",
+        "prefix_match_unit": "None",
+        "replayssm_buffer_len": "16",
+        "skip_page_size_padded": "None",
+        "sliding_window": "None",
+        "use_kda_recoverssm": "False",
+        "use_replayssm": "False",
+        "user_specified_block_size": "False",
+        "user_specified_mamba_block_size": "False"
+      }
+    }
+  }
+}

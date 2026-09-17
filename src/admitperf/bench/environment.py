@@ -35,6 +35,37 @@ def package_versions() -> dict[str, str | None]:
     return out
 
 
+def code_version() -> dict[str, Any]:
+    """Which commit produced this result, and whether the tree was dirty.
+
+    The package version is useless for this: it reads 0.0.1 for months while the
+    code underneath changes daily. Without the commit, a bundle cannot be placed
+    on either side of a fix, which is exactly the provenance a paper about
+    provenance has to have.
+    """
+    import subprocess
+
+    def _git(*args: str) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", *args], capture_output=True, text=True, timeout=5, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip() or None
+
+    sha = _git("rev-parse", "HEAD")
+    if sha is None:
+        return {"commit": None, "dirty": None}
+    status = _git("status", "--porcelain")
+    return {
+        "commit": sha[:12],
+        # A dirty tree means the commit does not describe what ran. Better to
+        # say so in the record than to imply a clean provenance we do not have.
+        "dirty": bool(status),
+    }
+
+
 def local_environment() -> dict[str, Any]:
     """The machine generating the load, which is where timings are taken."""
     return {
@@ -42,6 +73,7 @@ def local_environment() -> dict[str, Any]:
         "platform": platform.platform(),
         "machine": platform.machine(),
         "packages": package_versions(),
+        "code": code_version(),
     }
 
 

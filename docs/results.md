@@ -10,7 +10,7 @@ and the numbers behave the way the theory says they should.
 
 `max_num_seqs=4`, `max_model_len=2048`, prefix caching off, FCFS scheduling.
 80 requests at 15 arrivals/second, Poisson, two repeats per policy. Config in
-[`../experiments/shedding-vs-tail-latency.yaml`](../experiments/shedding-vs-tail-latency.yaml).
+[`../experiments/shedding-vs-tail-latency`](../experiments/shedding-vs-tail-latency).
 
 The concurrency cap is the point: four sequences run at a time and the surplus
 queues inside vLLM, which is the pressure a policy reads.
@@ -77,9 +77,9 @@ genuinely fills.
 ## Reproducing
 
 ```bash
-admitperf infra up   -c experiments/shedding-vs-tail-latency.yaml
+admitperf infra up   -c experiments/shedding-vs-tail-latency
 admitperf infra smoke
-admitperf bench run  -c experiments/shedding-vs-tail-latency.yaml
+admitperf bench run  -c experiments/shedding-vs-tail-latency
 admitperf bench compare results/
 admitperf infra down
 ```
@@ -92,4 +92,4 @@ result can be traced to the exact engine settings that produced it.
 | Run | What it was | Where |
 |---|---|---|
 | 2026-09-15 | Chronos-inspired vs `no_admission`, same A10G | [`reports/chronos-reproduction.md`](../reports/chronos-reproduction.md) |
-| 2026-09-16 | `results/Experiment1` — chronos vs `kv_threshold`. **Not a result**: the workload exceeded `max_model_len`, so a third of every run came back HTTP 400 and was counted as a failure, and the offered load was ~10x what the deployment could serve on time. Both policies scored ~0. `bench run` now refuses to start on the first of those. | `results/Experiment1/`, since renamed `experiments/half-capacity-headroom.yaml` |
+| 2026-09-16 | `results/Experiment1` — chronos vs `kv_threshold`. **Not a result**: the workload exceeded `max_model_len`, so a third of every run came back HTTP 400 and was counted as a failure, and the offered load was ~10x what the deployment could serve on time. Both policies scored ~0. `bench run` now refuses to start on the first of those. | `results/Experiment1/`, since renamed `experiments/half-capacity-headroom` |

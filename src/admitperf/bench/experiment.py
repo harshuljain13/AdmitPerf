@@ -77,6 +77,49 @@ async def run_one(
     return summarize(result, result.requests), result
 
 
+def results_dir_for(config_path: str | Path | None, out: str | Path | None) -> Path | None:
+    """Where a run should write, given how it was invoked.
+
+    An explicit `--out` always wins. Otherwise, if the config came from an
+    experiment folder, results belong in that folder: the point of the folder is
+    that everything about one experiment is in one place, and a results
+    directory somewhere else is how runs end up scattered.
+    """
+    if out is not None:
+        return Path(out)
+    if config_path is None:
+        return None
+    p = Path(config_path)
+    folder = p if p.is_dir() else p.parent
+    if (folder / ExperimentConfig.FILENAME).exists():
+        return folder / "results"
+    return None
+
+
+class ResultsExistError(RuntimeError):
+    """The target directory already holds runs."""
+
+
+def guard_results_dir(root: Path, *, force: bool = False) -> None:
+    """Refuse to write on top of an existing set of runs.
+
+    A second run into the same directory silently replaced the first and
+    destroyed the only copy of a result we had already reasoned about. Bundles
+    are evidence; evidence does not get overwritten because a path was reused.
+    """
+    if force or not root.exists():
+        return
+    existing = sorted({p.parent.name for p in root.rglob("manifest.json")})
+    if not existing:
+        return
+    raise ResultsExistError(
+        f"{root} already holds {len(existing)} run(s) — for example "
+        f"{existing[0]}. Writing here would replace them, and a bundle is the "
+        "only record of what a number meant. Move or rename the old results, "
+        "choose another --out, or pass --force if you genuinely want them gone."
+    )
+
+
 class ContextOverflowError(RuntimeError):
     """The workload can generate requests the engine cannot accept."""
 
@@ -255,6 +298,11 @@ async def _run_situation(
                     "experiment": cfg.name,
                     "policy": spec.name,
                     "policy_params": spec.params,
+                    # The signals this policy declared it needs, so a reader can
+                    # check them against `signal_range` without knowing the code.
+                    "policy_requires": sorted(
+                        getattr(get_policy(spec.name, **spec.params), "requires", frozenset())
+                    ),
                     "policy_label": spec.label,
                     "repeat": repeat + 1,
                     "repeats": cfg.bench.repeats,
@@ -265,6 +313,9 @@ async def _run_situation(
                     "situation": situation,
                     "offered_rate": wl.rate,
                     "workload": asdict(wl),
+                    # The measured serveable rate this load is expressed
+                    # against, when `bench capacity` has established one.
+                    "capacity_ref": cfg.bench.capacity_ref,
                     "baseline": asdict(baseline) if baseline else None,
                     "engine_url": engine_url,
                     "deployment": deployment.label if deployment else None,

@@ -8,9 +8,9 @@ Two groups, matching the two jobs:
 They are separate because bringing a model up takes minutes and you will run
 many policies against one deployment.
 
-    admitperf infra up -c experiments/shedding-vs-tail-latency.yaml
+    admitperf infra up -c experiments/shedding-vs-tail-latency
     admitperf infra smoke
-    admitperf bench run -c experiments/shedding-vs-tail-latency.yaml
+    admitperf bench run -c experiments/shedding-vs-tail-latency
     admitperf bench compare results/
     admitperf infra down
 
@@ -446,17 +446,42 @@ def bench() -> None:
 @click.option("--rate", type=float, default=None, help="Arrivals per second")
 @click.option("--seed", type=int, default=None)
 @click.option("--repeats", type=int, default=None, help="Runs per policy")
-@click.option("--out", default=None, help="Output directory")
+@click.option(
+    "--out",
+    default=None,
+    help="Where to write. Defaults to results/ inside the experiment folder.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Write even if the target already holds runs. They will be replaced.",
+)
 def bench_run(
-    config: str | None, engine_url: str | None, out: str | None, **overrides: object
+    config: str | None,
+    engine_url: str | None,
+    out: str | None,
+    force: bool,
+    **overrides: object,
 ) -> None:
     """Drive load through each policy and record what it cost."""
-    from admitperf.bench.experiment import run_experiment
+    from admitperf.bench.experiment import (
+        ResultsExistError,
+        guard_results_dir,
+        results_dir_for,
+        run_experiment,
+    )
 
     try:
         cfg = _load(config, **overrides)
     except ConfigError as exc:
         raise SystemExit(f"config error: {exc}") from exc
+
+    out_dir = results_dir_for(config, out)
+    if out_dir is not None:
+        try:
+            guard_results_dir(out_dir, force=force)
+        except ResultsExistError as exc:
+            raise SystemExit(str(exc)) from exc
 
     url, served = _resolve_endpoint(engine_url)
     baseline = _baseline_for(cfg, engine_url)
@@ -467,7 +492,7 @@ def bench_run(
                 cfg,
                 engine_url=url,
                 served_model=served,
-                out_dir=Path(out) if out else None,
+                out_dir=out_dir,
                 baseline=baseline,
             )
         )
