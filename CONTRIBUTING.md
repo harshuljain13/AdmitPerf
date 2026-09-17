@@ -72,10 +72,10 @@ pytest tests/policies/test_your_policy.py # just yours
 pytest -k determinism                     # cross-policy determinism suite
 ```
 
-Against the fake engine, no GPU needed:
+Against the mock engine, no GPU needed:
 
 ```bash
-python scripts/fake_vllm.py --port 8077 &
+python scripts/mock_vllm.py --port 8077 &
 admitperf bench run --engine-url http://127.0.0.1:8077 \
     --policy your_policy --policy no_admission -n 40 --rate 20 --repeats 2
 admitperf bench compare results/

@@ -104,7 +104,7 @@ Unresolved. Each one changes the build, so none should be answered by accident.
    remains of the "cheap and deterministic" corollary in [`motivation.md`](motivation.md)
    is a tension worth naming: a run against real hardware is not bit-reproducible, so
    reproducibility here means a pinned manifest and a published bundle, not identical
-   numbers. `scripts/fake_vllm.py` covers the wiring; it is explicitly not a measurement
+   numbers. `scripts/mock_vllm.py` covers the wiring; it is explicitly not a measurement
    substrate.
 2. **Policy count.** The roster in [`policies.md`](policies.md) versus the 3–4 that
    [`prior-art/feasibility_audit.md`](prior-art/feasibility_audit.md) argues is achievable.
