@@ -2,7 +2,7 @@
 
 AdmitPerf is not a greenfield build. Two prior artifacts inform its design.
 
-## `llm-inference-experiments/module7-admission-and-routing/`
+## **a working two-replica vLLM gateway** (`module7-admission-and-routing` in a companion experiments repository)
 
 A working admission gateway running against a live two-replica vLLM fleet on Lambda. Concept-map to AdmitPerf:
 
@@ -21,7 +21,7 @@ So the work is not "build a harness from scratch." It is: **lift that hardcoded 
 
 This also settles the feasibility audit's largest risk — *"you will have to patch vLLM internals."* module7 demonstrates you do not: admission sits in front of the fleet, reading `/metrics`. Only preemption-loss accounting needs anything inside the engine.
 
-## `llm-inference-experiments/module8-mini-serving-system/admit.py`
+## **the teaching version of the same function** (`module8-mini-serving-system/admit.py`)
 
 The teaching version of the same function — a stub students implement as coursework. A stable AdmitPerf API is what that assignment could target next semester.
 

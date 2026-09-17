@@ -206,6 +206,56 @@ class ArrivalRateWindow:
         return max(count for _, count in self._buckets) / self.bucket_s
 
 
+class PrefillDemandWindow:
+    """Mean prefill chunks per arrival, over the same window as lambda.
+
+    Algorithm 1's first check is rho_P = lambda * E[C_pre], where E[C_pre] is
+    the expectation over the *arrival process* — a statement about offered
+    load. Feeding it the arriving request's own cost instead makes a long
+    prompt read as system overload on its own account: at 512-token chunks a
+    4096-token request scores eight times a 512-token one, so a mixed workload
+    trips check 1 on its longest class no matter how idle the fleet is.
+
+    Chunks rather than milliseconds because p_i = ceil(l_i / B) depends only on
+    the traffic, while the per-chunk cost moves as the cost model is refitted.
+    Keeping them apart means a refit does not rewrite the history of what
+    arrived.
+    """
+
+    def __init__(self, *, window_s: float = 60.0, bucket_s: float = 1.0) -> None:
+        if window_s <= 0 or bucket_s <= 0:
+            raise ValueError("window and bucket must be positive")
+        self.window_s = window_s
+        self.bucket_s = bucket_s
+        #: (slot, arrivals, total chunks) — bucketed so the window stays O(1)
+        #: per decision however heavy the load.
+        self._buckets: collections.deque[tuple[int, int, int]] = collections.deque()
+
+    def record(self, chunks: int, now: float | None = None) -> None:
+        t = time.monotonic() if now is None else now
+        slot = int(t / self.bucket_s)
+        if self._buckets and self._buckets[-1][0] == slot:
+            _, n, total = self._buckets[-1]
+            self._buckets[-1] = (slot, n + 1, total + chunks)
+        else:
+            self._buckets.append((slot, 1, chunks))
+        self._evict(t)
+
+    def _evict(self, now: float) -> None:
+        oldest = int((now - self.window_s) / self.bucket_s)
+        while self._buckets and self._buckets[0][0] < oldest:
+            self._buckets.popleft()
+
+    def mean_chunks(self, now: float | None = None) -> float | None:
+        """E[p] over the window, or None when nothing has arrived yet."""
+        t = time.monotonic() if now is None else now
+        self._evict(t)
+        arrivals = sum(n for _, n, _ in self._buckets)
+        if arrivals <= 0:
+            return None
+        return sum(total for _, _, total in self._buckets) / arrivals
+
+
 def fit_cost_model(rates: ServiceRates, *, base: CostModel, chunk_tokens: int) -> CostModel:
     """Replace the paper's roofline alpha/beta with measured values.
 
@@ -233,4 +283,10 @@ def fit_cost_model(rates: ServiceRates, *, base: CostModel, chunk_tokens: int) -
     )
 
 
-__all__ = ["ArrivalRateWindow", "ServiceRateEstimator", "ServiceRates", "fit_cost_model"]
+__all__ = [
+    "ArrivalRateWindow",
+    "PrefillDemandWindow",
+    "ServiceRateEstimator",
+    "ServiceRates",
+    "fit_cost_model",
+]

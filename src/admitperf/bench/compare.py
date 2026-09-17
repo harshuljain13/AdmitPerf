@@ -23,9 +23,11 @@ class PolicyStats:
     label: str
     runs: int = 0
     admitted: list[float] = field(default_factory=list)
-    offered: list[float] = field(default_factory=list)
+    offered_count: list[float] = field(default_factory=list)
     ttft_p95: list[float] = field(default_factory=list)
     goodput: list[float] = field(default_factory=list)
+    offered: list[float] = field(default_factory=list)
+    served: list[float] = field(default_factory=list)
     rejects: dict[str, int] = field(default_factory=dict)
 
     unhealthy: int = 0
@@ -34,12 +36,16 @@ class PolicyStats:
         self.runs += 1
         if summary.get("signal_was_healthy") is False:
             self.unhealthy += 1
-        self.offered.append(float(summary.get("offered") or 0))
+        self.offered_count.append(float(summary.get("offered") or 0))
         self.admitted.append(float(summary.get("admitted") or 0))
         if (p95 := (summary.get("ttft_ms") or {}).get("p95")) is not None:
             self.ttft_p95.append(float(p95))
-        if (g := summary.get("goodput_under_admission")) is not None:
-            self.goodput.append(float(g))
+        if (g := summary.get("offered_attainment")) is not None:
+            self.offered.append(float(g))
+        if (s := summary.get("served_attainment")) is not None:
+            self.served.append(float(s))
+        if (r := summary.get("goodput_rps")) is not None:
+            self.goodput.append(float(r))
         for reason, count in (summary.get("reject_reasons") or {}).items():
             self.rejects[reason] = self.rejects.get(reason, 0) + int(count)
 
@@ -126,24 +132,37 @@ def _table(root: Path, runs: list[tuple[str, dict[str, Any]]], *, header: bool =
             "",
         ]
     lines += [
-        f"{'policy':<{width}}  {'runs':>4}  {'admit%':>8}  {'TTFT p95':>14}  {'goodput':>9}",
-        f"{'-' * width}  {'-' * 4}  {'-' * 8}  {'-' * 14}  {'-' * 9}",
+        f"{'policy':<{width}}  {'runs':>4}  {'admit%':>8}  {'TTFT p95':>14}  "
+        f"{'offered':>8}  {'served':>7}  {'req/s':>6}",
+        f"{'-' * width}  {'-' * 4}  {'-' * 8}  {'-' * 14}  {'-' * 8}  {'-' * 7}  {'-' * 6}",
     ]
 
     for s in sorted(stats.values(), key=lambda x: x.label):
-        rates = [a / o for a, o in zip(s.admitted, s.offered, strict=True) if o]
+        rates = [a / o for a, o in zip(s.admitted, s.offered_count, strict=True) if o]
         admit = _median(rates)
         ttft = _median(s.ttft_p95)
-        good = _median(s.goodput)
+        offered = _median(s.offered)
+        served = _median(s.served)
+        rps = _median(s.goodput)
         lines.append(
             f"{s.label:<{width}}  {s.runs:>4}  "
             f"{'-' if admit is None else f'{admit * 100:7.1f}%'}  "
             f"{('-' if ttft is None else f'{ttft:.0f}ms') + _spread(s.ttft_p95):>14}  "
-            f"{'-' if good is None else f'{good:9.4f}'}"
+            f"{'-' if offered is None else f'{offered:8.3f}'}  "
+            f"{'-' if served is None else f'{served:7.3f}'}  "
+            f"{'-' if rps is None else f'{rps:6.2f}'}"
         )
 
     lines.append("")
     lines.append("medians across repeats; ± is half the observed range, not a CI.")
+    lines.append(
+        "offered = met / arrived (rejections count as misses) — the headline. "
+        "served = met / admitted,"
+    )
+    lines.append(
+        "which flatters shedding and is shown only beside it. req/s is met per "
+        "second of wall clock."
+    )
 
     degraded = [s.label for s in stats.values() if s.unhealthy]
     if degraded:

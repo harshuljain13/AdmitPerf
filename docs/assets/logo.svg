@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BRIEF: AdmitPerf sidebar lockup. Same wordmark as banner.svg, rebuilt for a
+     narrow rail: transparent ground so it sits on any surface, left-aligned,
+     accent bar shortened and tucked under the wordmark.
+     Size: 260x52. IDs: wordmark, accent. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 52" width="260" height="52"
+     role="img" aria-label="AdmitPerf">
+  <g id="wordmark" font-family="Helvetica, Arial, sans-serif" font-weight="900">
+    <text x="0" y="30" font-size="28" letter-spacing="-1.2">
+      <tspan fill="#F5C518">Admit</tspan><tspan fill="#FFFFFF">Perf</tspan>
+    </text>
+  </g>
+  <g id="accent">
+    <rect x="0" y="40" width="44" height="3" fill="#F5C518"/>
+  </g>
+</svg>

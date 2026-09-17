@@ -1,9 +1,9 @@
 # Queue pressure on a single small GPU. This is the shape that actually
 # produced a result: see docs/results.md.
 #
-#   admitperf infra up   -c experiments/demo.yaml
+#   admitperf infra up   -c experiments/shedding-vs-tail-latency.yaml
 #   admitperf infra smoke
-#   admitperf bench run  -c experiments/demo.yaml
+#   admitperf bench run  -c experiments/shedding-vs-tail-latency.yaml
 #   admitperf bench compare results/
 #   admitperf infra down
 name: queue-pressure

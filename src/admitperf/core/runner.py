@@ -63,6 +63,9 @@ class RunResult:
     reject_reasons: dict[str, int] = field(default_factory=dict)
     decisions: list[DecisionRecord] = field(default_factory=list)
     outcomes: list[RequestOutcome] = field(default_factory=list)
+    #: Every admitted request, by id. Kept because judging an outcome needs
+    #: what that request was promised, and the outcome alone does not carry it.
+    requests: dict[str, Request] = field(default_factory=dict)
     scrapes: int = 0
     scrape_failures: int = 0
     #: First scrape error seen, kept so a run that measured nothing can say why.
@@ -99,6 +102,7 @@ class Runner:
         self.config = config or RunnerConfig()
         self.states = StateCache()
         self.result = RunResult()
+        self._started: float | None = None
 
         # Once, here. A policy that needs a signal this engine cannot report
         # would otherwise read the missing value as zero and quietly turn into
@@ -111,7 +115,7 @@ class Runner:
         )
 
     async def run(self) -> RunResult:
-        started = time.monotonic()
+        started = self._started = time.monotonic()
         stop = asyncio.Event()
         scraper = asyncio.create_task(self._scrape_loop(stop))
 
@@ -187,10 +191,15 @@ class Runner:
         if decision.kind is DecisionKind.DEFER and attempt >= self.config.max_defers:
             decision = Decision.reject(reason="defer_exhausted")
 
+        # Every request is retained, warmup included: the summary needs to know
+        # which were warmup in order to exclude them, and a request absent from
+        # the map is simply invisible.
+        self.result.requests.setdefault(req.request_id, req)
         self._record(req, decision, state)
 
         if decision.kind is DecisionKind.ADMIT:
             self.result.admitted += 1
+            self.result.requests[req.request_id] = req
             self.policy.on_admit(req, state)
             return asyncio.create_task(self.engine.submit(req))
 
@@ -225,6 +234,11 @@ class Runner:
         return await task
 
     def _record(self, req: Request, decision: Decision, state: SystemState) -> None:
+        now = time.monotonic()
+        # How far past its scheduled arrival the verdict landed. Also catches
+        # coordinated omission: if the arrival loop falls behind, this grows
+        # and the recorded latencies understate what a client would see.
+        due = (self._started or now) + req.arrival_time
         status = None
         if decision.kind is DecisionKind.REJECT:
             status = REJECT_STATUS.get(decision.reason or "", DEFAULT_REJECT_STATUS)
@@ -232,7 +246,8 @@ class Runner:
             DecisionRecord(
                 request_id=req.request_id,
                 tenant_id=req.tenant_id,
-                decided_at=time.monotonic(),
+                decided_at=now,
+                decision_latency_ms=max(0.0, (now - due) * 1000.0),
                 kind=decision.kind.value,
                 reason=decision.reason,
                 http_status=status,

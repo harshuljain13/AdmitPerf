@@ -5,8 +5,8 @@
 # fitted from live telemetry — the substitution the paper's limitations section
 # flags as future work.
 #
-#   admitperf infra up   -c experiments/chronos.yaml
-#   admitperf bench run  -c experiments/chronos.yaml
+#   admitperf infra up   -c experiments/chronos-vs-no-admission.yaml
+#   admitperf bench run  -c experiments/chronos-vs-no-admission.yaml
 #   admitperf bench compare results/
 name: chronos-vs-naive
 

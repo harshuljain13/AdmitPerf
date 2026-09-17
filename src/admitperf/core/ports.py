@@ -59,6 +59,10 @@ class DecisionRecord:
     kv_used_fraction: float | None
     waiting_requests: int
     running_requests: int
+    #: Time from the request being due to the verdict being reached. A refusal
+    #: is only useful if it is fast — a slow reject costs the caller the wait
+    #: and gives them nothing — so it is measured rather than assumed.
+    decision_latency_ms: float | None = None
 
 
 @runtime_checkable

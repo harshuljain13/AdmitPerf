@@ -1,4 +1,4 @@
-.PHONY: diagrams diagrams-check test lint
+.PHONY: diagrams diagrams-check test lint dashboard mock-engine
 
 MMD := $(wildcard docs/architecture/*.mmd) $(wildcard reports/figures/*.mmd)
 PNG := $(MMD:.mmd=.png)
@@ -30,5 +30,14 @@ test:
 	$(PYTHON) -m pytest -q
 
 lint:
-	$(PYTHON) -m ruff check src tests
-	$(PYTHON) -m ruff format --check src tests
+	$(PYTHON) -m ruff check src tests dashboard
+	$(PYTHON) -m ruff format --check src tests dashboard
+
+# The app: configure an experiment, run the pipeline, read the results.
+dashboard:
+	$(PYTHON) -m streamlit run dashboard/app.py
+
+# A mock engine so the dashboard has something to run against without a GPU.
+# Start it in a second terminal; the Run page checks the port.
+mock-engine:
+	$(PYTHON) scripts/mock_vllm.py --port 8000 --capacity 4

@@ -14,15 +14,22 @@ between policies would change the thing being controlled for.
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from admitperf.bench.environment import engine_environment, local_environment
 from admitperf.bench.results import summarize, write_bundle
-from admitperf.bench.workloads.poisson import PoissonWorkload
-from admitperf.core.config import Deployment, ExperimentConfig, PolicySpec
+from admitperf.bench.workloads.poisson import Baseline, PoissonWorkload
+from admitperf.core.config import (
+    Deployment,
+    ExperimentConfig,
+    PolicySpec,
+    WorkloadConfig,
+)
 from admitperf.core.registry import get_policy
 from admitperf.core.runner import Runner, RunnerConfig, RunResult
 from admitperf.engines.vllm import VllmConfig, VllmEngine
@@ -39,13 +46,19 @@ async def run_one(
     engine_url: str,
     served_model: str,
     seed: int,
+    baseline: Baseline | None = None,
+    workload_cfg: WorkloadConfig | None = None,
 ) -> tuple[dict[str, Any], RunResult]:
-    """One policy, one repeat."""
+    """One policy, one repeat, under one traffic condition."""
+    wl = workload_cfg or cfg.workload
     engine = VllmEngine(VllmConfig(base_url=engine_url, model=served_model))
     workload = PoissonWorkload(
-        n_requests=cfg.workload.n,
-        rate_per_s=cfg.workload.rate,
+        n_requests=wl.n,
+        rate_per_s=wl.rate,
         seed=seed,
+        duration_s=wl.duration_s,
+        warmup_s=wl.warmup_s,
+        baseline=baseline if wl.slo_mode == "relative" else None,
     )
     runner = Runner(
         workload=workload,
@@ -61,7 +74,46 @@ async def run_one(
         result = await runner.run()
     finally:
         await engine.aclose()
-    return summarize(result), result
+    return summarize(result, result.requests), result
+
+
+class ContextOverflowError(RuntimeError):
+    """The workload can generate requests the engine cannot accept."""
+
+
+def check_context_budget(cfg: ExperimentConfig, classes=None) -> None:
+    """Refuse to start if the traffic cannot fit the engine's context window.
+
+    vLLM answers an over-long request with a 400. The harness counts that as an
+    admitted request that failed, which is indistinguishable in the summary
+    from a request the engine dropped under load — so a third of a run can be
+    configuration error wearing the costume of a result. Caught here it costs a
+    second; caught afterwards it costs the whole deployment.
+    """
+    from admitperf.bench.workloads.poisson import DEFAULT_CLASSES
+
+    limit = cfg.infra.engine.max_model_len
+    if not limit:
+        return
+
+    offenders = [
+        (c.name, c.input_tokens[1] + c.output_tokens[1])
+        for c in (classes or DEFAULT_CLASSES)
+        if c.input_tokens[1] + c.output_tokens[1] > limit
+    ]
+    if not offenders:
+        return
+
+    worst = max(n for _, n in offenders)
+    detail = ", ".join(f"{name} up to {n}" for name, n in offenders)
+    raise ContextOverflowError(
+        f"this workload can generate requests of up to {worst} tokens "
+        f"(prompt + output) but the engine is configured for "
+        f"max_model_len={limit}: {detail}. Those requests come back as HTTP 400 "
+        f"and are recorded as failures, which reads like overload rather than a "
+        f"mismatch. Raise max_model_len to at least {worst}, or narrow the "
+        f"workload classes."
+    )
 
 
 async def run_experiment(
@@ -71,6 +123,7 @@ async def run_experiment(
     served_model: str,
     out_dir: Path | None = None,
     deployment: Deployment | None = None,
+    baseline: Baseline | None = None,
 ) -> Path:
     """Every policy × every repeat against one deployment.
 
@@ -78,32 +131,107 @@ async def run_experiment(
     comparable only when they faced the same engine on the same hardware.
     Sweeping several deployments is `run_sweep`, which calls this once each.
     """
+    check_context_budget(cfg)
+
     root = out_dir or Path("results") / f"{_stamp()}-{cfg.name}"
     root.mkdir(parents=True, exist_ok=True)
 
     print(
         f"experiment '{cfg.name}': {len(cfg.policies)} "
         f"{'policy' if len(cfg.policies) == 1 else 'policies'} × "
-        f"{cfg.bench.repeats} repeat(s), {cfg.workload.n} requests at "
-        f"{cfg.workload.rate}/s against {engine_url}"
+        f"{cfg.bench.repeats} repeat(s), "
+        + (
+            f"{cfg.workload.duration_s:.0f}s (warmup {cfg.workload.warmup_s:.0f}s)"
+            if cfg.workload.duration_s
+            else f"{cfg.workload.n} requests"
+        )
+        + f" at {cfg.workload.rate}/s against {engine_url}"
     )
 
+    # Captured once: the engine does not change mid-experiment, and asking it
+    # per run would add a round trip to every policy for the same answer.
+    env = {
+        "local": local_environment(),
+        "engine": await engine_environment(engine_url),
+    }
+    engine_version = (env["engine"] or {}).get("version")
+    print(f"  engine: vllm {engine_version or '(version not reported)'}")
+
     index: list[dict[str, Any]] = []
-    for spec in cfg.policies:
-        for repeat in range(cfg.bench.repeats):
+    situations = cfg.situations()
+    if len(situations) > 1:
+        print(
+            f"  {len(situations)} situations against this one deployment: "
+            + ", ".join(s.label for s in situations)
+        )
+    for situation in situations:
+        wl = situation.workload
+        if len(situations) > 1:
+            print(f"\n  -- {situation.label} --")
+        await _run_situation(
+            cfg,
+            situation.label,
+            wl,
+            root=root,
+            engine_url=engine_url,
+            served_model=served_model,
+            baseline=baseline,
+            deployment=deployment,
+            env=env,
+            index=index,
+            single=len(situations) == 1,
+        )
+
+    (root / "index.json").write_text(json.dumps(index, indent=2) + "\n")
+    print(f"\nresults: {root}")
+    print(f"compare: admitperf bench compare {root}")
+    print(f"report:  admitperf bench report {root}")
+    return root
+
+
+async def _run_situation(
+    cfg: ExperimentConfig,
+    situation: str,
+    wl: WorkloadConfig,
+    *,
+    root: Path,
+    engine_url: str,
+    served_model: str,
+    baseline: Baseline | None,
+    deployment: Deployment | None,
+    env: dict[str, Any],
+    index: list[dict[str, Any]],
+    single: bool,
+) -> None:
+    """Every policy x every repeat, under one traffic condition."""
+    for repeat in range(cfg.bench.repeats):
+        # Shuffle within each repeat. A fixed order lets thermal drift, cache
+        # warming and any slow leak accumulate against whichever policy always
+        # runs last — it would look worse for reasons that are not its own.
+        order = list(cfg.policies)
+        if cfg.bench.randomize_policy_order:
+            random.Random(wl.seed + repeat).shuffle(order)
+        for spec in order:
             # Vary the seed per repeat, or every repeat replays identical
             # traffic and the spread measures nothing but engine jitter.
-            seed = cfg.workload.seed + repeat
+            seed = wl.seed + repeat
             label = f"{spec.label} [{repeat + 1}/{cfg.bench.repeats}]"
             print(f"  {label} ... ", end="", flush=True)
 
             summary, result = await run_one(
-                cfg, spec, engine_url=engine_url, served_model=served_model, seed=seed
+                cfg,
+                spec,
+                engine_url=engine_url,
+                served_model=served_model,
+                seed=seed,
+                baseline=baseline,
+                workload_cfg=wl,
             )
             print(
                 f"admitted {summary['admitted']}/{summary['offered']}  "
                 f"TTFT p95 {_ms(summary['ttft_ms']['p95'])}  "
-                f"goodput {summary['goodput_under_admission']}"
+                f"offered {summary['offered_attainment']}  "
+                f"served {summary['served_attainment']}"
             )
             if not summary["signal_was_healthy"]:
                 # Worth interrupting for. The run completes and the numbers
@@ -116,7 +244,10 @@ async def run_experiment(
                     "stale state; this run does not measure it."
                 )
 
-            run_dir = root / f"{_slug(spec.label)}-r{repeat + 1}"
+            # Situation in the path, not just the manifest: a directory
+            # listing should show what varied without opening anything.
+            stem = f"{_slug(spec.label)}-r{repeat + 1}"
+            run_dir = root / (stem if single else f"{_slug(situation)}/{stem}")
             write_bundle(
                 run_dir,
                 result=result,
@@ -128,27 +259,37 @@ async def run_experiment(
                     "repeat": repeat + 1,
                     "repeats": cfg.bench.repeats,
                     "seed": seed,
+                    "slo_mode": wl.slo_mode,
+                    # The second axis of the comparison. Policies are
+                    # comparable within a situation, never across two.
+                    "situation": situation,
+                    "offered_rate": wl.rate,
+                    "workload": asdict(wl),
+                    "baseline": asdict(baseline) if baseline else None,
                     "engine_url": engine_url,
                     "deployment": deployment.label if deployment else None,
                     "deployment_infra": asdict(deployment.infra) if deployment else None,
                     "config": cfg.to_dict(),
                     "created_at": _stamp(),
+                    # Which software produced this number. design.md promises
+                    # it; without it a result cannot be reproduced or compared
+                    # against a later one.
+                    "environment": env,
                 },
             )
             index.append(
                 {
                     "policy": spec.label,
                     "deployment": deployment.label if deployment else None,
+                    "situation": situation,
+                    "offered_rate": wl.rate,
                     "repeat": repeat + 1,
-                    "dir": run_dir.name,
+                    # Relative, so a situation sweep and a single run index
+                    # the same way.
+                    "dir": str(run_dir.relative_to(root)),
                     **summary,
                 }
             )
-
-    (root / "index.json").write_text(json.dumps(index, indent=2) + "\n")
-    print(f"\nresults: {root}")
-    print(f"compare: admitperf bench compare {root}")
-    return root
 
 
 def _slug(text: str) -> str:
@@ -176,6 +317,8 @@ async def run_sweep(
     Provisioning is injected rather than imported so this stays testable and so
     `bench run` against an engine you started yourself keeps working unchanged.
     """
+    check_context_budget(cfg)
+
     root = out_dir or Path("results") / f"{_stamp()}-{cfg.name}"
     root.mkdir(parents=True, exist_ok=True)
     deployments = cfg.deployments()

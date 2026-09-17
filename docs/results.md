@@ -10,7 +10,7 @@ and the numbers behave the way the theory says they should.
 
 `max_num_seqs=4`, `max_model_len=2048`, prefix caching off, FCFS scheduling.
 80 requests at 15 arrivals/second, Poisson, two repeats per policy. Config in
-[`../experiments/demo.yaml`](../experiments/demo.yaml).
+[`../experiments/shedding-vs-tail-latency.yaml`](../experiments/shedding-vs-tail-latency.yaml).
 
 The concurrency cap is the point: four sequences run at a time and the surplus
 queues inside vLLM, which is the pressure a policy reads.
@@ -64,8 +64,12 @@ genuinely fills.
   enough to defend a small difference.
 - **Synthetic traffic.** Poisson arrivals over three SLO classes, not a captured
   production trace.
-- **No comparison to published policies.** `queue_depth` is a threshold, not a
-  port of anything. The roster in [`policies.md`](policies.md) is unbuilt.
+- **One published policy ported so far.** `queue_depth` is a threshold, not a
+  port of anything. The Chronos-inspired admission test is ported and written
+  up in [`reports/chronos-reproduction.md`](../reports/chronos-reproduction.md)
+  — which found it far more cautious than the paper reports, and beaten on its
+  own terms by a four-line queue-depth rule at the load tested. The rest of the
+  roster in [`policies.md`](policies.md) is unbuilt.
 - **`goodput` is dominated by the deadlines the workload generator assigns.**
   At these latencies most requests miss the interactive deadline regardless of
   policy, which compresses the differences between policies.
@@ -73,12 +77,19 @@ genuinely fills.
 ## Reproducing
 
 ```bash
-admitperf infra up   -c experiments/demo.yaml
+admitperf infra up   -c experiments/shedding-vs-tail-latency.yaml
 admitperf infra smoke
-admitperf bench run  -c experiments/demo.yaml
+admitperf bench run  -c experiments/shedding-vs-tail-latency.yaml
 admitperf bench compare results/
 admitperf infra down
 ```
 
 Roughly $0.30 of A10G time. Every run bundle records the resolved config, so a
 result can be traced to the exact engine settings that produced it.
+
+## Other runs on this hardware
+
+| Run | What it was | Where |
+|---|---|---|
+| 2026-09-15 | Chronos-inspired vs `no_admission`, same A10G | [`reports/chronos-reproduction.md`](../reports/chronos-reproduction.md) |
+| 2026-09-16 | `results/Experiment1` — chronos vs `kv_threshold`. **Not a result**: the workload exceeded `max_model_len`, so a third of every run came back HTTP 400 and was counted as a failure, and the offered load was ~10x what the deployment could serve on time. Both policies scored ~0. `bench run` now refuses to start on the first of those. | `results/Experiment1/`, since renamed `experiments/half-capacity-headroom.yaml` |

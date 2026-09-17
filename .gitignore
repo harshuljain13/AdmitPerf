@@ -27,8 +27,9 @@ venv/
 env/
 ENV/
 
-# uv
-uv.lock
+# uv.lock is COMMITTED on purpose. Every dependency is declared with >=, so
+# without a lock two people get different versions and a benchmark that claims
+# reproducible comparison cannot deliver one.
 
 # IDE
 .vscode/

@@ -1,0 +1,96 @@
+# Which admission policy, in which situation.
+#
+# Every policy faces the same deployment under four traffic conditions, so the
+# only things that vary are the load and the accept-or-refuse decision. The
+# question this answers is not "which policy is best" — that question has no
+# answer — but "which policy is best *here*", four times over.
+#
+#     admitperf infra up   -c experiments/which-policy-when.yaml
+#     admitperf infra smoke
+#     admitperf bench run  -c experiments/which-policy-when.yaml --out results/regimes
+#     admitperf bench decide  results/regimes      # situation -> policy
+#     admitperf bench report  results/regimes      # the numbers behind it
+#     admitperf infra down
+#
+# 4 situations x 5 policies x 3 repeats x 75s = about 75 minutes of A10G,
+# roughly $1.40. Drop `repeats` to 2 for ~50 minutes, but three is the
+# minimum that lets you defend a small difference.
+
+name: regimes
+
+infra:
+  provider: modal
+  gpu: A10G
+  gpu_count: 1
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  max_concurrent_inputs: 256
+  engine:
+    # The bottleneck that creates queueing. Raise it and there is no
+    # congestion for a policy to manage; the comparison becomes vacuous.
+    max_num_seqs: 10
+    # Must clear the workload's largest request: batch is 4096 in + 2048 out.
+    max_model_len: 6144
+    gpu_memory_utilization: 0.85
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    # Off for benchmarking: with it on, KV pressure stops tracking offered
+    # load and kv_threshold reads a signal that means something else.
+    enable_prefix_caching: false
+    scheduling_policy: fcfs
+
+# The base condition. Each entry under `loads` inherits it and overrides only
+# what differs.
+workload:
+  kind: poisson
+  seed: 0
+  slo_mode: absolute
+  duration_s: 60
+  warmup_s: 15
+
+# The situation axis. PLACEHOLDERS — replace them with what `bench capacity`
+# measures on the deployment you actually provisioned:
+#
+#     admitperf bench capacity -c experiments/which-policy-when.yaml
+#
+# It walks the baseline up a ramp, finds where attainment falls through 90%,
+# and prints a `loads:` block as multiples of that rate. Round numbers picked
+# by hand are a guess about the hardware; these are a measurement of it, and
+# they are what makes "at 1.5x capacity, use X" transfer to another GPU.
+#
+# The values below are from a 2026-09-16 A10G run and are kept only so the
+# file runs out of the box.
+loads:
+  - rate: 4.0     # ~0.5x capacity — admission control should have nothing to do
+  - rate: 8.0     # ~1x — the knee, where refusing well starts to pay
+  - rate: 12.0    # ~1.5x — overload, the regime these policies are for
+  - rate: 16.0    # ~2x — heavy overload, where refusing badly still beats not refusing
+
+policies:
+  # Admit everything. Not a strawman: at low load it is the correct policy,
+  # and every other row is only meaningful as a difference from this one.
+  - name: no_admission
+
+  # Queue length, the four-line rule. Two thresholds because where you put it
+  # matters more than the idea, and that is worth showing.
+  - name: queue_depth
+    max_waiting: 8
+  - name: queue_depth
+    max_waiting: 2
+
+  # KV-cache pressure. Expect it to be inert on a model this small — the cache
+  # never fills — and that inertness is a result, not a bug in the run.
+  - name: kv_threshold
+    threshold: 0.9
+
+  # A published algorithm: per-request deadline feasibility rather than a
+  # busyness threshold. See reports/chronos-reproduction.md, including the
+  # addendum on how sensitive it is to cost-model calibration.
+  - name: chronos_inspired
+    chunk_tokens: 512
+    safety_factor: 1.0
+
+bench:
+  repeats: 3
+  # Shuffled per repeat so drift cannot accumulate against whichever policy
+  # always runs last.
+  randomize_policy_order: true

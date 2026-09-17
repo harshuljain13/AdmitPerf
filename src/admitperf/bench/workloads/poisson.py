@@ -28,7 +28,14 @@ from admitperf.traces.base import TraceEvent, TraceLoader
 
 @dataclass(frozen=True)
 class SLOClass:
-    """One traffic class: how often it arrives, how big it is, what it promises."""
+    """One traffic class: how often it arrives, how big it is, what it promises.
+
+    Deadlines are read one of two ways. In absolute mode they are
+    milliseconds. In relative mode they are *multiples of the engine's unloaded
+    latency*, measured by `admitperf infra calibrate` — so "3x" means the same
+    thing on a small model and a large one, and a comparison across hardware
+    stays meaningful.
+    """
 
     name: str
     weight: float
@@ -37,6 +44,22 @@ class SLOClass:
     deadline_ttft_ms: float | None
     deadline_tbt_ms: float | None
     priority: int = 0
+    #: Multipliers used when slo_mode is "relative".
+    ttft_scale: float = 5.0
+    tbt_scale: float = 2.0
+
+
+@dataclass(frozen=True)
+class Baseline:
+    """The engine's latency with nothing else running.
+
+    Produced by `admitperf infra calibrate`, which sends a trickle of traffic
+    so nothing queues. Relative deadlines are multiples of these.
+    """
+
+    ttft_p50_ms: float
+    itl_p50_ms: float
+    samples: int = 0
 
 
 #: Defaults roughly mirroring PROPOSAL.md §2: an interactive class with a tight
@@ -51,6 +74,8 @@ DEFAULT_CLASSES: tuple[SLOClass, ...] = (
         deadline_ttft_ms=500.0,
         deadline_tbt_ms=50.0,
         priority=10,
+        ttft_scale=3.0,
+        tbt_scale=1.5,
     ),
     SLOClass(
         name="streaming",
@@ -60,6 +85,8 @@ DEFAULT_CLASSES: tuple[SLOClass, ...] = (
         deadline_ttft_ms=2000.0,
         deadline_tbt_ms=100.0,
         priority=5,
+        ttft_scale=5.0,
+        tbt_scale=2.0,
     ),
     SLOClass(
         name="batch",
@@ -69,6 +96,8 @@ DEFAULT_CLASSES: tuple[SLOClass, ...] = (
         deadline_ttft_ms=30000.0,
         deadline_tbt_ms=None,
         priority=0,
+        ttft_scale=10.0,
+        tbt_scale=3.0,
     ),
 )
 
@@ -91,6 +120,9 @@ class PoissonWorkload(TraceLoader):
         seed: int = 0,
         classes: tuple[SLOClass, ...] = DEFAULT_CLASSES,
         tenants: tuple[str, ...] = ("tenant-a", "tenant-b", "tenant-c"),
+        duration_s: float | None = None,
+        warmup_s: float = 0.0,
+        baseline: Baseline | None = None,
     ) -> None:
         if n_requests < 1:
             raise ValueError(f"n_requests must be >= 1, got {n_requests}")
@@ -106,6 +138,11 @@ class PoissonWorkload(TraceLoader):
         self.seed = seed
         self.classes = classes
         self.tenants = tenants
+        self.duration_s = duration_s
+        self.warmup_s = warmup_s
+        #: When present, deadlines become multiples of the engine's unloaded
+        #: latency rather than fixed milliseconds.
+        self.baseline = baseline
 
     def requests(self) -> Iterator[Request]:
         """Yield requests in arrival order.
@@ -117,12 +154,20 @@ class PoissonWorkload(TraceLoader):
         rng = random.Random(self.seed)
         weights = [c.weight for c in self.classes]
         now = 0.0
+        i = 0
 
-        for i in range(self.n_requests):
+        while True:
             # Exponential gap — the inverse-CDF of a Poisson process.
             now += rng.expovariate(self.rate_per_s)
+            if self.duration_s is not None:
+                if now > self.duration_s:
+                    return
+            elif i >= self.n_requests:
+                return
+
             cls = rng.choices(self.classes, weights=weights, k=1)[0]
             tenant = rng.choice(self.tenants)
+            ttft, tbt = self._deadlines(cls)
 
             yield Request(
                 request_id=f"req-{i:06d}",
@@ -131,11 +176,30 @@ class PoissonWorkload(TraceLoader):
                 input_tokens=rng.randint(*cls.input_tokens),
                 agent_id=None,
                 expected_output_tokens=rng.randint(*cls.output_tokens),
-                deadline_ttft_ms=cls.deadline_ttft_ms,
-                deadline_tbt_ms=cls.deadline_tbt_ms,
+                deadline_ttft_ms=ttft,
+                deadline_tbt_ms=tbt,
                 priority=cls.priority,
                 slo_class=cls.name,
+                # Warmup requests are sent — they are part of the load the
+                # engine faces — but excluded from the results, because they
+                # pay for cold caches and graph capture rather than for
+                # anything the policy did.
+                metadata={"warmup": now < self.warmup_s},
             )
+            i += 1
+
+    def _deadlines(self, cls: SLOClass) -> tuple[float | None, float | None]:
+        """Absolute milliseconds, or multiples of the engine's unloaded latency.
+
+        Fixed milliseconds do not transfer across hardware: 500ms is generous
+        for a 0.5B model and impossible for a 70B one, so a single number would
+        be measuring the model rather than the policy.
+        """
+        if self.baseline is None:
+            return cls.deadline_ttft_ms, cls.deadline_tbt_ms
+        ttft = cls.ttft_scale * self.baseline.ttft_p50_ms
+        tbt = cls.tbt_scale * self.baseline.itl_p50_ms if cls.deadline_tbt_ms else None
+        return ttft, tbt
 
     def events(self) -> Iterator[TraceEvent]:
         """The frozen TraceLoader view of the same stream.
@@ -156,10 +220,13 @@ class PoissonWorkload(TraceLoader):
             )
 
     def total_events(self) -> int:
-        return self.n_requests
+        """Exact for a fixed count; an estimate when running for a duration."""
+        if self.duration_s is None:
+            return self.n_requests
+        return int(self.duration_s * self.rate_per_s)
 
     def total(self) -> int:
-        return self.n_requests
+        return self.total_events()
 
 
-__all__ = ["DEFAULT_CLASSES", "PoissonWorkload", "SLOClass"]
+__all__ = ["DEFAULT_CLASSES", "Baseline", "PoissonWorkload", "SLOClass"]

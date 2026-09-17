@@ -17,15 +17,17 @@
 | Experiment driver — every policy × repeats | ✅ Working | `bench/experiment.py` |
 | Results bundle + provenance tags + unavailable metrics | ✅ Working | `bench/results.py` |
 | Cross-run comparison with spread | ✅ Working | `bench/compare.py` |
-| CLI — `infra up/status/smoke/down`, `bench run/compare` | ✅ Working | `cli.py` |
+| CLI — `infra up/status/smoke/down`, `bench run/compare/report` | ✅ Working | `cli.py` |
 | Policies — `NoAdmission`, `KVThreshold`, `QueueDepth`, `QueueDepthDefer` | ✅ Working | `policies/` |
-| Fake vLLM for GPU-free testing | ✅ Working | `scripts/fake_vllm.py` |
+| Mock vLLM for GPU-free testing | ✅ Working | `scripts/mock_vllm.py` |
 | Tests | ✅ 122 passing | `tests/` |
 | SGLang adapter | ⛔ None | — |
 | Lambda provider | ⛔ None — use `--engine-url` against a box you started | — |
-| Reference policy ports (Chronos-inspired, QLM-inspired, …) | ⛔ None | — |
+| Chronos-inspired port + reproduction report | ✅ Working | `policies/chronos/` · [`reports/chronos-reproduction.md`](../reports/chronos-reproduction.md) |
+| Other reference policy ports (QLM-inspired, …) | ⛔ None | — |
 | Tenant-fairness and agent-session workloads | ⛔ None | — |
-| HTML report / dashboard | ⛔ None — `bench compare` prints a table | — |
+| HTML report — verdict, caveats, figures, provenance, one file | ✅ Working | `bench/report.py` |
+| Dashboard — configure, run the pipeline, read results | ✅ Working | `dashboard/` |
 | Runtime middleware (ASGI/Envoy) | ⛔ None | — |
 
 ## Verified end to end
@@ -60,8 +62,10 @@ engine.
 - **No reference policy ports.** `QueueDepth` is a threshold, not a port of a
   published algorithm. The roster in [`policies.md`](policies.md) is unbuilt, so
   there is no head-to-head against prior work — which is the actual goal.
-- **No report artifact.** `bench compare` prints a table; there is no HTML or
-  figure output to attach to a paper.
+- **The report is only as good as the runs behind it.** `bench report` writes
+  a standalone `report.html` with figures and provenance, and it states its
+  own caveats — but a gap inside the run-to-run spread is still a gap inside
+  the spread, however well it is rendered.
 - **Two repeats is thin.** Enough to see that the baseline's spread is large,
   not enough to defend a small difference between policies.
 

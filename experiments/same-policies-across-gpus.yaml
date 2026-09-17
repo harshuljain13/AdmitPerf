@@ -1,6 +1,6 @@
 # The same comparison, across several deployments.
 #
-#   admitperf bench sweep -c experiments/sweep.yaml
+#   admitperf bench sweep -c experiments/same-policies-across-gpus.yaml
 #
 # Each matrix entry is provisioned, every policy runs against it, then it is
 # torn down before the next. Comparisons stay INSIDE a deployment: policies are

@@ -96,7 +96,13 @@ would report the machine as if it were the policy.
 ## Reproducibility contract
 
 - Every run pins, in `manifest.json`: policy, engine, endpoint, KV scale as probed,
-  workload name/size/rate/seed, and the provisioning session (model, GPU, provider).
+  workload name/size/rate/seed, the provisioning session (model, GPU, provider), and the
+  **environment** — Python and platform, the client package versions that took the
+  timings, and the engine's reported version plus the cache settings it actually
+  resolved, which can differ from the flags it was given.
+- Dependency versions are pinned in a committed `uv.lock`. Every declared dependency uses
+  a `>=` range, so without a lock two people resolve different versions and a comparison
+  across time stops meaning anything.
 - Every run emits `summary.json`, `decisions.jsonl` and `outcomes.jsonl` alongside it.
   A directory rather than an archive, so a reader can diff two runs and grep the
   decisions.

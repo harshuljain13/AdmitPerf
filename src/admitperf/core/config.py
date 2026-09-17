@@ -162,11 +162,42 @@ class WorkloadConfig:
     rate: float = 10.0
     seed: int = 0
 
+    #: Run for a fixed time instead of a fixed request count. Preferred for
+    #: comparisons: with a fixed count, a policy that refuses most traffic
+    #: finishes early and is measured over a different window than the baseline
+    #: it is being compared against.
+    duration_s: float | None = None
+
+    #: Requests arriving in this opening window are sent but excluded from the
+    #: results. They pay for cold caches, CUDA graph capture and a cold prefix
+    #: cache, none of which is the policy's doing.
+    warmup_s: float = 0.0
+
+    #: "absolute" takes the deadlines in the SLO classes as milliseconds.
+    #: "relative" multiplies them by the engine's unloaded latency, measured by
+    #: `admitperf infra calibrate`. Fixed milliseconds do not transfer between
+    #: a 0.5B model on an A10G and a 70B on four GPUs, so a comparison across
+    #: hardware needs the relative form to mean the same thing in both places.
+    slo_mode: str = "absolute"
+
     def validate(self) -> None:
         if self.n < 1:
             raise ConfigError(f"workload.n must be >= 1, got {self.n}")
         if self.rate <= 0:
             raise ConfigError(f"workload.rate must be > 0, got {self.rate}")
+        if self.duration_s is not None and self.duration_s <= 0:
+            raise ConfigError(f"workload.duration_s must be > 0, got {self.duration_s}")
+        if self.warmup_s < 0:
+            raise ConfigError(f"workload.warmup_s must be >= 0, got {self.warmup_s}")
+        if self.duration_s is not None and self.warmup_s >= self.duration_s:
+            raise ConfigError(
+                f"workload.warmup_s ({self.warmup_s}) must be less than "
+                f"duration_s ({self.duration_s}), or nothing is measured"
+            )
+        if self.slo_mode not in {"absolute", "relative"}:
+            raise ConfigError(
+                f"workload.slo_mode must be absolute or relative, got {self.slo_mode!r}"
+            )
 
 
 @dataclass
@@ -203,6 +234,11 @@ class BenchConfig:
     max_state_age_s: float = 5.0
     max_defers: int = 100
 
+    #: Shuffle which policy runs first within each repeat. A fixed order lets
+    #: thermal drift, cache warming and any slow leak accumulate against
+    #: whichever policy always runs last.
+    randomize_policy_order: bool = True
+
     def validate(self) -> None:
         if self.repeats < 1:
             raise ConfigError(f"bench.repeats must be >= 1, got {self.repeats}")
@@ -216,6 +252,22 @@ class Deployment:
 
     label: str
     infra: InfraConfig
+
+
+@dataclass
+class Situation:
+    """One traffic condition, against an unchanged deployment.
+
+    The second axis of a comparison. A deployment answers "on what hardware";
+    a situation answers "under what load" — and the two must not be confused,
+    because changing the machine invalidates a comparison while changing the
+    load is the comparison. Which policy wins is a function of the situation,
+    so a result that names a winner without naming the situation is not a
+    finding, it is an anecdote.
+    """
+
+    label: str
+    workload: WorkloadConfig
 
 
 @dataclass
@@ -233,6 +285,9 @@ class ExperimentConfig:
     #: would be measuring hardware, not admission control.
     matrix: list[InfraConfig] = field(default_factory=list)
     workload: WorkloadConfig = field(default_factory=WorkloadConfig)
+    #: Traffic conditions to run every policy under, against the *same*
+    #: deployment. Empty means one situation: `workload` as written.
+    loads: list[WorkloadConfig] = field(default_factory=list)
     policies: list[PolicySpec] = field(default_factory=lambda: [PolicySpec("no_admission")])
     bench: BenchConfig = field(default_factory=BenchConfig)
 
@@ -245,6 +300,23 @@ class ExperimentConfig:
         if not self.matrix:
             return [Deployment(label=self._label(self.infra), infra=self.infra)]
         return [Deployment(label=self._label(i), infra=i) for i in self.matrix]
+
+    def situations(self) -> list[Situation]:
+        """Every traffic condition this experiment runs, in order."""
+        if not self.loads:
+            return [Situation(label=self._load_label(self.workload), workload=self.workload)]
+        return [Situation(label=self._load_label(w), workload=w) for w in self.loads]
+
+    @staticmethod
+    def _load_label(workload: WorkloadConfig) -> str:
+        """Short and filesystem-safe. The rate is what varies in practice, so
+        it leads; anything else that differs is appended."""
+        bits = [f"{workload.rate:g}rps"]
+        if workload.duration_s:
+            bits.append(f"{workload.duration_s:g}s")
+        if workload.slo_mode != "absolute":
+            bits.append(workload.slo_mode)
+        return "-".join(bits)
 
     @staticmethod
     def _label(infra: InfraConfig) -> str:
@@ -271,6 +343,14 @@ class ExperimentConfig:
                 "would overwrite each other"
             )
         self.workload.validate()
+        for load in self.loads:
+            load.validate()
+        load_labels = [s.label for s in self.situations()]
+        if len(load_labels) != len(set(load_labels)):
+            raise ConfigError(
+                f"loads produce duplicate labels {load_labels}; two situations that "
+                "cannot be told apart would overwrite each other's results"
+            )
         self.bench.validate()
         if not self.policies:
             raise ConfigError("at least one policy is required")
@@ -304,6 +384,12 @@ class ExperimentConfig:
             infra=InfraConfig(**infra_raw, engine=EngineConfig(**engine_raw)),
             matrix=[_infra(e or {}) for e in matrix_raw],
             workload=WorkloadConfig(**(raw.get("workload") or {})),
+            # A load entry inherits the base workload and overrides parts of
+            # it, so a sweep states only what varies — usually just the rate.
+            loads=[
+                WorkloadConfig(**{**(raw.get("workload") or {}), **entry})
+                for entry in (raw.get("loads") or [])
+            ],
             policies=[PolicySpec.parse(p) for p in policies_raw],
             bench=BenchConfig(**(raw.get("bench") or {})),
         )

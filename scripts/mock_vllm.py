@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""A pretend vLLM, so the whole CLI can be exercised without a GPU.
+"""A mock vLLM, so the whole CLI can be exercised without a GPU.
 
-    python scripts/fake_vllm.py                     # serves on :8000
+    python scripts/mock_vllm.py                     # serves on :8000
     admitperf smoke --engine-url http://127.0.0.1:8000
     admitperf run --policy no_admission --engine-url http://127.0.0.1:8000
 
 It speaks the three endpoints AdmitPerf touches — /v1/models, /metrics and a
 streaming /v1/chat/completions — and, importantly, it gets *busy*. KV usage
 rises with the number of requests in flight and tokens slow down under load, so
-a threshold policy actually has something to react to. A fake that always
+a threshold policy actually has something to react to. A mock that always
 reports an idle fleet would make every policy look identical.
 
 Stdlib only, no dependencies. This is a test fixture, not a simulator: none of
@@ -27,7 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 STATE = {"running": 0, "waiting": 0, "completed": 0, "preemptions": 0}
 
 # Cumulative timing counters, the same sum/count pairs vLLM publishes. A
-# predictive policy derives its service rates from these, so a fake without
+# predictive policy derives its service rates from these, so a mock without
 # them leaves such a policy permanently uncalibrated — which looks exactly like
 # a policy that decided everything was admissible.
 TIMING = {
@@ -104,7 +104,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        if self.path == "/v1/models":
+        if self.path == "/version":
+            # Real vLLM publishes this; the harness records it in every run
+            # manifest so a result can say which engine produced it.
+            self._send(200, json.dumps({"version": "0.29.0-mock"}).encode(), "application/json")
+        elif self.path == "/v1/models":
             payload = json.dumps({"object": "list", "data": [{"id": "lab"}]}).encode()
             self._send(200, payload, "application/json")
         elif self.path == "/metrics":
@@ -165,7 +169,7 @@ class Handler(BaseHTTPRequestHandler):
         decode_started = time.monotonic()
         for i in range(n_tokens):
             chunk = {
-                "id": "fake",
+                "id": "mock",
                 "object": "chat.completion.chunk",
                 "choices": [{"index": 0, "delta": {"content": f"tok{i} "}}],
             }
@@ -201,7 +205,7 @@ def main() -> None:
     CAPACITY = args.capacity
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"fake vLLM on http://127.0.0.1:{args.port}  (capacity {CAPACITY})")
+    print(f"mock vLLM on http://127.0.0.1:{args.port}  (capacity {CAPACITY})")
     print(f"  admitperf infra smoke --engine-url http://127.0.0.1:{args.port}")
     try:
         server.serve_forever()
