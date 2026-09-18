@@ -105,4 +105,6 @@ experiments/*/results/**/outcomes.jsonl
 experiments/*/results/**/trace.jsonl
 
 # Spec-dev drafts stay local
-.spec-dev/
+# .spec-dev/ is tracked here on purpose: the survey names this repo as its
+# reference implementation, so the plan that keeps the two in step is project
+# documentation rather than scratch.
