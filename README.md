@@ -180,7 +180,7 @@ for reference-policy ports (never claim `"CONCUR"` when you mean
 
 ## Authors
 
-**Harshul Jain** · **Dr. Tanmay Sah** · **Tanya Sah** · **Parv Khatri**
+**Harshul Jain** · **Parv Khatri** · **Tanya Sah**
 All independent researchers. Co-first-author ordering resolved at freeze.
 
 ## Citation
