@@ -182,13 +182,13 @@ for reference-policy ports (never claim `"CONCUR"` when you mean
 
 | | Affiliation | Contact |
 |---|---|---|
-| **Harshul Jain** | Independent Researcher, Audible | harshuljain1393@gmail.com |
-| **Dr. Tanmay Sah** | Independent Researcher | tradertanmay@mail.com |
+| **Harshul Jain** | Independent Researcher | harshuljain1393@gmail.com |
+| **Tanmay Sah** | Independent Researcher | tradertanmay@mail.com |
 | **Tanya Sah** | Independent Researcher | tanyasah20@gmail.com |
-| **Parv Khatri** | Independent Researcher, SAP | khatriparv@gmail.com |
+| **Parv Khatri** | Independent Researcher | khatriparv@gmail.com |
 
-Affiliations are listed for identification only; this work is not endorsed by or
-conducted on behalf of any employer. Co-first-author ordering resolved at freeze.
+All authors contributed in an independent capacity. Co-first-author ordering
+resolved at freeze.
 
 ## Citation
 
