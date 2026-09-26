@@ -186,6 +186,7 @@ for reference-policy ports (never claim `"CONCUR"` when you mean
 | **Tanmay Sah** | Independent Researcher | tradertanmay@mail.com |
 | **Tanya Sah** | Independent Researcher | tanyasah20@gmail.com |
 | **Parv Khatri** | Independent Researcher | khatriparv@gmail.com |
+| **Dolly Sah** | Independent Researcher | Dolly17sah@gmail.com |
 
 All authors contributed in an independent capacity. Co-first-author ordering
 resolved at freeze.
@@ -195,7 +196,7 @@ resolved at freeze.
 ```bibtex
 @software{admitperf2026,
   title = {AdmitPerf: A Benchmark-Driven Admission Control Layer for LLM Inference},
-  author = {Jain, Harshul and Sah, Tanmay and Sah, Tanya and Khatri, Parv},
+  author = {Jain, Harshul and Sah, Tanmay and Sah, Tanya and Khatri, Parv and Sah, Dolly},
   year = {2026},
   url = {https://github.com/harshuljain13/AdmitPerf}
 }

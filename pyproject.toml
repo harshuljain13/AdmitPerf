@@ -9,6 +9,7 @@ authors = [
     { name = "Tanmay Sah", email = "tradertanmay@mail.com" },
     { name = "Tanya Sah", email = "tanyasah20@gmail.com" },
     { name = "Parv Khatri", email = "khatriparv@gmail.com" },
+    { name = "Dolly Sah", email = "Dolly17sah@gmail.com" },
 ]
 requires-python = ">=3.11"
 # Runtime deps are deliberately minimal: a policy plugin should be cheap to
