@@ -183,7 +183,7 @@ for reference-policy ports (never claim `"CONCUR"` when you mean
 | | Affiliation | Contact |
 |---|---|---|
 | **Harshul Jain** | Independent Researcher | harshuljain1393@gmail.com |
-| **Tanmay Sah** | Independent Researcher | tradertanmay@mail.com |
+| **Tanmay Sah** | Independent Researcher | tradertanmay@gmail.com |
 | **Tanya Sah** | Independent Researcher | tanyasah20@gmail.com |
 | **Parv Khatri** | Independent Researcher | khatriparv@gmail.com |
 | **Dolly Sah** | Independent Researcher | Dolly17sah@gmail.com |
