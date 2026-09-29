@@ -5,10 +5,7 @@ description = "An open benchmark for LLM admission-control policies"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "Harshul Jain" },
-    { name = "Tanmay Sah" },
-    { name = "Tanya Sah" },
-    { name = "Parv Khatri" },
+    { name = "Harshul Jain", email = "harshuljain1393@gmail.com" },
 ]
 requires-python = ">=3.11"
 # Runtime deps are deliberately minimal: a policy plugin should be cheap to
