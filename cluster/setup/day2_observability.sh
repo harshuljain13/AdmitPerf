@@ -4,9 +4,8 @@
 # persistence and alerting off, so it is disposable lab observability.
 set -euo pipefail
 
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
-source "$CLUSTER/setup/_lambda_only.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/setup/_lambda_only.sh"
 cd "$ROOT"
 
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
@@ -17,7 +16,7 @@ helm repo update prometheus-community >/dev/null
 helm upgrade --install prometheus prometheus-community/prometheus \
   --namespace monitoring \
   --create-namespace \
-  --values "$CLUSTER/k8s-config/observability/prometheus-values.yaml" \
+  --values "$ROOT/k8s-config/observability/prometheus-values.yaml" \
   --wait --timeout 10m
 
 echo "== Grafana (helm) =="
@@ -25,18 +24,18 @@ helm repo add grafana https://grafana.github.io/helm-charts >/dev/null
 helm repo update grafana >/dev/null
 helm upgrade --install grafana grafana/grafana \
   --namespace monitoring \
-  --values "$CLUSTER/k8s-config/observability/grafana-values.yaml" \
+  --values "$ROOT/k8s-config/observability/grafana-values.yaml" \
   --wait --timeout 10m
 
 echo "== DCGM exporter (cluster GPU) =="
-kubectl apply -f "$CLUSTER/k8s-config/observability/dcgm-exporter.yaml" || true
+kubectl apply -f "$ROOT/k8s-config/observability/dcgm-exporter.yaml" || true
 
 echo "== Grafana dashboards (sidecar ConfigMap) =="
 python3 -m observability.dashboards
-kubectl -n monitoring create configmap turnstile-dashboards \
-  --from-file="$CLUSTER/k8s-config/observability/dashboards" \
+kubectl -n monitoring create configmap class10-dashboards \
+  --from-file="$ROOT/k8s-config/observability/dashboards" \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n monitoring label configmap turnstile-dashboards grafana_dashboard=1 --overwrite
+kubectl -n monitoring label configmap class10-dashboards grafana_dashboard=1 --overwrite
 
 echo
 echo "Day 2 is up. On the Mac (Step 2 tunnel must stay open) open only 127.0.0.1:"

@@ -4,9 +4,8 @@
 # Leaves: KUBECONFIG at /etc/rancher/k3s/k3s.yaml and hami-scheduler ready.
 set -euo pipefail
 
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
-source "$CLUSTER/setup/_lambda_only.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/setup/_lambda_only.sh"
 cd "$ROOT"
 
 echo "== GPU =="

@@ -3,8 +3,7 @@
 # Run on: GPU box. Wraps lambda_k3s_hami.sh (k3s + HAMi) followed by
 # lambda_apply_slices.sh (the sliced workloads).
 set -euo pipefail
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
-source "$CLUSTER/setup/_lambda_only.sh"
-bash "$CLUSTER/setup/lambda_k3s_hami.sh"
-bash "$CLUSTER/setup/lambda_apply_slices.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/setup/_lambda_only.sh"
+bash "$ROOT/setup/lambda_k3s_hami.sh"
+bash "$ROOT/setup/lambda_apply_slices.sh"

@@ -1,8 +1,8 @@
 {
-  "uid": "turnstile-gateway",
+  "uid": "class10-gateway",
   "title": "Class 10 / Gateway + admission",
   "tags": [
-    "turnstile",
+    "class10",
     "gateway"
   ],
   "schemaVersion": 39,

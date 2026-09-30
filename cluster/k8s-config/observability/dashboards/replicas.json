@@ -1,8 +1,8 @@
 {
-  "uid": "turnstile-replicas",
+  "uid": "class10-replicas",
   "title": "Class 10 / Pods and replicas",
   "tags": [
-    "turnstile",
+    "class10",
     "replicas",
     "pods"
   ],

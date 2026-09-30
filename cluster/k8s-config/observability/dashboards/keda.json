@@ -1,8 +1,8 @@
 {
-  "uid": "turnstile-keda",
+  "uid": "class10-keda",
   "title": "Class 10 / KEDA",
   "tags": [
-    "turnstile",
+    "class10",
     "keda"
   ],
   "schemaVersion": 39,

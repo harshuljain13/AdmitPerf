@@ -1,8 +1,8 @@
 {
-  "uid": "turnstile-cluster",
+  "uid": "class10-cluster",
   "title": "Class 10 / Cluster",
   "tags": [
-    "turnstile",
+    "class10",
     "cluster",
     "dcgm"
   ],

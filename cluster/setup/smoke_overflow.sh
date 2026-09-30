@@ -9,9 +9,8 @@ if [[ -z "${OVERFLOW_BASE_URL:-}" ]]; then
   exit 0
 fi
 
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export TRACE_PATH="${TRACE_PATH:-$ROOT/traces/requests.jsonl}"
-exec python "$CLUSTER/setup/overflow_smoke.py"
+exec python "$ROOT/setup/overflow_smoke.py"

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Open an interactive shell on the GPU box, already cd'ed into ~/admitperf-cluster.
+# Open an interactive shell on the GPU box, already cd'ed into ~/class10.
 # Run on: Mac. Reads LAMBDA and LAMBDA_SSH_KEY from .env, so that file must
 # exist even though you do not source .env into your own shell until Step 19.
 set -euo pipefail
 
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ -f "$ROOT/.env" ]]; then
   set -a
   source "$ROOT/.env"
@@ -24,4 +23,4 @@ exec ssh -i "$LAMBDA_SSH_KEY" \
   -L 30080:127.0.0.1:30080 \
   -L 31495:127.0.0.1:31495 \
   -t "$LAMBDA" \
-  'mkdir -p ~/admitperf-cluster; cd ~/admitperf-cluster; exec bash -l'
+  'mkdir -p ~/class10; cd ~/class10; exec bash -l'

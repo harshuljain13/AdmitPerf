@@ -4,8 +4,7 @@
 # torch and vLLM import and can see the device. No Kubernetes here.
 set -euo pipefail
 
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "== GPU =="

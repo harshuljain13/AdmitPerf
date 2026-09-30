@@ -4,15 +4,14 @@
 # manifest: over 50 GiB gets 22528/27648 MiB slices, otherwise two x 16384.
 set -euo pipefail
 
-CLUSTER="$(cd "$(dirname "$0")/.." && pwd)"
-ROOT="$(cd "$CLUSTER/.." && pwd)"
-source "$CLUSTER/setup/_lambda_only.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/setup/_lambda_only.sh"
 cd "$ROOT"
 
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 MEM_MIB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ' || echo 40960)"
-MANIFEST="$CLUSTER/k8s-config/hami/hami-lambda.yaml"
+MANIFEST="$ROOT/k8s-config/hami/hami-lambda.yaml"
 if [[ "${MEM_MIB:-0}" -gt 50000 ]]; then
   echo "GPU ${MEM_MIB} MiB → D5-shaped slices 22528 / 27648"
   sed -e 's/nvidia.com\/gpumem: "16384"/nvidia.com\/gpumem: "22528"/' \
@@ -23,10 +22,10 @@ else
   kubectl apply -f "$MANIFEST"
 fi
 
-kubectl apply -f "$CLUSTER/k8s-config/gateway/orch-serve.yaml"
-kubectl apply -f "$CLUSTER/k8s-config/router/keda-prefill.yaml"
-kubectl apply -f "$CLUSTER/k8s-config/router/keda-decode.yaml"
-kubectl apply -f "$CLUSTER/k8s-config/ui/open-webui.yaml"
+kubectl apply -f "$ROOT/k8s-config/gateway/orch-serve.yaml"
+kubectl apply -f "$ROOT/k8s-config/router/keda-prefill.yaml"
+kubectl apply -f "$ROOT/k8s-config/router/keda-decode.yaml"
+kubectl apply -f "$ROOT/k8s-config/ui/open-webui.yaml"
 
 echo "== waiting for workloads =="
 kubectl rollout status deploy/vllm-prefill --timeout=30m || true
