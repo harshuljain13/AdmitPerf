@@ -122,10 +122,27 @@ class InfraConfig:
     max_concurrent_inputs: int = 256
     engine: EngineConfig = field(default_factory=EngineConfig)
 
+    #: How many serving workers to bring up. One is the Modal shape and the
+    #: default. More than one requires a provider that can place a request,
+    #: which is the whole reason the fleet shape exists: an admission decision
+    #: is only interesting when there is somewhere to admit *into*.
+    workers: int = 1
+    #: How a request picks a worker when there is more than one. Ignored at
+    #: workers == 1, where there is nothing to choose.
+    placement: str = "least_loaded"
+
+    PROVIDERS: ClassVar[frozenset[str]] = frozenset({"modal", "cluster"})
+    PLACEMENTS: ClassVar[frozenset[str]] = frozenset({"least_loaded", "round_robin"})
+
     @property
     def modal_gpu(self) -> str:
         """Modal's GPU spec: 'A100' for one, 'A100:4' for four."""
         return self.gpu if self.gpu_count <= 1 else f"{self.gpu}:{self.gpu_count}"
+
+    @property
+    def is_fleet(self) -> bool:
+        """More than one worker, so placement is a real decision."""
+        return self.workers > 1
 
     def validate(self) -> None:
         """Catch what would otherwise fail ten minutes into a deploy.
@@ -152,6 +169,22 @@ class InfraConfig:
         if self.engine.scheduling_policy not in {"fcfs", "priority"}:
             raise ConfigError(
                 f"scheduling_policy must be fcfs or priority, got {self.engine.scheduling_policy!r}"
+            )
+        if self.provider not in self.PROVIDERS:
+            raise ConfigError(
+                f"provider must be one of {sorted(self.PROVIDERS)}, got {self.provider!r}"
+            )
+        if self.workers < 1:
+            raise ConfigError(f"workers must be >= 1, got {self.workers}")
+        if self.placement not in self.PLACEMENTS:
+            raise ConfigError(
+                f"placement must be one of {sorted(self.PLACEMENTS)}, got {self.placement!r}"
+            )
+        if self.workers > 1 and self.provider == "modal":
+            raise ConfigError(
+                f"workers is {self.workers}, but provider 'modal' brings up a single "
+                "container and cannot place a request. Use provider: cluster, or set "
+                "workers: 1 — otherwise the run would silently measure one worker."
             )
 
 
