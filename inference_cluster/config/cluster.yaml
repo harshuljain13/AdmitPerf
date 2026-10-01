@@ -1,0 +1,68 @@
+# The one place the cluster is described. Manifests are generated from this.
+#   python -m infra.render config/cluster.yaml
+#
+# Nothing below is repeated in a manifest by hand. If a value appears twice,
+# that is a bug — "same cluster, only the policy changed" stops being true.
+
+name: default
+
+gpu:
+  kind: H100
+  count: 4
+  hbm_gb: 80
+
+# Two workers, each one model sharded across two GPUs.
+#   TP is an engine flag. "workers" is a deployment fact (two servers), not
+#   vLLM's --data-parallel-size, which means something else.
+topology:
+  workers: 2
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+
+# One model on every worker keeps them interchangeable, so placement is a load
+# decision and admission has a real choice to make.
+#
+# VL-72B takes text AND images, so there is no need for a separate vision
+# worker. That is the whole reason to pick it: multi-modal without splitting
+# the fleet by capability, which would leave a vision request with exactly one
+# destination and no placement decision to make.
+#
+# For multi-modal, give a worker its own model and capability. Workers then stop
+# being interchangeable and placement becomes capability routing — fine for a
+# demo, but it weakens any policy comparison. Keep them uniform while measuring.
+model:
+  id: Qwen/Qwen2.5-VL-72B-Instruct
+  quantization: fp8        # 72B in bf16 is ~145 GB; at TP=2 that is 72.5 GB a
+                           # card against ~72 GB usable. The weights alone do
+                           # not fit. fp8 halves it. null = bf16.
+  served_name: lab
+  capability: text+vision
+
+# Per-worker overrides. Empty means every worker runs `model` above.
+workers_override: []
+# - index: 1
+#   model: {id: Qwen/Qwen2.5-VL-7B-Instruct, capability: vision}
+
+engine:
+  max_model_len: 32768          # deep research grows long; this is what binds KV
+  gpu_memory_utilization: 0.90
+  max_num_seqs: 64
+  enable_prefix_caching: true   # shared system+tool prefix is the point
+  scheduling_policy: priority
+  distributed_executor_backend: mp   # single node. ray is for multi-node only
+  enable_auto_tool_choice: true
+  tool_call_parser: hermes      # Qwen2.5. Verify on one GPU before renting four
+
+hop:
+  backend: mooncake             # nccl and nixl in this tree are no-op stubs
+
+overflow:
+  provider: superlinked
+  model: null                   # name it. "another API" is a documented fail
+  max_requests: 50              # the limiter, also required
+  on: [503, 529]                # never 429 — a quota refusal stays local
+
+admission:
+  policy: kv_threshold          # resolved from admitperf's registry
+  params:
+    threshold: 0.90
