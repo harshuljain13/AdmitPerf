@@ -1,2 +1,0 @@
-locust>=2.29
-openai>=1.40

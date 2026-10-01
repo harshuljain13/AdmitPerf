@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from components import note, section, warn  # noqa: E402
 from theme import GREY, HEADER, LINE, MUTED, SURFACE, WHITE, YELLOW  # noqa: E402

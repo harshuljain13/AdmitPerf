@@ -30,7 +30,7 @@ from theme import DECISION_COLORS, GREY, MUTED, WHITE, YELLOW, policy_color_map 
 from data import decisions_frame, discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
-RESULTS = ROOT / "results"
+RESULTS = ROOT / "reports" / "results"
 
 
 def _pct(x: float | None) -> str:

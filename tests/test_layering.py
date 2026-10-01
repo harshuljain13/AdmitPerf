@@ -13,10 +13,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "admitperf"
+SRC = Path(__file__).resolve().parents[1] / "admitperf"
 
 # core may not import these sibling packages.
-FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines"}
+FORBIDDEN_FOR_CORE = {"admitperf.bench"}
 
 
 def _imports_of(path: Path) -> set[str]:

@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from admitperf.core.config import ExperimentConfig
-from admitperf.infra.session import Session
+from admitperf.core.session import Session
 
 APP_PATH = Path(__file__).parent / "modal_app.py"
 APP_NAME = "admitperf-vllm"

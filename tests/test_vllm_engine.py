@@ -15,7 +15,7 @@ import pytest
 
 from admitperf.core.api import Request
 from admitperf.core.ports import EngineAdapter
-from admitperf.engines.vllm import (
+from admitperf.core.engine import (
     VLLM_METRICS,
     KVScaleError,
     VllmConfig,
