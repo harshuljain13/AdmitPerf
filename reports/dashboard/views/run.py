@@ -24,7 +24,7 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from components import empty_state, note, section, verdict, warn  # noqa: E402
 from theme import (  # noqa: E402
@@ -42,7 +42,7 @@ from theme import (  # noqa: E402
 
 from admitperf.core.config import ConfigError, ExperimentConfig  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENTS = ROOT / "experiments"
 RESULTS = ROOT / "results"
 SESSION = ROOT / ".admitperf" / "session.json"

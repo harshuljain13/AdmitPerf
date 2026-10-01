@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dashboard"))
-DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "reports" / "dashboard"))
+DASHBOARD = Path(__file__).resolve().parents[1] / "reports" / "dashboard"
 
 from data import discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
 
@@ -441,7 +441,7 @@ def test_the_button_label_is_coloured_not_just_the_button() -> None:
 def test_the_sidebar_logo_exists_and_is_rendered_from_the_svg() -> None:
     """st.logo takes an image. SVG text would depend on Helvetica being present
     in whoever's browser, so the wordmark is rasterised from the source SVG."""
-    assets = DASHBOARD.parent / "docs" / "assets"
+    assets = DASHBOARD.parents[1] / "docs" / "assets"
     for name in ("logo.svg", "logo.png", "icon.svg", "icon.png"):
         assert (assets / name).exists(), f"missing brand asset {name}"
 

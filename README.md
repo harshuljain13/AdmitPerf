@@ -30,7 +30,7 @@ make dashboard          # terminal 2: configure an experiment, run it, read it
 ```
 
 The dashboard runs the whole pipeline — provision, run, aggregate, report, tear
-down — one stage at a time. [`dashboard/README.md`](dashboard/README.md)
+down — one stage at a time. [`reports/dashboard/README.md`](reports/dashboard/README.md)
 
 ## Or from the CLI
 
@@ -145,7 +145,7 @@ admitperf infra up --model meta-llama/Llama-3.1-8B --hf-secret huggingface
 ```
 src/admitperf/   core (the four objects, registry, runner) · engines · infra · bench
 policies/        the policies under study, as a separate package
-experiments/     example configs          dashboard/   the Streamlit app
+experiments/     example configs          reports/dashboard/  the Streamlit app
 docs/            motivation → design → metrics → results
 reports/         written studies, each backed by a run bundle
 scripts/         mock_vllm.py, a mock engine for testing without a GPU
@@ -166,7 +166,7 @@ scripts/         mock_vllm.py, a mock engine for testing without a GPU
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
 | See which policies fit behind this API, and the candidate list | [`docs/scope.md`](docs/scope.md) · [`docs/policies.md`](docs/policies.md) |
 | See what each policy does, without reading code | [`src/admitperf/policies/README.md`](src/admitperf/policies/README.md) |
-| Explore results interactively | [`dashboard/README.md`](dashboard/README.md) |
+| Explore results interactively | [`reports/dashboard/README.md`](reports/dashboard/README.md) |
 | Read the written studies, and the plan | [`reports/`](reports/) · [`docs/PROPOSAL.md`](docs/PROPOSAL.md) |
 | Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](docs/prior-art/adversarial_review.md) |
 | Understand where the design came from | [`docs/lineage.md`](docs/lineage.md) |

@@ -15,7 +15,7 @@ import streamlit as st
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from components import note, section, verdict, warn  # noqa: E402
 from theme import HEADER, MUTED  # noqa: E402
@@ -23,7 +23,7 @@ from theme import HEADER, MUTED  # noqa: E402
 from admitperf.core.config import ConfigError, ExperimentConfig  # noqa: E402
 from admitperf.core.registry import available  # noqa: E402
 
-EXPERIMENTS = Path(__file__).resolve().parents[2] / "experiments"
+EXPERIMENTS = Path(__file__).resolve().parents[3] / "experiments"
 
 #: Parameters worth exposing per policy, with a plain description. Anything not
 #: listed still works from a YAML file; this is the common set, not the limit.
