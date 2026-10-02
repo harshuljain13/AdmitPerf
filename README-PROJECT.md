@@ -16,12 +16,9 @@ admission policies you swap by configuration while everything else holds still.
 
 | Directory | What it is |
 |---|---|
-| `inference_cluster/` | The cluster. Manifests, bring-up scripts, and the renderer that generates them from one config |
-| `app/` | The application. A document-reading research agent on AgentShip |
-| `policies/` | Admission policies, swapped by config |
-| `bench/` *(in `src/admitperf/bench`)* | Load generation, SLOs, comparison |
-| `reports/` | What a run produced |
-| `docs/` | Architecture, data flow, debugging |
+| `infra/` | The cluster. Manifests, bring-up scripts, and the renderer that generates them from one config |
+| `client_app/` | What talks to the cluster. Open WebUI now, AgentShip later |
+| `src/admitperf/` | The library: core, policies, bench, experiments, reports, docs |
 | `SUBMISSION.md` | The cohort write-up, answered part by part |
 
 ---
@@ -32,8 +29,8 @@ One config describes it. Manifests are generated, never hand-edited — otherwis
 "same cluster, only the policy changed" is a claim nobody can check.
 
 ```bash
-python -m inference_cluster.render inference_cluster/config/cluster.yaml -o workers.yaml
-python -m inference_cluster.render inference_cluster/config/cluster.yaml --urls
+python -m infra.render infra/config/cluster.yaml -o workers.yaml
+python -m infra.render infra/config/cluster.yaml --urls
 ```
 
 **`Qwen2.5-VL-72B-Instruct`, fp8, TP=2, two workers on 4×H100-80GB.**
@@ -100,6 +97,7 @@ Two runs make the argument:
 ## Status
 
 - [x] Cluster vendored, manifests generated from config
+- [x] Repo restructured: src/admitperf · infra · client_app
 - [ ] Admission reads a policy from the registry instead of a hardcoded check
 - [ ] Signal value recorded with every decision
 - [ ] Agent wired to the gateway

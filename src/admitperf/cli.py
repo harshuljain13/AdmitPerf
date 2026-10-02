@@ -178,7 +178,7 @@ def infra() -> None:
 def infra_up(config: str | None, hf_secret: str | None, **overrides: object) -> None:
     """Start an engine and remember where it is."""
     from admitperf.core.session import SessionStore
-    from cluster.providers.modal_provider import ModalProvider, ProvisionError
+    from infra.providers.modal_provider import ModalProvider, ProvisionError
 
     if hf_secret:
         os.environ["ADMITPERF_HF_SECRET"] = hf_secret
@@ -413,7 +413,7 @@ def infra_calibrate(engine_url: str | None, samples: int) -> None:
 def infra_down() -> None:
     """Stop the engine and forget the session."""
     from admitperf.core.session import SessionStore
-    from cluster.providers.modal_provider import ModalProvider, ProvisionError
+    from infra.providers.modal_provider import ModalProvider, ProvisionError
 
     store = SessionStore()
     if not store.exists():
@@ -517,7 +517,7 @@ def bench_sweep(config: str, out: str | None, keep_up: bool) -> None:
     from admitperf.core.config import Deployment
     from admitperf.core.engine import VllmConfig, VllmEngine
     from admitperf.core.session import Session, SessionStore
-    from cluster.providers.modal_provider import ModalProvider, ProvisionError
+    from infra.providers.modal_provider import ModalProvider, ProvisionError
 
     try:
         cfg = ExperimentConfig.load(config)

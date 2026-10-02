@@ -1,11 +1,11 @@
-"""Render worker manifests from inference_cluster/config/cluster.yaml.
+"""Render worker manifests from inference_infra/config/cluster.yaml.
 
 One config in, N vLLM Deployments and Services out. The point is that model,
 topology and engine flags appear exactly once. Hand-edited manifests make
 "same cluster, only the policy changed" a claim nobody can check.
 
-    python -m inference_cluster.render inference_cluster/config/cluster.yaml            # print
-    python -m inference_cluster.render inference_cluster/config/cluster.yaml -o out.yaml
+    python -m infra.render inference_infra/config/cluster.yaml            # print
+    python -m infra.render inference_infra/config/cluster.yaml -o out.yaml
 
 Static manifests (gateway, mooncake, open-webui, observability) are not
 generated — they do not vary with the model.

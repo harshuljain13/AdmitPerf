@@ -14,8 +14,8 @@ import pytest
 
 from admitperf.core.config import ExperimentConfig
 from admitperf.core.session import Session, SessionStore
-from cluster.providers import modal_provider
-from cluster.providers.modal_provider import ModalProvider, ProvisionError
+from infra.providers import modal_provider
+from infra.providers.modal_provider import ModalProvider, ProvisionError
 
 DEPLOY_OUTPUT = """
 Building image...

@@ -83,7 +83,7 @@ strict = true
 exclude = ["src/admitperf/infra/modal_app.py"]
 
 [[tool.mypy.overrides]]
-module = "cluster.providers.modal_app"
+module = "infra.providers.modal_app"
 ignore_errors = true
 
 [tool.pytest.ini_options]
