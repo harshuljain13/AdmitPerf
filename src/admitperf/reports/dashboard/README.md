@@ -118,22 +118,22 @@ cannot appear without a definition behind it.
 
 | File | Where it is used |
 |---|---|
-| `docs/assets/banner.svg` | The source of the palette. Repository header. |
-| `docs/assets/logo.svg` → `.png` | Sidebar wordmark, above the navigation |
-| `docs/assets/icon.svg` → `.png` | Collapsed sidebar, where the wordmark does not fit |
+| `assets/banner.svg` | The source of the palette. Repository header. |
+| `assets/logo.svg` → `.png` | Sidebar wordmark, above the navigation |
+| `assets/icon.svg` → `.png` | Collapsed sidebar, where the wordmark does not fit |
 
 The SVGs are the source; the PNGs are rendered from them because `st.logo`
 takes an image and SVG text would depend on Helvetica being installed in
 whoever's browser. Re-render after editing:
 
 ```bash
-rsvg-convert -w 780 -h 156 docs/assets/logo.svg -o docs/assets/logo.png
-rsvg-convert -w 144 -h 144 docs/assets/icon.svg -o docs/assets/icon.png
+rsvg-convert -w 780 -h 156 assets/logo.svg -o assets/logo.png
+rsvg-convert -w 144 -h 144 assets/icon.svg -o assets/icon.png
 ```
 
 ## Branding
 
-`theme.py` takes every colour and the typeface from `docs/assets/banner.svg` —
+`theme.py` takes every colour and the typeface from `assets/banner.svg` —
 near-black ground, admit-yellow, white, grey, Helvetica 900. The wordmark spells
 *Admit* in yellow, which is why yellow also means admitted in every chart. A
 test asserts the palette against the SVG, so editing the banner fails the suite

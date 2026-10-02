@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard")
 )
+REPO = Path(__file__).resolve().parents[1]
 DASHBOARD = Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard"
 
 from data import discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
@@ -147,16 +148,13 @@ def test_empty_directory_yields_an_empty_frame(tmp_path: Path) -> None:
 
 
 def test_palette_matches_the_banner_asset() -> None:
-    """The brand lives in docs/assets/banner.svg. If someone edits the banner,
+    """The brand lives in assets/banner.svg. If someone edits the banner,
     this fails rather than letting the app drift away from it."""
     import re
-    from pathlib import Path
 
     import theme
 
-    svg = (
-        Path(__file__).resolve().parents[1] / "src" / "admitperf" / "docs" / "assets" / "banner.svg"
-    ).read_text()
+    svg = (REPO / "assets" / "banner.svg").read_text()
     in_banner = {c.upper() for c in re.findall(r"#[0-9a-fA-F]{6}", svg)}
 
     assert theme.INK.upper() in in_banner
@@ -445,7 +443,7 @@ def test_the_button_label_is_coloured_not_just_the_button() -> None:
 def test_the_sidebar_logo_exists_and_is_rendered_from_the_svg() -> None:
     """st.logo takes an image. SVG text would depend on Helvetica being present
     in whoever's browser, so the wordmark is rasterised from the source SVG."""
-    assets = DASHBOARD.parents[1] / "docs" / "assets"
+    assets = REPO / "assets"
     for name in ("logo.svg", "logo.png", "icon.svg", "icon.png"):
         assert (assets / name).exists(), f"missing brand asset {name}"
 

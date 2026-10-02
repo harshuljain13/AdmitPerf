@@ -26,11 +26,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-# The wordmark, pinned above the navigation. Rendered from docs/assets/logo.svg
+# The wordmark, pinned above the navigation. Rendered from assets/logo.svg
 # to PNG at build time: st.logo takes an image, and SVG text would depend on
 # Helvetica being present in whatever browser opens this. icon_image is the
 # collapsed-rail mark, where the full lockup does not fit.
-ASSETS = HERE.parent / "docs" / "assets"
+# Repository root, not relative to this file: the dashboard has moved once
+# already and resolved to a directory that did not exist.
+ASSETS = HERE.parents[3] / "assets"
 if (ASSETS / "logo.png").exists():
     st.logo(
         str(ASSETS / "logo.png"),

@@ -1,6 +1,6 @@
 """AdmitPerf branding, taken from the banner rather than invented.
 
-Every value here is read off `docs/assets/banner.svg`: near-black ground,
+Every value here is read off `assets/banner.svg`: near-black ground,
 admit-yellow wordmark, white second half, grey tagline, a thin yellow accent
 bar, Helvetica at weight 900 with tight tracking.
 
