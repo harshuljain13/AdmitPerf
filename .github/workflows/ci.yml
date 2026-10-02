@@ -1,0 +1,77 @@
+name: CI
+
+# The gate: lint and the full offline suite, on every push and every PR, on every branch.
+# Branch filters are deliberately absent — a gate that does not run on the branch you work
+# on is not a gate, it is a thing that goes green after you have already merged.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+# A new push to the same branch cancels the previous run. Nobody needs results for a commit
+# that has already been replaced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint and test (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # The floor from pyproject. Testing only on the newest version hides the syntax
+          # and stdlib assumptions that break the oldest supported one.
+          python-version: "3.11"
+          cache: pip
+
+      # Editable, with dev extras. A bare install collects tests whose imports then fail;
+      # locally that passes only because the venv accumulated the extras by hand.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Lint
+        run: ruff check .
+
+      # Enforced so formatting stops being a review topic: the tool decides, and a diff that
+      # is only whitespace can no longer hide a real change inside it.
+      - name: Format check
+        run: ruff format --check .
+
+      # Bare pytest honours testpaths from pyproject. Naming a directory here would silently
+      # skip anything added outside it later.
+      - name: Test
+        run: pytest -q
+
+  package:
+    name: Build the wheel and test what ships
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      # Installing the built wheel into a clean environment and importing it is the only
+      # check that catches a module missing from the package manifest. The editable install
+      # above cannot: it sees the working tree, not what was packaged.
+      - name: Install the wheel and import it
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install dist/*.whl
+          /tmp/fresh/bin/python -c "from admitperf import AdmissionPolicy, Decision, Request, SystemState; print('public API ok')"
+          /tmp/fresh/bin/admitperf --help > /dev/null

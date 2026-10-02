@@ -62,6 +62,10 @@ packages = ["src/admitperf"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# infra/ is vendored from the class 10 cluster. Reformatting it to this project's style
+# would make every future diff against upstream unreadable, so it keeps its own.
+# Markdown is excluded because its code blocks are illustrative, not compiled.
+extend-exclude = ["infra", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]

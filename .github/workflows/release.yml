@@ -1,0 +1,103 @@
+name: Release
+
+# Releases are cut from a TAG, never from a branch, so what is published is a fixed, named
+# commit that can be checked out again years later.
+#
+#   # bump the version in pyproject.toml and admitperf/__init__.py
+#   git commit -am "release: 0.1.0" && git tag v0.1.0 && git push origin v0.1.0
+#
+# A tag runs TestPyPI first, then installs the package back OUT of TestPyPI and smoke-tests
+# it before touching PyPI. That round trip is the only thing that catches a missing
+# dependency or a bad pin, because it is a real index resolve rather than a local path.
+#
+# Publishing uses Trusted Publishing (OIDC), so no API token is stored in this repository.
+# Configure once at https://pypi.org/manage/account/publishing/ with
+#   owner harshuljain13 · repo AdmitPerf · workflow release.yml · environment pypi
+on:
+  push:
+    tags: ["v*"]
+  # Rehearse against TestPyPI without cutting a tag.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish. A tag always does testpypi -> verify -> pypi."
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    # OIDC. The token is minted per run; nothing long-lived is stored.
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  verify:
+    name: Install from TestPyPI and smoke-test
+    needs: testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Dependencies come from real PyPI; only admitperf itself from TestPyPI, which does
+      # not mirror the whole ecosystem. Without extra-index-url this fails on every dep.
+      - name: Install from the index, not from a path
+        run: |
+          python -m pip install --upgrade pip
+          for i in 1 2 3 4 5; do
+            pip install \
+              --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              admitperf && break
+            echo "index not caught up yet, retry $i"; sleep 20
+          done
+      - name: Smoke-test what was published
+        run: |
+          python -c "from admitperf import AdmissionPolicy, Decision, Request, SystemState"
+          python -c "from admitperf.core.registry import available; assert available(), 'no policies registered'"
+          admitperf --help > /dev/null
+
+  pypi:
+    name: Publish to PyPI
+    needs: verify
+    # Only a tag publishes for real. A manual run stops after the TestPyPI round trip
+    # unless it explicitly asked for pypi.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.target == 'pypi'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

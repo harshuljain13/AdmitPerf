@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard"))
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard")
+)
 DASHBOARD = Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard"
 
 from data import discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
@@ -152,7 +154,9 @@ def test_palette_matches_the_banner_asset() -> None:
 
     import theme
 
-    svg = (Path(__file__).resolve().parents[1] / "src" / "admitperf" / "docs" / "assets" / "banner.svg").read_text()
+    svg = (
+        Path(__file__).resolve().parents[1] / "src" / "admitperf" / "docs" / "assets" / "banner.svg"
+    ).read_text()
     in_banner = {c.upper() for c in re.findall(r"#[0-9a-fA-F]{6}", svg)}
 
     assert theme.INK.upper() in in_banner
