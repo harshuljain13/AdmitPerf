@@ -1,8 +1,8 @@
 {
-  "uid": "class10-gateway",
-  "title": "Class 10 / Gateway + admission",
+  "uid": "admitperf-gateway",
+  "title": "AdmitPerf / Gateway + admission",
   "tags": [
-    "class10",
+    "admitperf",
     "gateway"
   ],
   "schemaVersion": 39,

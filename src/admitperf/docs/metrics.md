@@ -1,7 +1,7 @@
 # Metrics
 
 This document owns every metric definition. Nothing else in the repo should define one; new
-metrics arrive here first (see [`../CONTRIBUTING.md`](../CONTRIBUTING.md)).
+metrics arrive here first (see [`../CONTRIBUTING.md`](../../../CONTRIBUTING.md)).
 
 ## Standard (per request)
 

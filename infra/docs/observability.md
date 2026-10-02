@@ -2,7 +2,7 @@
 
 The histograms 10 adds, and how the ten Grafana dashboards are generated.
 
-Part of the [module 10 docs](README.md). Overview: [ARCHITECTURE.md](ARCHITECTURE.md) · Request path: [DATAFLOW.md](DATAFLOW.md)
+Part of the [cluster docs](README.md). Overview: [ARCHITECTURE.md](ARCHITECTURE.md) · Request path: [DATAFLOW.md](DATAFLOW.md)
 
 ---
 
@@ -44,7 +44,7 @@ into one gauge per pod.
 flowchart LR
     PY["<b>observability/dashboards.py</b><br/>panels as Python"]
     JSON["ten .json files<br/>k8s-config/observability/dashboards/"]
-    CM["ConfigMap class10-dashboards<br/>label grafana_dashboard=1"]
+    CM["ConfigMap admitperf-dashboards<br/>label grafana_dashboard=1"]
     SIDECAR["Grafana sidecar"]
 
     PY -->|"python -m observability.dashboards"| JSON
@@ -96,7 +96,7 @@ Where each stage is actually recorded:
 | `overflow` | `router/overflow.py:134` — only when a burst actually happened |
 
 Every stage boundary writes a histogram sample. That is the whole difference
-between module 9 and 10: module 9 tells you *what* happened, 10 tells you *where
+between the cluster and 10: the cluster tells you *what* happened, 10 tells you *where
 the time went*.
 
 ---

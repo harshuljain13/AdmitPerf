@@ -14,10 +14,10 @@ defend is also a thing you can deploy.
 
 > **Why** — across 14 admission-primary papers surveyed, no two share a
 > baseline, engine version, workload, or SLO definition. Head-to-head
-> comparison is not currently possible. [`docs/motivation.md`](docs/motivation.md)
+> comparison is not currently possible. [`docs/motivation.md`](src/admitperf/docs/motivation.md)
 
 **Status**: working MVP, verified on real hardware.
-[Results](docs/results.md) · [honest gaps](docs/status.md)
+[Results](src/admitperf/docs/results.md) · [honest gaps](src/admitperf/docs/status.md)
 
 ## Start here
 
@@ -30,7 +30,7 @@ make dashboard          # terminal 2: configure an experiment, run it, read it
 ```
 
 The dashboard runs the whole pipeline — provision, run, aggregate, report, tear
-down — one stage at a time. [`reports/dashboard/README.md`](reports/dashboard/README.md)
+down — one stage at a time. [`reports/dashboard/README.md`](src/admitperf/reports/dashboard/README.md)
 
 ## Or from the CLI
 
@@ -88,7 +88,7 @@ much as the median: unmanaged queueing is unpredictable, not merely slow.
 exceeded 0.005 while the queue reached 24 deep — on a 0.5B model a KV-pressure
 policy reads a flat line and silently becomes admit-everything. Which signal
 carries the pressure depends on the regime, which is why policies declare what
-they need. Full numbers: [`docs/results.md`](docs/results.md).
+they need. Full numbers: [`docs/results.md`](src/admitperf/docs/results.md).
 
 ## Writing a policy
 
@@ -152,24 +152,24 @@ scripts/         mock_vllm.py, a mock engine for testing without a GPU
 ```
 
 `make test` · `make lint` · `make dashboard` · `make mock-engine` · `make diagrams`. Architecture in
-[`docs/architecture/`](docs/architecture/), following the
+[`docs/architecture/`](src/admitperf/docs/architecture/), following the
 [C4 model](https://c4model.com); the `.mmd` files are the source of truth.
 
 ## Documentation
 
 | Read this to... | Go here |
 |---|---|
-| Understand why AdmitPerf exists | [`docs/motivation.md`](docs/motivation.md) |
-| See what exists and what does not | [`docs/status.md`](docs/status.md) |
-| See the first real-hardware results | [`docs/results.md`](docs/results.md) |
-| Read the data-flow + reproducibility contract | [`docs/design.md`](docs/design.md) |
-| Read the metric definitions, and what is not measurable | [`docs/metrics.md`](docs/metrics.md) |
-| See which policies fit behind this API, and the candidate list | [`docs/scope.md`](docs/scope.md) · [`docs/policies.md`](docs/policies.md) |
+| Understand why AdmitPerf exists | [`docs/motivation.md`](src/admitperf/docs/motivation.md) |
+| See what exists and what does not | [`docs/status.md`](src/admitperf/docs/status.md) |
+| See the first real-hardware results | [`docs/results.md`](src/admitperf/docs/results.md) |
+| Read the data-flow + reproducibility contract | [`docs/design.md`](src/admitperf/docs/design.md) |
+| Read the metric definitions, and what is not measurable | [`docs/metrics.md`](src/admitperf/docs/metrics.md) |
+| See which policies fit behind this API, and the candidate list | [`docs/scope.md`](src/admitperf/docs/scope.md) · [`docs/policies.md`](src/admitperf/docs/policies.md) |
 | See what each policy does, without reading code | [`src/admitperf/policies/README.md`](src/admitperf/policies/README.md) |
-| Explore results interactively | [`reports/dashboard/README.md`](reports/dashboard/README.md) |
-| Read the written studies, and the plan | [`reports/`](reports/) · [`docs/PROPOSAL.md`](docs/PROPOSAL.md) |
-| Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](docs/prior-art/adversarial_review.md) |
-| Understand where the design came from | [`docs/lineage.md`](docs/lineage.md) |
+| Explore results interactively | [`reports/dashboard/README.md`](src/admitperf/reports/dashboard/README.md) |
+| Read the written studies, and the plan | [`reports/`](src/admitperf/reports/) · [`docs/PROPOSAL.md`](src/admitperf/docs/PROPOSAL.md) |
+| Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](src/admitperf/docs/prior-art/adversarial_review.md) |
+| Understand where the design came from | [`docs/lineage.md`](src/admitperf/docs/lineage.md) |
 
 ## Contributing
 

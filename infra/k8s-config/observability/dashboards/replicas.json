@@ -1,8 +1,8 @@
 {
-  "uid": "class10-replicas",
-  "title": "Class 10 / Pods and replicas",
+  "uid": "admitperf-replicas",
+  "title": "AdmitPerf / Pods and replicas",
   "tags": [
-    "class10",
+    "admitperf",
     "replicas",
     "pods"
   ],

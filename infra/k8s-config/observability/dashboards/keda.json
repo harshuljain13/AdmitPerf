@@ -1,8 +1,8 @@
 {
-  "uid": "class10-keda",
-  "title": "Class 10 / KEDA",
+  "uid": "admitperf-keda",
+  "title": "AdmitPerf / KEDA",
   "tags": [
-    "class10",
+    "admitperf",
     "keda"
   ],
   "schemaVersion": 39,

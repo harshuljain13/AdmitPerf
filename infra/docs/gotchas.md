@@ -7,7 +7,7 @@ like a different problem than it is.
 ready minutes before vLLM binds its port, while the engine downloads weights and
 compiles CUDA graphs. It looks exactly like a crash, and any latency measured in
 that window is meaningless. The manifests `infra/render.py` generates include a
-probe; the originals vendored from module 10 did not.
+probe; the originals vendored from the reference lab did not.
 
 **The engine's own traceback is not the error.** When the engine core dies, the
 API server prints an asyncio traceback ending in "see root cause above". The real
