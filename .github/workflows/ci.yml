@@ -31,12 +31,15 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      # Editable, with dev extras. A bare install collects tests whose imports then fail;
-      # locally that passes only because the venv accumulated the extras by hand.
+      # EVERY extra, not just dev. The suite collects tests for the dashboard, the trace
+      # loaders and the Modal provider; with a narrower install those are collected and
+      # then fail to import. This exact failure shipped once already: '.[dev]' passed
+      # locally only because the working venv had accumulated pandas and streamlit by
+      # hand, which is the thing CI exists to notice.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[dev]'
+          pip install -e '.[all]'
 
       - name: Lint
         run: ruff check .
