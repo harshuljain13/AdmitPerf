@@ -7,7 +7,7 @@ Thanks for wanting to add a policy, workload, engine adapter, or metric. This gu
 Every policy implements a single interface:
 
 ```python
-from core import AdmissionPolicy, Decision, Request, SystemState
+from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
 
 class YourPolicy(AdmissionPolicy):
     name = "your_policy"          # unique across the registry

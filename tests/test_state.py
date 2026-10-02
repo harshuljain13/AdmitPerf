@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 
-from core.api import SystemState
-from core.ports import STATE_AGE_KEY
-from core.state import StateCache, state_age
+from admitperf.core.api import SystemState
+from admitperf.core.ports import STATE_AGE_KEY
+from admitperf.core.state import StateCache, state_age
 
 
 class FakeTime:

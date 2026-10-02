@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from cli import load_dotenv
+from admitperf.cli import load_dotenv
 
 
 def _env(tmp_path: Path, body: str) -> Path:
@@ -61,7 +61,7 @@ def test_the_deploy_says_which_modal_identity_it_will_use(
     """`MODAL_TOKEN_ID` silently outranks ~/.modal.toml. When it comes from a
     file, "add a payment method" for an account you know is funded is a long
     way to walk before suspecting the wrong workspace."""
-    import cli
+    from admitperf import cli
 
     monkeypatch.setattr(cli, "DOTENV_KEYS", ["MODAL_TOKEN_ID"])
     monkeypatch.setenv("MODAL_TOKEN_ID", "ak-abcdefgh12345")

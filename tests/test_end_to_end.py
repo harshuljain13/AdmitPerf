@@ -12,11 +12,11 @@ from pathlib import Path
 
 import httpx
 
-from bench.results import percentiles, summarize, write_bundle
-from bench.workloads.poisson import PoissonWorkload
-from core.engine import VllmConfig, VllmEngine
-from core.registry import get_policy
-from core.runner import Runner, RunnerConfig
+from admitperf.bench.results import percentiles, summarize, write_bundle
+from admitperf.bench.workloads.poisson import PoissonWorkload
+from admitperf.core.engine import VllmConfig, VllmEngine
+from admitperf.core.registry import get_policy
+from admitperf.core.runner import Runner, RunnerConfig
 
 METRICS = """
 vllm:num_requests_running{{model_name="lab"}} {running}

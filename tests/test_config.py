@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config import ConfigError, EngineConfig, ExperimentConfig, PolicySpec
+from admitperf.core.config import ConfigError, EngineConfig, ExperimentConfig, PolicySpec
 
 
 def _args(engine: EngineConfig) -> list[str]:

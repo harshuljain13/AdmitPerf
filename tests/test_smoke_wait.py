@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from cli import _startup_budget, wait_for_engine
+from admitperf.cli import _startup_budget, wait_for_engine
 
 
 class _Engine:
@@ -64,8 +64,8 @@ def test_your_own_engine_is_not_waited_on(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_the_budget_comes_from_the_deployment(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from core import session as session_mod
-    from core.session import Session, SessionStore
+    from admitperf.core import session as session_mod
+    from admitperf.core.session import Session, SessionStore
 
     store = SessionStore(tmp_path / "session.json")
     store.save(

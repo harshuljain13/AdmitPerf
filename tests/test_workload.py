@@ -11,7 +11,7 @@ import statistics
 
 import pytest
 
-from bench.workloads.poisson import DEFAULT_CLASSES, PoissonWorkload
+from admitperf.bench.workloads.poisson import DEFAULT_CLASSES, PoissonWorkload
 
 
 def test_same_seed_gives_an_identical_stream() -> None:
@@ -114,7 +114,7 @@ def test_rejects_nonsense_configuration(kwargs: dict[str, object]) -> None:
 def test_duration_mode_stops_on_time_not_on_count() -> None:
     """Preferred for comparisons: with a fixed count a heavy-shedding policy
     finishes early and is measured over a different window."""
-    from bench.workloads.poisson import PoissonWorkload as W
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
 
     reqs = list(W(duration_s=5.0, rate_per_s=20.0, seed=0).requests())
     assert reqs[-1].arrival_time <= 5.0
@@ -124,7 +124,7 @@ def test_duration_mode_stops_on_time_not_on_count() -> None:
 def test_warmup_requests_are_marked_not_dropped() -> None:
     """They are still sent — they are part of the load the engine faces — but
     flagged so the summary can exclude them."""
-    from bench.workloads.poisson import PoissonWorkload as W
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
 
     reqs = list(W(duration_s=5.0, warmup_s=2.0, rate_per_s=20.0, seed=0).requests())
     warm = [r for r in reqs if r.metadata["warmup"]]
@@ -137,8 +137,8 @@ def test_warmup_requests_are_marked_not_dropped() -> None:
 def test_relative_deadlines_scale_off_the_measured_baseline() -> None:
     """500ms is generous for a small model and impossible for a large one, so a
     fixed threshold measures the model rather than the policy."""
-    from bench.workloads.poisson import Baseline
-    from bench.workloads.poisson import PoissonWorkload as W
+    from admitperf.bench.workloads.poisson import Baseline
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
 
     slow = list(W(n_requests=200, seed=1, baseline=Baseline(400.0, 40.0)).requests())
     fast = list(W(n_requests=200, seed=1, baseline=Baseline(100.0, 10.0)).requests())
@@ -151,7 +151,7 @@ def test_relative_deadlines_scale_off_the_measured_baseline() -> None:
 
 
 def test_absolute_deadlines_are_used_when_no_baseline_is_given() -> None:
-    from bench.workloads.poisson import PoissonWorkload as W
+    from admitperf.bench.workloads.poisson import PoissonWorkload as W
 
     req = next(r for r in W(n_requests=200, seed=1).requests() if r.slo_class == "interactive")
     assert req.deadline_ttft_ms == 500.0

@@ -6,7 +6,7 @@ Nothing in src/admitperf/ knows this exists. It is discovered only through the
 
 from __future__ import annotations
 
-from core import AdmissionPolicy, Decision, Request, SystemState
+from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
 
 
 class RejectEverything(AdmissionPolicy):

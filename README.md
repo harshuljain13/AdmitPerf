@@ -93,7 +93,7 @@ they need. Full numbers: [`docs/results.md`](docs/results.md).
 ## Writing a policy
 
 ```python
-from core import AdmissionPolicy, Decision, Request, SystemState
+from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
 
 class KVThreshold(AdmissionPolicy):
     """Reject when the KV cache is above 90% utilization."""

@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from core.config import ConfigError, ExperimentConfig, InfraConfig
+from admitperf.core.config import ConfigError, ExperimentConfig, InfraConfig
 
 REPO = Path(__file__).resolve().parents[1]
-EXPERIMENTS = REPO / "experiments"
+EXPERIMENTS = REPO / "src" / "admitperf" / "experiments"
 
 
 def _configs() -> list[Path]:

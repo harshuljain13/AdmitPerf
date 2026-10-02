@@ -40,7 +40,7 @@ def test_core_does_not_import_heavier_layers() -> None:
 
 
 def test_core_imports_without_optional_dependencies() -> None:
-    """`import core` must work with only stdlib + click available.
+    """`import admitperf.core` must work with only stdlib + click available.
 
     Run in a subprocess with the bench/engine third-party modules blocked, so a
     stray `import httpx` in core fails here rather than in a user's minimal
@@ -50,9 +50,9 @@ def test_core_imports_without_optional_dependencies() -> None:
         "import sys\n"
         "for blocked in ('httpx', 'yaml', 'numpy', 'pandas'):\n"
         "    sys.modules[blocked] = None\n"
-        "import core\n"
-        "from core import AdmissionPolicy, Decision, Request, SystemState\n"
-        "from core import StateCache, check_compatibility\n"
+        "import admitperf.core\n"
+        "from admitperf.core import AdmissionPolicy, Decision, Request, SystemState\n"
+        "from admitperf.core import StateCache, check_compatibility\n"
         "print('ok')\n"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)

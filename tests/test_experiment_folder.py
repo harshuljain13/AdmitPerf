@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from bench.experiment import (
+from admitperf.bench.experiment import (
     ResultsExistError,
     guard_results_dir,
     results_dir_for,
 )
-from core.config import ConfigError, ExperimentConfig
+from admitperf.core.config import ConfigError, ExperimentConfig
 
 CONFIG = """
 name: folded

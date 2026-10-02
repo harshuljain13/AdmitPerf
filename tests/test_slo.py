@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from bench.slo import Attainment, judge, percentile
-from core.api import Request
-from core.ports import RequestOutcome
+from admitperf.bench.slo import Attainment, judge, percentile
+from admitperf.core.api import Request
+from admitperf.core.ports import RequestOutcome
 
 
 def _req(*, ttft: float | None = 500.0, itl: float | None = 50.0) -> Request:
