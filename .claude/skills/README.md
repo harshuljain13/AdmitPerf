@@ -1,6 +1,6 @@
 # Project skills
 
-Six skills that encode how this project is worked on. They load automatically for anyone
+Eight skills that encode how this project is worked on. They load automatically for anyone
 using Claude Code in this repository — no setup, because they are versioned alongside the
 code they describe.
 
@@ -10,7 +10,9 @@ code they describe.
 | [`admitperf-policy`](admitperf-policy/SKILL.md) | Porting a published admission policy |
 | [`admitperf-review`](admitperf-review/SKILL.md) | Reviewing a change, adversarially |
 | [`admitperf-pr`](admitperf-pr/SKILL.md) | Opening a pull request |
+| [`admitperf-issue`](admitperf-issue/SKILL.md) | Filing a bug, a policy port, or a docs problem |
 | [`admitperf-debt`](admitperf-debt/SKILL.md) | Auditing claims against the bundles behind them |
+| [`admitperf-spec`](admitperf-spec/SKILL.md) | Planning docs, the board, and what is actually done |
 | [`admitperf-release`](admitperf-release/SKILL.md) | Cutting a release |
 
 ## Why these exist
@@ -29,9 +31,14 @@ They are not style guides. Each encodes a mistake this project actually made.
   demonstrate.
 - **`admitperf-pr`** says to check the gate's *exit codes*: piping `ruff` into `tail`
   returns tail's status, and a formatting failure can be committed while the gate reports
-  clean.
+  clean. It also says to run the gate in a clean venv, because CI has already failed on an
+  extra the working venv had accumulated by hand.
+- **`admitperf-issue`** asks for the signal range before anything else, because "the policy
+  admitted everything" and "the policy never saw pressure" look identical from outside.
+- **`admitperf-spec`** exists because the plan and the board have disagreed: a direction was
+  recorded as banked while the run behind it isolated nothing.
 
-The thread running through all six: **a number is not a result until you know the signal
+The thread running through all eight: **a number is not a result until you know the signal
 moved.** A policy that never saw its threshold did not perform badly — it never ran, and it
 reports the same numbers as no policy at all. Telling those apart is the entire point of
 this repository, so it is the first thing every skill checks.
