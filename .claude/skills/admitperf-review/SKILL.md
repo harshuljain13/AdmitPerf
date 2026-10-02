@@ -36,7 +36,7 @@ from a run where nothing was saturated?** If yes, that is the review finding.
 
 ## On vendored code
 
-`infra/` is module 10's cluster, vendored and excluded from ruff. Do not reformat it — that
+`infra/` is the vendored serving cluster, excluded from ruff. Do not reformat it — that
 makes every future diff against upstream unreadable. Changes there should be minimal and
 should say why they could not be made upstream.
 

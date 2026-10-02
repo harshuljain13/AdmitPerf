@@ -28,7 +28,7 @@ class YourPolicy(AdmissionPolicy):
 Declare which signals it needs, so a mismatch fails at startup instead of silently
 reading a missing value as zero. This is not theoretical: a KV-threshold policy on a
 small model reads `kv_used_fraction` near 0.0 forever and quietly becomes an
-admit-everything baseline. See [`docs/policies.md`](docs/policies.md#choosing-a-signal).
+admit-everything baseline. See [`docs/policies.md`](src/admitperf/docs/policies.md#choosing-a-signal).
 
 ```python
 class YourPolicy(AdmissionPolicy):
@@ -52,7 +52,7 @@ If you are porting a published algorithm (Chronos, QLM, CONCUR, etc.), you must 
 
 - ✅ `class ChronosWCRT` — implements the exact bound from the paper, cites the equation number.
 - ✅ `class ChronosInspiredThreshold` — takes the *idea* but simplifies; class name says "inspired" not the paper's system name.
-- ❌ Never name a class after a published system unless you can defend the port line-by-line against the paper. See [`docs/scope.md`](docs/scope.md#the-fidelity-rule-for-reference-ports).
+- ❌ Never name a class after a published system unless you can defend the port line-by-line against the paper. See [`docs/scope.md`](src/admitperf/docs/scope.md#the-fidelity-rule-for-reference-ports).
 
 Add a short docstring header linking the source paper and stating what was preserved vs simplified.
 
@@ -100,12 +100,12 @@ admitperf bench compare results/
 
 ## What we do NOT accept
 
-- Policies that require patching engine internals (see [`docs/scope.md`](docs/scope.md#class-b--batch-formation-not-portable)).
+- Policies that require patching engine internals (see [`docs/scope.md`](src/admitperf/docs/scope.md#class-b--batch-formation-not-portable)).
 - Claims of a faithful port that we cannot verify against the source paper.
-- New metrics without a definition in [`docs/metrics.md`](docs/metrics.md).
+- New metrics without a definition in [`docs/metrics.md`](src/admitperf/docs/metrics.md).
 - Changes to the adapter API (`Request`, `SystemState`, `Decision`, `AdmissionPolicy`) — that is v0 frozen. If you think the API needs to change, open an issue first.
 - Metrics estimated rather than measured. If a number cannot be obtained from the engine or from client-side timing, it belongs in the bundle's `unavailable` block with a reason.
 
 ## Questions
 
-Open an issue with the `question` label, or read the [motivation](docs/motivation.md), [scope](docs/scope.md) and [status](docs/status.md) docs first.
+Open an issue with the `question` label, or read the [motivation](src/admitperf/docs/motivation.md), [scope](src/admitperf/docs/scope.md) and [status](src/admitperf/docs/status.md) docs first.

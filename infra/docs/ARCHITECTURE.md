@@ -1,9 +1,8 @@
-# Architecture — Module 10, cluster profiling
+# Architecture — the serving cluster
 
 Overview only. Each component has its own deep dive; this page is the map.
 
-Described with the [C4 model](https://c4model.com). Module 10 is the **complete
-stack**: the disaggregated cluster, the observability layer, and the engine-tuning
+Described with the [C4 model](https://c4model.com). The cluster is the **complete stack**: the disaggregated cluster, the observability layer, and the engine-tuning
 tools, in one module.
 
 | Layer | What it covers |
@@ -36,7 +35,7 @@ flowchart LR
     OPERATOR["Lab operator<br/>[Person]"]
     CHATTER["Chat user<br/>[Person]"]
 
-    SYS["<b>Module 10 cluster</b><br/>[Software System]<br/>Admits, places and serves inference;<br/>measures itself while doing it"]
+    SYS["<b>Serving cluster</b><br/>[Software System]<br/>Admits, places and serves inference;<br/>measures itself while doing it"]
 
     BURST["Burst capacity<br/>[External System]<br/>OpenAI-compatible endpoint"]
     HF["Hugging Face Hub<br/>[External System]<br/>Model weights"]
@@ -97,7 +96,7 @@ flowchart LR
     end
 
     PROM["<b>prometheus-server</b><br/>[Container: monitoring ns]"]
-    GRAF["<b>grafana</b><br/>[Container: NodePort]<br/>ten Class 10 dashboards"]
+    GRAF["<b>grafana</b><br/>[Container: NodePort]<br/>ten This lab dashboards"]
     KEDA["<b>KEDA operator</b><br/>[Container: keda ns]<br/>metric → replica count"]
     SCALE["replica count on<br/>vllm-prefill / vllm-decode"]
 

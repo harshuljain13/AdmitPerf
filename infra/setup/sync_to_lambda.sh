@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy the lab from your Mac to ~/class10 on the GPU box, over rsync/SSH.
+# Copy the lab from your Mac to ~/admitperf on the GPU box, over rsync/SSH.
 # Run on: Mac. Reads LAMBDA and LAMBDA_SSH_KEY from .env and exits 1 without them.
 # Excludes .venv, __pycache__, .pytest_cache — source only, no environments.
 set -euo pipefail
@@ -18,13 +18,13 @@ if [[ -z "${LAMBDA:-}" || -z "${LAMBDA_SSH_KEY:-}" || ! -f "$LAMBDA_SSH_KEY" ]];
   exit 1
 fi
 
-echo "Sync Mac → $LAMBDA:~/class10/"
-ssh -i "$LAMBDA_SSH_KEY" -o StrictHostKeyChecking=accept-new "$LAMBDA" "mkdir -p ~/class10"
+echo "Sync Mac → $LAMBDA:~/admitperf/"
+ssh -i "$LAMBDA_SSH_KEY" -o StrictHostKeyChecking=accept-new "$LAMBDA" "mkdir -p ~/admitperf"
 rsync -avz -e "ssh -i $LAMBDA_SSH_KEY -o StrictHostKeyChecking=accept-new" \
   --exclude '.venv' \
   --exclude '__pycache__' \
   --exclude '.pytest_cache' \
   --exclude '.env' \
   ./ \
-  "$LAMBDA:~/class10/"
+  "$LAMBDA:~/admitperf/"
 echo "Synced."

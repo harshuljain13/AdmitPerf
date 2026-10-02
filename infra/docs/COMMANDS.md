@@ -1,7 +1,7 @@
-# Debugging commands — module 10
+# Debugging commands — the cluster
 
-10 shares its cluster with module 9, so
-**[module 9's COMMANDS.md](COMMANDS.md)** still applies for
+10 shares its cluster with the cluster, so
+**[the cluster's COMMANDS.md](COMMANDS.md)** still applies for
 Kubernetes, HAMi, NVIDIA and KEDA. This file covers what 10 adds: the tunnel,
 Grafana, the new metrics, the load tools, and Open WebUI.
 
@@ -16,7 +16,7 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 | Browser chat | `open-webui`, NodePort `30030` | `default` |
 | Metrics | `prometheus-server` | `monitoring` |
 | Dashboards | `grafana`, NodePort `31495` | `monitoring` |
-| Dashboard source | ConfigMap `class10-dashboards` | `monitoring` |
+| Dashboard source | ConfigMap `admitperf-dashboards` | `monitoring` |
 | GPU telemetry | `dcgm-exporter` (DaemonSet) | `monitoring` |
 
 ---
@@ -65,7 +65,7 @@ kubectl -n monitoring get secret grafana -o jsonpath='{.data.admin-password}' | 
 The admin password. Regenerated on every install; user is always `admin`.
 
 ```
-kubectl -n monitoring get configmap class10-dashboards -o jsonpath='{.metadata.labels}{"\n"}'
+kubectl -n monitoring get configmap admitperf-dashboards -o jsonpath='{.metadata.labels}{"\n"}'
 ```
 
 **Must include `grafana_dashboard=1`.** The Grafana sidecar only imports
@@ -73,7 +73,7 @@ ConfigMaps carrying that label — a missing label is the usual reason dashboard
 do not appear.
 
 ```
-kubectl -n monitoring get configmap class10-dashboards -o jsonpath='{.data}' | jq -r 'keys[]'
+kubectl -n monitoring get configmap admitperf-dashboards -o jsonpath='{.data}' | jq -r 'keys[]'
 ```
 
 Which of the ten dashboards actually loaded.
@@ -122,12 +122,12 @@ Are the 10 histograms arriving at all.
 curl -s http://127.0.0.1:8080/metrics | grep orch_
 ```
 
-Everything module 9 exposed, plus:
+Everything the cluster exposed, plus:
 
 | Metric | Reads as |
 |---|---|
 | `orch_request_duration_seconds{stage}` | **Histogram** per stage: `gateway`, `pick`, `local`, `overflow`, `e2e` |
-| `orch_replica_kv_free_ratio{pod}` | Per-pod KV headroom — module 9 had one fleet-wide gauge |
+| `orch_replica_kv_free_ratio{pod}` | Per-pod KV headroom — the cluster had one fleet-wide gauge |
 | `orch_replica_queue_depth{pod}` | Per-pod queue |
 | `orch_replica_tokens_in_flight{pod}` | Per-pod load |
 | `orch_replica_healthy{pod}`, `_saturating{pod}` | Per-pod filter state |
@@ -164,7 +164,7 @@ Mooncake KV dashboard.
 python -m gateway.repl
 ```
 
-Run on: Mac, after `source .env`. Replaces module 9's `app.py`.
+Run on: Mac, after `source .env`. Replaces the cluster's `app.py`.
 
 | Command | Does |
 |---|---|
@@ -256,7 +256,7 @@ python -m app.harness --list
 python -m gateway.harness --list
 ```
 
-The scenario harnesses, 10's equivalent of module 9's `fakeworker.run --list`.
+The scenario harnesses, 10's equivalent of the cluster's `fakeworker.run --list`.
 
 ---
 

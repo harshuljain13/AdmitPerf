@@ -1,8 +1,8 @@
 {
-  "uid": "class10-cluster",
-  "title": "Class 10 / Cluster",
+  "uid": "admitperf-cluster",
+  "title": "AdmitPerf / Cluster",
   "tags": [
-    "class10",
+    "admitperf",
     "cluster",
     "dcgm"
   ],

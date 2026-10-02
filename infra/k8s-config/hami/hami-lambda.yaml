@@ -162,7 +162,7 @@ spec:
       volumes:
         - name: lab
           hostPath:
-            path: /home/ubuntu/class10
+            path: /home/ubuntu/admitperf
             type: Directory
 ---
 apiVersion: v1

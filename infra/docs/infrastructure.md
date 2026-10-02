@@ -2,7 +2,7 @@
 
 How you reach the cluster, why pods look ready before they are, and what the two controllers do.
 
-Part of the [module 10 docs](README.md). Overview: [ARCHITECTURE.md](ARCHITECTURE.md) · Request path: [DATAFLOW.md](DATAFLOW.md)
+Part of the [cluster docs](README.md). Overview: [ARCHITECTURE.md](ARCHITECTURE.md) · Request path: [DATAFLOW.md](DATAFLOW.md)
 
 ---
 
@@ -121,7 +121,7 @@ sequenceDiagram
     D->>H: install prometheus, then grafana
     D->>PY: python -m observability.dashboards
     PY-->>D: ten .json files
-    D->>CM: create configmap class10-dashboards
+    D->>CM: create configmap admitperf-dashboards
     D->>CM: label grafana_dashboard=1
     SC->>CM: watches that label
     SC->>G: imports the ten dashboards
