@@ -12,10 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from core.config import ExperimentConfig
-import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 from cluster.providers import modal_provider
 from cluster.providers.modal_provider import ModalProvider, ProvisionError
+from core.config import ExperimentConfig
 from core.session import Session, SessionStore
 
 DEPLOY_OUTPUT = """

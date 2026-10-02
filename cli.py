@@ -25,8 +25,8 @@ from pathlib import Path
 
 import click
 
-from core import __version__
 from bench.workloads.poisson import Baseline
+from core import __version__
 from core.config import ConfigError, ExperimentConfig
 from core.registry import available
 
@@ -514,9 +514,9 @@ def bench_sweep(config: str, out: str | None, keep_up: bool) -> None:
     import asyncio as _asyncio
 
     from bench.experiment import run_sweep
+    from cluster.providers.modal_provider import ModalProvider, ProvisionError
     from core.config import Deployment
     from core.engine import VllmConfig, VllmEngine
-    from cluster.providers.modal_provider import ModalProvider, ProvisionError
     from core.session import Session, SessionStore
 
     try:

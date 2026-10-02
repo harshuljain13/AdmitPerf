@@ -14,9 +14,9 @@ import httpx
 
 from bench.results import percentiles, summarize, write_bundle
 from bench.workloads.poisson import PoissonWorkload
+from core.engine import VllmConfig, VllmEngine
 from core.registry import get_policy
 from core.runner import Runner, RunnerConfig
-from core.engine import VllmConfig, VllmEngine
 
 METRICS = """
 vllm:num_requests_running{{model_name="lab"}} {running}

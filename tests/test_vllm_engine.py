@@ -14,7 +14,6 @@ import httpx
 import pytest
 
 from core.api import Request
-from core.ports import EngineAdapter
 from core.engine import (
     VLLM_METRICS,
     KVScaleError,
@@ -22,6 +21,7 @@ from core.engine import (
     VllmEngine,
     parse_prometheus,
 )
+from core.ports import EngineAdapter
 
 #: Hand-written, with values chosen to make assertions readable.
 FIXTURE = Path(__file__).parent / "fixtures" / "vllm_metrics.txt"

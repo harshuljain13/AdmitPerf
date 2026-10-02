@@ -30,9 +30,9 @@ from core.config import (
     PolicySpec,
     WorkloadConfig,
 )
+from core.engine import VllmConfig, VllmEngine
 from core.registry import get_policy
 from core.runner import Runner, RunnerConfig, RunResult
-from core.engine import VllmConfig, VllmEngine
 
 
 def _stamp() -> str:
