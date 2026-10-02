@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from admitperf.core.api import DecisionKind, Request, SystemState
-from admitperf.core.registry import get_policy, requirements_of
-from admitperf.policies.chronos.estimator import ArrivalRateWindow
+from core.api import DecisionKind, Request, SystemState
+from core.registry import get_policy, requirements_of
+from policies.chronos.estimator import ArrivalRateWindow
 
 CALIBRATED = {
     "vllm:request_prefill_time_seconds_sum": 1.0,

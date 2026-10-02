@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from admitperf.bench.report import build, load_bundles, render_html, write
+from bench.report import build, load_bundles, render_html, write
 
 
 def _bundle(root: Path, name: str, *, policy: str, attainment: float, **extra) -> Path:
@@ -177,7 +177,7 @@ def test_the_report_palette_matches_the_dashboard(tmp_path: Path) -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dashboard"))
     import theme
 
-    from admitperf.bench import report
+    from bench import report
 
     assert (report.INK, report.YELLOW, report.GREY) == (theme.INK, theme.YELLOW, theme.GREY)
     assert report.MUTED == theme.MUTED
@@ -189,9 +189,9 @@ def test_signal_range_records_what_the_policy_could_see(tmp_path: Path) -> None:
     fine. On a 0.5B, kv_used_fraction peaked at 0.005 against a 0.9 threshold —
     establishing that took a manual dig through decision logs, which is one dig
     too many for something a paper cites."""
-    from admitperf.bench.results import signal_ranges
-    from admitperf.core.ports import DecisionRecord
-    from admitperf.core.runner import RunResult
+    from bench.results import signal_ranges
+    from core.ports import DecisionRecord
+    from core.runner import RunResult
 
     result = RunResult()
     for kv, waiting in ((0.0, 0), (0.004, 3), (0.002, 11)):
@@ -218,9 +218,9 @@ def test_signal_range_records_what_the_policy_could_see(tmp_path: Path) -> None:
 def test_a_signal_never_reported_is_absent_not_zero(tmp_path: Path) -> None:
     """Zero claims the signal sat at the bottom of its range. Absent says the
     engine never reported it. Those are different findings."""
-    from admitperf.bench.results import signal_ranges
-    from admitperf.core.ports import DecisionRecord
-    from admitperf.core.runner import RunResult
+    from bench.results import signal_ranges
+    from core.ports import DecisionRecord
+    from core.runner import RunResult
 
     result = RunResult()
     result.decisions.append(

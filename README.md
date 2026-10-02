@@ -93,7 +93,7 @@ they need. Full numbers: [`docs/results.md`](docs/results.md).
 ## Writing a policy
 
 ```python
-from admitperf import AdmissionPolicy, Decision, Request, SystemState
+from core import AdmissionPolicy, Decision, Request, SystemState
 
 class KVThreshold(AdmissionPolicy):
     """Reject when the KV cache is above 90% utilization."""
@@ -115,7 +115,7 @@ Policies in **your own** pip package are discovered automatically — no edit to
 this repo. `admitperf policies` lists everything resolvable.
 
 ```toml
-[project.entry-points."admitperf.policies"]
+[project.entry-points."policies"]
 my_policy = "my_pkg.policies:MyPolicy"
 ```
 

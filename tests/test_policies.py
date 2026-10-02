@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from admitperf.core.api import DecisionKind, Request, SystemState
-from admitperf.core.registry import get_policy, requirements_of
+from core.api import DecisionKind, Request, SystemState
+from core.registry import get_policy, requirements_of
 
 
 def _state(*, kv: float | None = 0.0, waiting: int = 0, running: int = 0) -> SystemState:

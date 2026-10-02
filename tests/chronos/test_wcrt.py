@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from admitperf.policies.chronos.wcrt import (
+from policies.chronos.wcrt import (
     CostModel,
     admission_test,
     prefill_utilization,
@@ -205,7 +205,7 @@ def test_the_test_reports_its_own_inputs() -> None:
 def test_expected_prefill_cost_is_a_window_mean() -> None:
     """E[p] over arrivals, so a long prompt cannot make the fleet look busy on
     its own account."""
-    from admitperf.policies.chronos.estimator import PrefillDemandWindow
+    from policies.chronos.estimator import PrefillDemandWindow
 
     window = PrefillDemandWindow(window_s=60.0)
     assert window.mean_chunks(now=0.0) is None, "nothing has arrived yet"
@@ -216,7 +216,7 @@ def test_expected_prefill_cost_is_a_window_mean() -> None:
 
 
 def test_old_arrivals_leave_the_window() -> None:
-    from admitperf.policies.chronos.estimator import PrefillDemandWindow
+    from policies.chronos.estimator import PrefillDemandWindow
 
     window = PrefillDemandWindow(window_s=10.0)
     window.record(8, now=0.0)
@@ -228,8 +228,8 @@ def test_a_long_prompt_alone_does_not_trip_the_overload_check() -> None:
     """The defect this corrected: at 512-token chunks a 4096-token request
     scored eight times a 512-token one, so a mixed workload refused its longest
     class however idle the fleet was."""
-    from admitperf.core.api import Request, SystemState
-    from admitperf.policies.chronos.policy import ChronosInspiredWCRT
+    from core.api import Request, SystemState
+    from policies.chronos.policy import ChronosInspiredWCRT
 
     policy = ChronosInspiredWCRT(fit_from_telemetry=False, chunk_tokens=512)
     state = SystemState(

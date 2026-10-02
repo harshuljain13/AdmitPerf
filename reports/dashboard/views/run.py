@@ -40,7 +40,7 @@ from theme import (  # noqa: E402
     YELLOW_DIM,
 )
 
-from admitperf.core.config import ConfigError, ExperimentConfig  # noqa: E402
+from core.config import ConfigError, ExperimentConfig  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENTS = ROOT / "experiments"

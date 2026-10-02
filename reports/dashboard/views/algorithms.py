@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from components import note, section, warn  # noqa: E402
 from theme import GREY, HEADER, LINE, MUTED, SURFACE, WHITE, YELLOW  # noqa: E402
 
-from admitperf.core.registry import available  # noqa: E402
+from core.registry import available  # noqa: E402
 
 #: Curated notes per policy. Deliberately about judgement rather than
 #: mechanics: the code says what a policy does, this says when to believe it.
@@ -192,7 +192,7 @@ def render() -> None:
 
     section("Adding Your Own", "No change to this repository is needed.")
     st.code(
-        """from admitperf import AdmissionPolicy, Decision, Request, SystemState
+        """from core import AdmissionPolicy, Decision, Request, SystemState
 
 
 class MyPolicy(AdmissionPolicy):
@@ -207,7 +207,7 @@ class MyPolicy(AdmissionPolicy):
     )
     st.markdown("Then declare an entry point in your own package:")
     st.code(
-        '[project.entry-points."admitperf.policies"]\nmy_policy = "my_pkg:MyPolicy"',
+        '[project.entry-points."policies"]\nmy_policy = "my_pkg:MyPolicy"',
         language="toml",
     )
     st.markdown(

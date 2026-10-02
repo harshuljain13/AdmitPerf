@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from admitperf.core.api import AdmissionPolicy, Decision, DecisionKind, Request, SystemState
-from admitperf.core.ports import CapabilityError, check_compatibility
-from admitperf.core.registry import available, get_policy, register, requirements_of
+from core.api import AdmissionPolicy, Decision, DecisionKind, Request, SystemState
+from core.ports import CapabilityError, check_compatibility
+from core.registry import available, get_policy, register, requirements_of
 
 thirdparty = pytest.importorskip(
     "thirdparty_policy",

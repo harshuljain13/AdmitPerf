@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from admitperf.bench.experiment import ContextOverflowError, check_context_budget
-from admitperf.bench.workloads.poisson import SLOClass
-from admitperf.core.config import ExperimentConfig
+from bench.experiment import ContextOverflowError, check_context_budget
+from bench.workloads.poisson import SLOClass
+from core.config import ExperimentConfig
 
 SMALL = SLOClass(
     name="small",

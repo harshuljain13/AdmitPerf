@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from components import note, section, verdict, warn  # noqa: E402
 from theme import HEADER, MUTED  # noqa: E402
 
-from admitperf.core.config import ConfigError, ExperimentConfig  # noqa: E402
-from admitperf.core.registry import available  # noqa: E402
+from core.config import ConfigError, ExperimentConfig  # noqa: E402
+from core.registry import available  # noqa: E402
 
 EXPERIMENTS = Path(__file__).resolve().parents[3] / "experiments"
 

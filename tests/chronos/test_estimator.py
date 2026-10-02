@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from admitperf.core.api import SystemState
-from admitperf.policies.chronos.estimator import ServiceRateEstimator, ServiceRates
+from core.api import SystemState
+from policies.chronos.estimator import ServiceRateEstimator, ServiceRates
 
 
 def _state(**metrics: float) -> SystemState:

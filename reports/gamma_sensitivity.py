@@ -24,9 +24,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from admitperf.bench.workloads.poisson import DEFAULT_CLASSES  # noqa: E402
-from admitperf.core.api import Request, SystemState  # noqa: E402
-from admitperf.policies.chronos.policy import ChronosInspiredWCRT  # noqa: E402
+from bench.workloads.poisson import DEFAULT_CLASSES  # noqa: E402
+from core.api import Request, SystemState  # noqa: E402
+from policies.chronos.policy import ChronosInspiredWCRT  # noqa: E402
 
 #: Held fixed so the only thing varying is the cost model. A live engine would
 #: also move these, which is exactly why this is analysis and not measurement.

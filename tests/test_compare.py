@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from admitperf.bench.compare import compare_dir, load_runs
+from bench.compare import compare_dir, load_runs
 
 
 def _run(root: Path, name: str, label: str, *, ttft_p95: float, admitted: int, goodput: float):

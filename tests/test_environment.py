@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 
-from admitperf.bench.environment import (
+from bench.environment import (
     _cache_config,
     engine_environment,
     local_environment,

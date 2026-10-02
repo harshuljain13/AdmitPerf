@@ -2,7 +2,7 @@
 
 import pytest
 
-from admitperf import (
+from core import (
     AdmissionPolicy,
     Decision,
     DecisionKind,
@@ -11,7 +11,7 @@ from admitperf import (
     __version__,
     get_policy,
 )
-from admitperf.policies import NoAdmission
+from policies import NoAdmission
 
 
 def test_version() -> None:

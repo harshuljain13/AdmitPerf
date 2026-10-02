@@ -13,9 +13,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from admitperf.core.api import Request
-from admitperf.core.ports import EngineAdapter
-from admitperf.core.engine import (
+from core.api import Request
+from core.ports import EngineAdapter
+from core.engine import (
     VLLM_METRICS,
     KVScaleError,
     VllmConfig,
