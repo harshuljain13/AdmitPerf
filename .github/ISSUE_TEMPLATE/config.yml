@@ -1,0 +1,14 @@
+# Blank issues are off so every report arrives with the context the templates ask for: the
+# version, how it was installed, and the bundle. Those answer most of what we would
+# otherwise have to ask for, and each round trip costs a day.
+blank_issues_enabled: false
+contact_links:
+  - name: Question, or help running an experiment
+    url: https://github.com/harshuljain13/AdmitPerf/discussions
+    about: >-
+      Ask here rather than opening an issue — usage questions, "which policy should I use",
+      interpreting a result, and anything you are not yet sure is a bug.
+
+  - name: Security vulnerability
+    url: https://github.com/harshuljain13/AdmitPerf/security/advisories/new
+    about: Report privately, never as a public issue.

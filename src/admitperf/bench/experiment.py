@@ -30,9 +30,9 @@ from admitperf.core.config import (
     PolicySpec,
     WorkloadConfig,
 )
+from admitperf.core.engine import VllmConfig, VllmEngine
 from admitperf.core.registry import get_policy
 from admitperf.core.runner import Runner, RunnerConfig, RunResult
-from admitperf.engines.vllm import VllmConfig, VllmEngine
 
 
 def _stamp() -> str:

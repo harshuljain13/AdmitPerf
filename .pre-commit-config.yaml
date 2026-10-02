@@ -1,0 +1,35 @@
+# Local gate: format, lint, and the suite before anything lands. Install once with
+#   pre-commit install
+#
+# The suite runs on every commit rather than in CI alone, because the failures worth
+# catching here are cheap to fix and expensive to discover later: an import that only
+# resolves because the working tree is on the path, a config that no longer validates.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff-format
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+        # The rendered manifests are generated and may carry multiple documents.
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      # A results bundle or a weights file committed by accident is hard to remove later.
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (offline suite)
+        entry: pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true

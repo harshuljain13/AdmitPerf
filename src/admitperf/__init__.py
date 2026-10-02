@@ -7,14 +7,15 @@ The public surface is the frozen adapter API. Writing a policy needs only:
 
 from __future__ import annotations
 
-from admitperf.core.api import (
+from admitperf.core import (
     AdmissionPolicy,
     Decision,
     DecisionKind,
     Request,
     SystemState,
+    available,
+    get_policy,
 )
-from admitperf.core.registry import available, get_policy
 
 __version__ = "0.0.1"
 

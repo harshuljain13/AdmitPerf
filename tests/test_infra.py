@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 
 from admitperf.core.config import ExperimentConfig
-from admitperf.infra import modal_provider
-from admitperf.infra.modal_provider import ModalProvider, ProvisionError
-from admitperf.infra.session import Session, SessionStore
+from admitperf.core.session import Session, SessionStore
+from infra.providers import modal_provider
+from infra.providers.modal_provider import ModalProvider, ProvisionError
 
 DEPLOY_OUTPUT = """
 Building image...

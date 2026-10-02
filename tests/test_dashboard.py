@@ -13,8 +13,10 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dashboard"))
-DASHBOARD = Path(__file__).resolve().parents[1] / "dashboard"
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard")
+)
+DASHBOARD = Path(__file__).resolve().parents[1] / "src" / "admitperf" / "reports" / "dashboard"
 
 from data import discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
 
@@ -152,7 +154,9 @@ def test_palette_matches_the_banner_asset() -> None:
 
     import theme
 
-    svg = (Path(__file__).resolve().parents[1] / "docs" / "assets" / "banner.svg").read_text()
+    svg = (
+        Path(__file__).resolve().parents[1] / "src" / "admitperf" / "docs" / "assets" / "banner.svg"
+    ).read_text()
     in_banner = {c.upper() for c in re.findall(r"#[0-9a-fA-F]{6}", svg)}
 
     assert theme.INK.upper() in in_banner
@@ -441,7 +445,7 @@ def test_the_button_label_is_coloured_not_just_the_button() -> None:
 def test_the_sidebar_logo_exists_and_is_rendered_from_the_svg() -> None:
     """st.logo takes an image. SVG text would depend on Helvetica being present
     in whoever's browser, so the wordmark is rasterised from the source SVG."""
-    assets = DASHBOARD.parent / "docs" / "assets"
+    assets = DASHBOARD.parents[1] / "docs" / "assets"
     for name in ("logo.svg", "logo.png", "icon.svg", "icon.png"):
         assert (assets / name).exists(), f"missing brand asset {name}"
 

@@ -1,0 +1,19 @@
+name: Documentation
+description: Something is wrong, missing, or misleading in the docs
+labels: [documentation]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Which page
+      placeholder: "docs/metrics.md, the goodput definition"
+    validations: {required: true}
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: >-
+        Wrong, missing, and misleading are different problems. Misleading is the worst of
+        the three, because the reader leaves confident.
+    validations: {required: true}

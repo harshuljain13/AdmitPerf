@@ -1,0 +1,36 @@
+name: Policy port request
+description: A published admission policy that should be available here
+labels: [policy, enhancement]
+body:
+  - type: input
+    id: paper
+    attributes:
+      label: Paper
+      placeholder: "Chronos — Frontiers CS 8, 2026. arXiv:…"
+    validations: {required: true}
+
+  - type: dropdown
+    id: klass
+    attributes:
+      label: Class
+      description: >-
+        Class A is a pure function of (request, observable fleet state) running in front of
+        an unmodified engine. Class B changes how batches are formed inside the engine and
+        cannot be ported without maintaining a fork — see docs/scope.md.
+      options: ["A — ingress-shaped", "B — batch-formation", "Not sure"]
+    validations: {required: true}
+
+  - type: textarea
+    id: signal
+    attributes:
+      label: What signal does it read?
+      description: Queue depth, KV pressure, deadline slack, tenant credit, session state.
+    validations: {required: true}
+
+  - type: textarea
+    id: deviations
+    attributes:
+      label: Known deviations from the paper
+      description: >-
+        Anything that cannot be reproduced faithfully — a simulator-only assumption, a
+        metric the engine does not expose. Better stated now than discovered in review.

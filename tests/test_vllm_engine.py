@@ -14,14 +14,14 @@ import httpx
 import pytest
 
 from admitperf.core.api import Request
-from admitperf.core.ports import EngineAdapter
-from admitperf.engines.vllm import (
+from admitperf.core.engine import (
     VLLM_METRICS,
     KVScaleError,
     VllmConfig,
     VllmEngine,
     parse_prometheus,
 )
+from admitperf.core.ports import EngineAdapter
 
 #: Hand-written, with values chosen to make assertions readable.
 FIXTURE = Path(__file__).parent / "fixtures" / "vllm_metrics.txt"

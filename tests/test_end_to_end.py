@@ -14,9 +14,9 @@ import httpx
 
 from admitperf.bench.results import percentiles, summarize, write_bundle
 from admitperf.bench.workloads.poisson import PoissonWorkload
+from admitperf.core.engine import VllmConfig, VllmEngine
 from admitperf.core.registry import get_policy
 from admitperf.core.runner import Runner, RunnerConfig
-from admitperf.engines.vllm import VllmConfig, VllmEngine
 
 METRICS = """
 vllm:num_requests_running{{model_name="lab"}} {running}

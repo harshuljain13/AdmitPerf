@@ -7,7 +7,7 @@ Thanks for wanting to add a policy, workload, engine adapter, or metric. This gu
 Every policy implements a single interface:
 
 ```python
-from admitperf import AdmissionPolicy, Decision, Request, SystemState
+from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
 
 class YourPolicy(AdmissionPolicy):
     name = "your_policy"          # unique across the registry
@@ -40,7 +40,7 @@ If the policy belongs in this repo, add it to `src/admitperf/policies/` and regi
 If it lives in **your own package**, declare an entry point instead — no edit here needed:
 
 ```toml
-[project.entry-points."admitperf.policies"]
+[project.entry-points."policies"]
 your_policy = "your_pkg.policies:YourPolicy"
 ```
 

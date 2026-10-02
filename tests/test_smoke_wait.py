@@ -64,8 +64,8 @@ def test_your_own_engine_is_not_waited_on(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_the_budget_comes_from_the_deployment(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from admitperf.infra import session as session_mod
-    from admitperf.infra.session import Session, SessionStore
+    from admitperf.core import session as session_mod
+    from admitperf.core.session import Session, SessionStore
 
     store = SessionStore(tmp_path / "session.json")
     store.save(

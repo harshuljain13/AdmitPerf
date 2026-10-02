@@ -1,0 +1,42 @@
+name: Bug report
+description: Something behaves differently from what it says it does
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A run bundle answers more than a description can. If you have one, the three files
+        below are usually enough to reproduce without asking anything further.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+      placeholder: |
+        The policy admitted every request. I expected it to refuse once KV passed 0.9.
+    validations: {required: true}
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command, and the config it ran against.
+      render: shell
+    validations: {required: true}
+
+  - type: textarea
+    id: bundle
+    attributes:
+      label: From the run bundle
+      description: >-
+        `manifest.json` (what ran against what) and the `signal_range` from `summary.json`.
+        The signal range is usually the answer: a policy that never saw its threshold did
+        not misbehave, it never fired.
+      render: json
+
+  - type: input
+    id: version
+    attributes:
+      label: Version and install method
+      placeholder: "0.0.1, pip install -e ."
+    validations: {required: true}

@@ -7,7 +7,7 @@ made the package closed to precisely the extension it exists to enable.
 A third-party policy now registers itself from its own distribution:
 
     # their pyproject.toml
-    [project.entry-points."admitperf.policies"]
+    [project.entry-points."policies"]
     my_policy = "my_pkg.policies:MyPolicy"
 
 Resolution order is built-ins first, then entry points. A name collision is an
@@ -24,7 +24,7 @@ from admitperf.core.api import AdmissionPolicy
 #: The published plugin group. Renaming the baseline package must never
 #: change this — it is the public contract third-party packages declare
 #: against, and a silent change makes every installed policy vanish.
-ENTRY_POINT_GROUP = "admitperf.policies"
+ENTRY_POINT_GROUP = "policies"
 
 # Built-in policies, populated by admitperf.policies at import time to avoid a
 # circular import (core must not depend on the policies subpackage).

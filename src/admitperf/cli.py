@@ -25,8 +25,8 @@ from pathlib import Path
 
 import click
 
-from admitperf import __version__
 from admitperf.bench.workloads.poisson import Baseline
+from admitperf.core import __version__
 from admitperf.core.config import ConfigError, ExperimentConfig
 from admitperf.core.registry import available
 
@@ -38,7 +38,7 @@ def _load(config: str | None, **overrides: object) -> ExperimentConfig:
 
 def _resolve_endpoint(engine_url: str | None) -> tuple[str, str]:
     """Explicit URL, else the provisioned session."""
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.session import SessionStore
 
     if engine_url:
         return engine_url, "lab"
@@ -51,7 +51,7 @@ def _resolve_endpoint(engine_url: str | None) -> tuple[str, str]:
 
 def _baseline_for(cfg: ExperimentConfig, engine_url: str | None) -> Baseline | None:
     """The measured baseline relative SLOs scale from, if one is needed."""
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.session import SessionStore
 
     if cfg.workload.slo_mode != "relative":
         return None
@@ -177,8 +177,8 @@ def infra() -> None:
 )
 def infra_up(config: str | None, hf_secret: str | None, **overrides: object) -> None:
     """Start an engine and remember where it is."""
-    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.session import SessionStore
+    from infra.providers.modal_provider import ModalProvider, ProvisionError
 
     if hf_secret:
         os.environ["ADMITPERF_HF_SECRET"] = hf_secret
@@ -215,7 +215,7 @@ def infra_up(config: str | None, hf_secret: str | None, **overrides: object) -> 
 @infra.command("status")
 def infra_status() -> None:
     """Show the current session, if there is one."""
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.session import SessionStore
 
     store = SessionStore()
     if not store.exists():
@@ -243,7 +243,7 @@ def _startup_budget(engine_url: str | None, default: float = 600.0) -> float:
     """
     if engine_url:
         return 30.0
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.session import SessionStore
 
     store = SessionStore()
     if not store.exists():
@@ -298,7 +298,7 @@ async def wait_for_engine(
 def infra_smoke(engine_url: str | None, wait: bool, timeout: float | None) -> None:
     """Check the engine serves /v1/models, /metrics and a completion."""
     from admitperf.core.api import Request
-    from admitperf.engines.vllm import VllmConfig, VllmEngine
+    from admitperf.core.engine import VllmConfig, VllmEngine
 
     url, served = _resolve_endpoint(engine_url)
     budget = timeout if timeout is not None else _startup_budget(engine_url)
@@ -376,8 +376,8 @@ def infra_calibrate(engine_url: str | None, samples: int) -> None:
     does when nothing is queued.
     """
     from admitperf.bench.calibrate import calibrate
-    from admitperf.engines.vllm import VllmConfig, VllmEngine
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.engine import VllmConfig, VllmEngine
+    from admitperf.core.session import SessionStore
 
     url, served = _resolve_endpoint(engine_url)
 
@@ -412,8 +412,8 @@ def infra_calibrate(engine_url: str | None, samples: int) -> None:
 @infra.command("down")
 def infra_down() -> None:
     """Stop the engine and forget the session."""
-    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
-    from admitperf.infra.session import SessionStore
+    from admitperf.core.session import SessionStore
+    from infra.providers.modal_provider import ModalProvider, ProvisionError
 
     store = SessionStore()
     if not store.exists():
@@ -515,9 +515,9 @@ def bench_sweep(config: str, out: str | None, keep_up: bool) -> None:
 
     from admitperf.bench.experiment import run_sweep
     from admitperf.core.config import Deployment
-    from admitperf.engines.vllm import VllmConfig, VllmEngine
-    from admitperf.infra.modal_provider import ModalProvider, ProvisionError
-    from admitperf.infra.session import Session, SessionStore
+    from admitperf.core.engine import VllmConfig, VllmEngine
+    from admitperf.core.session import Session, SessionStore
+    from infra.providers.modal_provider import ModalProvider, ProvisionError
 
     try:
         cfg = ExperimentConfig.load(config)

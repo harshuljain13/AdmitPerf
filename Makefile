@@ -35,9 +35,9 @@ lint:
 
 # The app: configure an experiment, run the pipeline, read the results.
 dashboard:
-	$(PYTHON) -m streamlit run dashboard/app.py
+	$(PYTHON) -m streamlit run reports/dashboard/app.py
 
 # A mock engine so the dashboard has something to run against without a GPU.
 # Start it in a second terminal; the Run page checks the port.
 mock-engine:
-	$(PYTHON) scripts/mock_vllm.py --port 8000 --capacity 4
+	$(PYTHON) tests/mock_vllm.py --port 8000 --capacity 4

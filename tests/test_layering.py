@@ -13,10 +13,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "admitperf"
+SRC = Path(__file__).resolve().parents[1] / "admitperf"
 
 # core may not import these sibling packages.
-FORBIDDEN_FOR_CORE = {"admitperf.bench", "admitperf.engines"}
+FORBIDDEN_FOR_CORE = {"bench"}
 
 
 def _imports_of(path: Path) -> set[str]:
@@ -40,7 +40,7 @@ def test_core_does_not_import_heavier_layers() -> None:
 
 
 def test_core_imports_without_optional_dependencies() -> None:
-    """`import admitperf` must work with only stdlib + click available.
+    """`import admitperf.core` must work with only stdlib + click available.
 
     Run in a subprocess with the bench/engine third-party modules blocked, so a
     stray `import httpx` in core fails here rather than in a user's minimal
@@ -50,8 +50,8 @@ def test_core_imports_without_optional_dependencies() -> None:
         "import sys\n"
         "for blocked in ('httpx', 'yaml', 'numpy', 'pandas'):\n"
         "    sys.modules[blocked] = None\n"
-        "import admitperf\n"
-        "from admitperf import AdmissionPolicy, Decision, Request, SystemState\n"
+        "import admitperf.core\n"
+        "from admitperf.core import AdmissionPolicy, Decision, Request, SystemState\n"
         "from admitperf.core import StateCache, check_compatibility\n"
         "print('ok')\n"
     )

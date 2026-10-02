@@ -139,7 +139,7 @@ Nothing needs to change in this repo — that is what the entry-point group is
 for. In your own package:
 
 ```python
-from admitperf import AdmissionPolicy, Decision, Request, SystemState
+from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
 
 
 class MyPolicy(AdmissionPolicy):
@@ -153,7 +153,7 @@ class MyPolicy(AdmissionPolicy):
 ```
 
 ```toml
-[project.entry-points."admitperf.policies"]
+[project.entry-points."policies"]
 my_policy = "my_pkg:MyPolicy"
 ```
 

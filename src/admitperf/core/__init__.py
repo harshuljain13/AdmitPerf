@@ -1,8 +1,12 @@
-"""Core — the decision path.
+"""Core — the decision path, and the public surface.
 
 The four objects (Request, SystemState, Decision, Outcome), the policy base
-class, the policy registry, and the cached state a policy reads. No engine, no
+class, the policy registry, and the cached state a policy reads. No engine
 provisioning, no benchmark machinery.
+
+Writing a policy needs only:
+
+    from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
 """
 
 from __future__ import annotations
@@ -25,6 +29,8 @@ from admitperf.core.ports import (
 from admitperf.core.registry import available, get_policy, register, requirements_of
 from admitperf.core.state import StateCache, empty_state, state_age
 
+__version__ = "0.0.1"
+
 __all__ = [
     "STATE_AGE_KEY",
     "AdmissionPolicy",
@@ -37,6 +43,7 @@ __all__ = [
     "RequestOutcome",
     "StateCache",
     "SystemState",
+    "__version__",
     "available",
     "check_compatibility",
     "empty_state",

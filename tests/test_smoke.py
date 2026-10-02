@@ -2,7 +2,7 @@
 
 import pytest
 
-from admitperf import (
+from admitperf.core import (
     AdmissionPolicy,
     Decision,
     DecisionKind,
