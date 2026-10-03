@@ -22,7 +22,7 @@ import httpx
 
 #: Packages worth recording. Engine behaviour and timing both depend on them,
 #: and httpx is here because the client is where latency is measured.
-TRACKED = ("admitperf", "httpx", "modal")
+TRACKED = ("admitperf", "httpx")
 
 
 def package_versions() -> dict[str, str | None]:

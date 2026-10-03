@@ -24,7 +24,6 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from components import empty_state, note, section, verdict, warn  # noqa: E402
 from theme import (  # noqa: E402
@@ -41,9 +40,10 @@ from theme import (  # noqa: E402
 )
 
 from admitperf.core.config import ConfigError, ExperimentConfig  # noqa: E402
+from admitperf.reports.paths import experiments_dir, repo_root
 
-ROOT = Path(__file__).resolve().parents[3]
-EXPERIMENTS = ROOT / "experiments"
+ROOT = repo_root()
+EXPERIMENTS = experiments_dir()
 RESULTS = ROOT / "reports" / "results"
 SESSION = ROOT / ".admitperf" / "session.json"
 
@@ -142,23 +142,18 @@ def _plan(
 
     stages = [
         Stage(
-            "Provision",
-            f"{cfg.infra.model} on {cfg.infra.modal_gpu}, via {cfg.infra.provider}",
-            _cli("infra", "up", "-c", config),
-            skip=(
-                ""
-                if provision and not reuse
-                else "reusing the existing session"
-                if provision
-                else "you are pointing at an engine that is already running"
-            ),
-            on_fail="Nothing was run and no session was written. Common causes, "
-            "if the output above does not already say: no payment method on the "
-            "Modal account (GPU functions are refused outright), a GPU type "
-            "unavailable in your region, gated weights needing an HF token, or a "
-            "tensor-parallel size larger than the GPUs requested. If the deploy "
-            "got far enough to create an app, <code>modal app list</code> will "
-            "show it.",
+            "Render the cluster",
+            f"{cfg.infra.model} on {cfg.infra.gpu_spec}, provider {cfg.infra.provider}",
+            _cli("infra", "render", "infra/config/single.yaml", "--plan"),
+            # This page cannot bring a cluster up. Provisioning is now an SSH
+            # sequence against rented machines, not a single API call, and
+            # pretending otherwise would offer a button that cannot work. It shows
+            # what WOULD be deployed and refuses the deployment itself.
+            skip="" if provision else "you are pointing at an engine already running",
+            on_fail="The config could not be rendered, so nothing was deployed and "
+            "nothing was measured. The error names the value that is wrong — a "
+            "quantization the card cannot execute, weights that leave no room for "
+            "KV, or a host with no address in <code>.env</code>.",
         ),
         Stage(
             "Check it answers",
@@ -166,10 +161,11 @@ def _plan(
             _cli("infra", "smoke"),
             skip="" if provision else "not this page's deployment to vouch for",
             on_fail="The deployment exists but never served a request, so no "
-            "benchmark was run against it. If it timed out, the engine may still "
-            "be loading weights — <code>modal app logs admitperf-vllm</code> will "
-            "say. A failed metrics scrape in particular means KV-pressure policies "
-            "would have had nothing to decide on.",
+            "benchmark was run against it. If it timed out the engine may still be "
+            "loading weights: a pod reports READY minutes before it can serve, "
+            "while torch.compile captures CUDA-graph buckets. A failed metrics "
+            "scrape in particular means KV-pressure policies would have had "
+            "nothing to decide on.",
         ),
         Stage(
             "Calibrate",
@@ -220,7 +216,8 @@ def _plan(
             else "nothing was provisioned here",
             always=True,
             on_fail="<b>The GPU may still be running and billing.</b> Check it "
-            "yourself: <code>modal app list</code>, then <code>admitperf infra down</code>.",
+            "yourself. Rented machines keep costing money until they are "
+            "terminated, and nothing here does that for you.",
         ),
     ]
     for stage in stages:
@@ -444,18 +441,23 @@ def render() -> None:
     section("Where To Run It", "")
     target = st.radio(
         "Engine",
-        ["Mock engine (free, no GPU)", "Already running (paste a URL)", "Provision a GPU"],
+        ["Mock engine (free, no GPU)", "Already running (paste a URL)"],
         help="The mock engine proves the wiring and costs nothing, but none of "
         "its timings mean anything about hardware. Real numbers need a real "
-        "engine.",
+        "engine.\n\nThere is no provision option: bringing a cluster up is an SSH "
+        "sequence against rented machines, not an API call, and this page will not "
+        "offer a button it cannot honour. Bring it up yourself, then paste the "
+        "gateway URL.",
     )
 
     engine_url: str | None = None
-    provision = target.startswith("Provision")
+    # Nothing here provisions. Kept as a name because the pipeline plan still
+    # distinguishes "a deployment this page is responsible for" from "an engine
+    # someone else started", and only the second is possible now.
+    provision = False
     reuse = False
     teardown = True
     ready = True
-    existing = _session_summary()
 
     if target.startswith("Mock"):
         port = int(st.number_input("Port", 1024, 65535, 8000))
@@ -465,34 +467,12 @@ def render() -> None:
             st.success(f"Mock engine responding on port {port}.")
         else:
             warn(f"Nothing is serving on port {port}. Start it in a terminal first:")
-            st.code(f"python scripts/mock_vllm.py --port {port} --capacity 4", language="bash")
-    elif target.startswith("Already"):
-        engine_url = st.text_input("Engine URL", "http://127.0.0.1:8000")
+            st.code(f"python tests/mock_vllm.py --port {port} --capacity 8", language="bash")
     else:
-        i = cfg.infra
-        note(
-            f"Will deploy <b>{i.model}</b> on <b>{i.modal_gpu}</b> via {i.provider} "
-            f"— max_num_seqs {i.engine.max_num_seqs}, tp "
-            f"{i.engine.tensor_parallel_size}, prefix caching "
-            f"{'on' if i.engine.enable_prefix_caching else 'off'}."
-        )
-        if existing:
-            st.success(
-                f"A session already exists: {existing.get('model')} on "
-                f"{existing.get('gpu')}, created {existing.get('created_at')}."
-            )
-            reuse = st.checkbox(
-                "Reuse it instead of deploying again",
-                value=True,
-                help="Bringing a model up takes minutes. Reuse only if this "
-                "session was created from the same config — the engine settings "
-                "are part of what a number means.",
-            )
-        teardown = st.checkbox(
-            "Tear the deployment down when the pipeline finishes",
-            value=True,
-            help="A GPU left running keeps billing. Off only if you intend to "
-            "run more experiments against the same deployment.",
+        engine_url = st.text_input(
+            "Engine URL",
+            "http://127.0.0.1:8080",
+            help="The gateway, if you brought the cluster up, or a worker directly.",
         )
 
     c1, c2 = st.columns(2)

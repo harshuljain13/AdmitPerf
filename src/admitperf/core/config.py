@@ -1,12 +1,12 @@
 """One definition of every setting, in one place.
 
 Before this, the same default lived in three files — the CLI flag, the
-provisioner dataclass, and the Modal app's own `os.environ.get` fallback.
+provisioner dataclass.
 Change one and forget another, and a deploy silently uses a value different
 from the one the CLI just printed.
 
 Here the defaults exist exactly once. The CLI overrides them, YAML overrides
-them, and the Modal app receives the *resolved* config rather than re-deriving
+them, and the engine receives the *resolved* config rather than re-deriving
 it. `.env` is for secrets only.
 
 The four sections mirror the four separable problems: getting infrastructure,
@@ -108,12 +108,12 @@ class EngineConfig:
 class InfraConfig:
     """Where the engine runs and what it runs."""
 
-    provider: str = "modal"
+    provider: str = "cluster"
     gpu: str = "A10G"
     gpu_count: int = 1
     model: str = "Qwen/Qwen3-0.6B"
     served_model_name: str = "lab"
-    #: Modal scales to zero after this; also how long an idle box costs nothing.
+    #: How long an idle engine is kept before it is considered stale.
     scaledown_window_s: int = 300
     startup_timeout_s: int = 900
     #: Concurrent requests the serving container accepts. Must exceed the
@@ -122,7 +122,7 @@ class InfraConfig:
     max_concurrent_inputs: int = 256
     engine: EngineConfig = field(default_factory=EngineConfig)
 
-    #: How many serving workers to bring up. One is the Modal shape and the
+    #: How many serving workers to bring up. One is the
     #: default. More than one requires a provider that can place a request,
     #: which is the whole reason the fleet shape exists: an admission decision
     #: is only interesting when there is somewhere to admit *into*.
@@ -131,12 +131,15 @@ class InfraConfig:
     #: workers == 1, where there is nothing to choose.
     placement: str = "least_loaded"
 
-    PROVIDERS: ClassVar[frozenset[str]] = frozenset({"modal", "cluster"})
+    #: Only our own cluster. Modal was removed: a hosted provider cannot
+    #: demonstrate placement, a KV hop or a multi-worker fleet, which is what this
+    #: project measures.
+    PROVIDERS: ClassVar[frozenset[str]] = frozenset({"cluster"})
     PLACEMENTS: ClassVar[frozenset[str]] = frozenset({"least_loaded", "round_robin"})
 
     @property
-    def modal_gpu(self) -> str:
-        """Modal's GPU spec: 'A100' for one, 'A100:4' for four."""
+    def gpu_spec(self) -> str:
+        """'A100' for one card, 'A100:4' for four. Used in run names."""
         return self.gpu if self.gpu_count <= 1 else f"{self.gpu}:{self.gpu_count}"
 
     @property
@@ -179,12 +182,6 @@ class InfraConfig:
         if self.placement not in self.PLACEMENTS:
             raise ConfigError(
                 f"placement must be one of {sorted(self.PLACEMENTS)}, got {self.placement!r}"
-            )
-        if self.workers > 1 and self.provider == "modal":
-            raise ConfigError(
-                f"workers is {self.workers}, but provider 'modal' brings up a single "
-                "container and cannot place a request. Use provider: cluster, or set "
-                "workers: 1 — otherwise the run would silently measure one worker."
             )
 
 
@@ -366,7 +363,7 @@ class ExperimentConfig:
         different from its siblings."""
         model = infra.model.rsplit("/", 1)[-1]
         e = infra.engine
-        bits = [model, infra.modal_gpu.replace(":", "x"), f"seqs{e.max_num_seqs}"]
+        bits = [model, infra.gpu_spec.replace(":", "x"), f"seqs{e.max_num_seqs}"]
         if e.tensor_parallel_size > 1:
             bits.append(f"tp{e.tensor_parallel_size}")
         if e.enable_prefix_caching:
@@ -516,7 +513,7 @@ class ExperimentConfig:
         return asdict(self)
 
     def engine_env(self) -> str:
-        """Resolved engine settings, as JSON for the Modal app to read back.
+        """Resolved engine settings, as JSON for the engine to read back.
 
         Passing the whole thing rather than a scatter of variables is what
         keeps the defaults defined in exactly one place.
@@ -525,7 +522,7 @@ class ExperimentConfig:
             {
                 "model": self.infra.model,
                 "served_model_name": self.infra.served_model_name,
-                "gpu": self.infra.modal_gpu,
+                "gpu": self.infra.gpu_spec,
                 "scaledown_window_s": self.infra.scaledown_window_s,
                 "startup_timeout_s": self.infra.startup_timeout_s,
                 "max_concurrent_inputs": self.infra.max_concurrent_inputs,

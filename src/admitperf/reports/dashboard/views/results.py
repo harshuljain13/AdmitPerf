@@ -28,8 +28,13 @@ from components import empty_state, note, section, verdict, warn  # noqa: E402
 from data import decisions_frame, discover, runs_frame, summarise, unavailable_metrics  # noqa: E402
 from theme import DECISION_COLORS, GREY, MUTED, WHITE, YELLOW, policy_color_map  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[3]
-RESULTS = ROOT / "reports" / "results"
+from admitperf.reports.paths import repo_root  # noqa: E402
+
+ROOT = repo_root()
+#: Committed run bundles. `parents[3]` here resolved to `src/`, so this was
+#: `src/reports/results` — a path that has never existed. The page rendered empty
+#: and looked like missing data rather than a wrong constant.
+RESULTS = Path(__file__).resolve().parents[1] / "results"
 
 
 def _pct(x: float | None) -> str:

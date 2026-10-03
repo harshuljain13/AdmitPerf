@@ -14,6 +14,8 @@ from pathlib import Path
 import altair as alt
 import streamlit as st
 
+from admitperf.reports.paths import assets_dir
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "src"))
@@ -32,7 +34,7 @@ st.set_page_config(
 # collapsed-rail mark, where the full lockup does not fit.
 # Repository root, not relative to this file: the dashboard has moved once
 # already and resolved to a directory that did not exist.
-ASSETS = HERE.parents[3] / "assets"
+ASSETS = assets_dir()
 if (ASSETS / "logo.png").exists():
     st.logo(
         str(ASSETS / "logo.png"),

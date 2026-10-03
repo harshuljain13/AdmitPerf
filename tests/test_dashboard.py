@@ -229,18 +229,27 @@ def test_experiments_page_validates_with_the_same_rules_as_the_cli() -> None:
     assert "policies" in text  # the generated YAML is shown for review
 
 
-def test_the_run_page_can_provision_before_it_measures() -> None:
-    """Running against a real GPU should be one button, not a terminal detour:
-    the page provisions, checks, measures and tears down itself."""
+def test_the_run_page_offers_only_engines_it_can_reach() -> None:
+    """A control that cannot work is worse than no control.
+
+    The page used to offer "Provision a GPU", which called Modal. Modal is gone
+    and bringing a cluster up is now an SSH sequence against rented machines, so
+    the option is removed rather than left to fail.
+    """
     from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
     app.run()
-    assert any("Provision" in o for o in app.radio[0].options)
+    # Two options only. There is no provision button: bringing a cluster up is
+    # an SSH sequence, and offering a control that cannot work is worse than
+    # offering none.
+    assert [o for o in app.radio[0].options] == [
+        "Mock engine (free, no GPU)",
+        "Already running (paste a URL)",
+    ]
 
-    app.radio[0].set_value(next(o for o in app.radio[0].options if o.startswith("Provision"))).run()
-    labels = [c.label for c in app.checkbox]
-    assert any("Tear the deployment down" in label for label in labels)
+    app.radio[0].set_value("Already running (paste a URL)").run()
+    assert app.text_input, "an engine URL must be askable"
 
 
 def test_the_run_page_shows_the_whole_pipeline_before_starting() -> None:
@@ -252,7 +261,12 @@ def test_the_run_page_shows_the_whole_pipeline_before_starting() -> None:
     app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
     app.run()
     text = " ".join(m.value for m in app.markdown)
-    for stage in ("Provision", "Run the experiment", "Aggregate", "Write the report", "Tear down"):
+    for stage in (
+        "Render the cluster",
+        "Run the experiment",
+        "Aggregate",
+        "Write the report",
+    ):
         assert stage in text, f"pipeline stage {stage!r} not shown before starting"
 
 
@@ -271,16 +285,20 @@ def test_the_plan_says_which_steps_will_actually_run() -> None:
     assert "will run<" in text, "a step that will run is not labelled as such"
 
 
-def test_the_run_page_tears_down_by_default() -> None:
-    """A GPU left running bills by the minute, and the page is the surface most
-    likely to be driven by someone who will not think to check."""
+def test_the_run_page_does_not_claim_to_tear_anything_down() -> None:
+    """A GPU left running bills by the minute, and this page cannot stop one.
+
+    It used to offer a teardown checkbox, which was true when provisioning went
+    through Modal. Now the machines are rented outside this tool, so the page must
+    not imply it will clean up — a promise it cannot keep is worse than silence.
+    """
     from streamlit.testing.v1 import AppTest
 
     app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
     app.run()
-    app.radio[0].set_value(next(o for o in app.radio[0].options if o.startswith("Provision"))).run()
-    teardown = next(c for c in app.checkbox if "Tear the deployment down" in c.label)
-    assert teardown.value is True
+    app.radio[0].set_value("Already running (paste a URL)").run()
+    labels = [c.label for c in app.checkbox]
+    assert not any("Tear the deployment down" in label for label in labels), labels
 
 
 def test_the_algorithms_page_lists_every_installed_policy() -> None:

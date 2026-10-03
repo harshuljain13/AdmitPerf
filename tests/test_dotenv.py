@@ -53,22 +53,3 @@ def test_comments_blanks_exports_and_quotes(
 def test_a_missing_file_is_not_an_error(tmp_path: Path) -> None:
     """Most installs have no .env, and none of this is required to run."""
     assert load_dotenv(tmp_path / "nope.env") == []
-
-
-def test_the_deploy_says_which_modal_identity_it_will_use(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`MODAL_TOKEN_ID` silently outranks ~/.modal.toml. When it comes from a
-    file, "add a payment method" for an account you know is funded is a long
-    way to walk before suspecting the wrong workspace."""
-    from admitperf import cli
-
-    monkeypatch.setattr(cli, "DOTENV_KEYS", ["MODAL_TOKEN_ID"])
-    monkeypatch.setenv("MODAL_TOKEN_ID", "ak-abcdefgh12345")
-    note = cli._auth_note()
-    assert ".env" in note
-    assert "ak-abcde" in note
-    assert "ak-abcdefgh12345" not in note, "the full token should not be echoed"
-
-    monkeypatch.delenv("MODAL_TOKEN_ID")
-    assert cli._auth_note() == "auth: ~/.modal.toml"

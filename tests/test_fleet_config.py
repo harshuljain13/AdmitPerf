@@ -14,11 +14,19 @@ import pytest
 from admitperf.core.config import ConfigError, ExperimentConfig, InfraConfig
 
 REPO = Path(__file__).resolve().parents[1]
-EXPERIMENTS = REPO / "src" / "admitperf" / "experiments"
+EXPERIMENTS = REPO / "experiments"
 
 
 def _configs() -> list[Path]:
-    return sorted(p for p in EXPERIMENTS.rglob("*.yaml") if p.is_file())
+    """Every runnable experiment config.
+
+    `archive/` is excluded: those described Modal deployments and Modal is gone.
+    They are kept because their results are cited evidence and a figure whose
+    config has been deleted is untraceable — see experiments/archive/README.md.
+    """
+    return sorted(
+        p for p in EXPERIMENTS.rglob("*.yaml") if p.is_file() and "archive" not in p.parts
+    )
 
 
 def test_experiments_directory_is_not_empty() -> None:
@@ -41,9 +49,11 @@ def test_shipped_configs_are_single_worker(path: Path) -> None:
     assert cfg.infra.is_fleet is False
 
 
-def test_defaults_are_the_modal_shape() -> None:
+def test_defaults_are_a_single_cluster_worker() -> None:
+    """Cluster is the only provider now. Modal was removed: a hosted provider
+    cannot demonstrate placement, a KV hop or a multi-worker fleet."""
     infra = InfraConfig()
-    assert infra.provider == "modal"
+    assert infra.provider == "cluster"
     assert infra.workers == 1
     assert infra.is_fleet is False
     infra.validate()
@@ -70,12 +80,8 @@ def test_zero_workers_is_refused() -> None:
         InfraConfig(workers=0).validate()
 
 
-def test_modal_refuses_a_fleet_rather_than_silently_serving_one_worker() -> None:
-    """The failure this guards against is a quiet one.
-
-    Modal brings up a single container. Asking it for four workers would not
-    error at deploy time — it would serve one and the results would read as a
-    four-worker run. Refuse at config time instead.
-    """
-    with pytest.raises(ConfigError, match="cannot place a request"):
-        InfraConfig(provider="modal", workers=4).validate()
+def test_the_only_provider_is_our_own_cluster() -> None:
+    """Modal is gone, and its name must not quietly validate."""
+    assert frozenset({"cluster"}) == InfraConfig.PROVIDERS
+    with pytest.raises(ConfigError, match="provider must be one of"):
+        InfraConfig(provider="modal").validate()

@@ -26,9 +26,6 @@ dev = [
     "mypy>=1.10",
     "types-PyYAML",
 ]
-modal = [
-    "modal>=0.64",
-]
 dashboard = [
     "streamlit>=1.40",
     "altair>=5.4",
@@ -46,7 +43,7 @@ traces = [
 # Everything, for a working copy of the repo:
 #     pip install -e '.[all]'
 all = [
-    "admitperf[dev,dashboard,modal,analysis,traces]",
+    "admitperf[dev,dashboard,analysis,traces]",
 ]
 
 [project.scripts]
@@ -82,13 +79,7 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# Runs only inside a Modal container, against decorators we do not have stubs
-# for locally. Type-checking it here would check Modal, not us.
-exclude = ["src/admitperf/infra/modal_app.py"]
 
-[[tool.mypy.overrides]]
-module = "infra.providers.modal_app"
-ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

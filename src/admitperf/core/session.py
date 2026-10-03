@@ -23,14 +23,14 @@ SESSION_FILE = SESSION_DIR / "session.json"
 class Session:
     """A provisioned engine deployment."""
 
-    provider: str  # "modal" | "lambda" | "local"
+    provider: str  # "cluster" | "local"
     engine: str  # "vllm" | "sglang"
     model: str
     endpoints: list[str]
     gpu: str | None = None
     served_model_name: str = "lab"
     created_at: str = ""
-    #: Anything the provider needs to tear itself down again — a Modal app
+    #: Anything the provider needs to tear itself down again — a cluster
     #: name, a Lambda host, a pid file. Opaque to everyone else.
     handle: dict[str, str] = field(default_factory=dict)
     #: The resolved experiment config this deployment was created from, so a

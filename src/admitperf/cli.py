@@ -78,10 +78,10 @@ DOTENV_KEYS: list[str] = []
 def load_dotenv(path: Path = Path(".env")) -> list[str]:
     """Read `.env` into the environment, without overriding what is already set.
 
-    `modal deploy` inherits this process's environment, so a token that only
-    exists in a file never reaches the container. Sourcing the file by hand
-    works at a shell and not at all from the dashboard, which launches these
-    commands itself — so a token sitting in `.env` looked present and was not.
+    Subprocesses inherit this process's environment, so a token that only exists
+    in a file never reaches them. Sourcing the file by hand works at a shell and
+    not at all from the dashboard, which launches these commands itself — so a
+    token sitting in `.env` looked present and was not.
 
     Anything already exported wins: an explicit `HF_TOKEN=... admitperf ...`
     should not be silently replaced by a stale file.
@@ -104,20 +104,6 @@ def load_dotenv(path: Path = Path(".env")) -> list[str]:
             loaded.append(key)
     DOTENV_KEYS[:] = loaded
     return loaded
-
-
-def _auth_note() -> str:
-    """Which Modal identity this deploy will use.
-
-    `MODAL_TOKEN_ID` silently outranks `~/.modal.toml`, so a token in `.env`
-    can put you in a different workspace than `modal profile current` reports —
-    and "add a payment method" for an account you know is funded is a long way
-    to walk before suspecting that."""
-    token = os.environ.get("MODAL_TOKEN_ID")
-    if not token:
-        return "auth: ~/.modal.toml"
-    source = ".env" if "MODAL_TOKEN_ID" in DOTENV_KEYS else "environment"
-    return f"auth: MODAL_TOKEN_ID from {source} ({token[:8]}...), overriding ~/.modal.toml"
 
 
 @click.group()
@@ -144,72 +130,7 @@ def policies() -> None:
 
 @main.group()
 def infra() -> None:
-    """Provision, inspect and tear down a serving engine."""
-
-
-@infra.command("up")
-@click.option("-c", "--config", default=None, help="Experiment YAML")
-@click.option("--provider", type=click.Choice(["modal"]), default=None)
-@click.option("--model", default=None, help="HuggingFace model id")
-@click.option("--gpu", default=None, help="GPU type, e.g. A10G, A100, H100")
-@click.option("--gpu-count", type=int, default=None, help="GPUs to attach")
-@click.option("--tensor-parallel-size", "-tp", type=int, default=None)
-@click.option("--pipeline-parallel-size", "-pp", type=int, default=None)
-@click.option(
-    "--max-num-seqs",
-    type=int,
-    default=None,
-    help="Engine concurrency cap. Small on purpose: it is the bottleneck that "
-    "creates queueing, and without queueing every policy scores alike.",
-)
-@click.option("--max-model-len", type=int, default=None)
-@click.option(
-    "--enable-prefix-caching/--no-enable-prefix-caching",
-    default=None,
-    help="Off by default for benchmarking: with it on, KV pressure stops reflecting offered load.",
-)
-@click.option("--scheduling-policy", type=click.Choice(["fcfs", "priority"]), default=None)
-@click.option(
-    "--hf-secret",
-    default=None,
-    help="Name of a Modal secret holding HF_TOKEN, for gated weights. "
-    "Setting HF_TOKEN in the environment works too.",
-)
-def infra_up(config: str | None, hf_secret: str | None, **overrides: object) -> None:
-    """Start an engine and remember where it is."""
-    from admitperf.core.session import SessionStore
-    from infra.providers.modal_provider import ModalProvider, ProvisionError
-
-    if hf_secret:
-        os.environ["ADMITPERF_HF_SECRET"] = hf_secret
-
-    try:
-        cfg = _load(config, **overrides)
-    except ConfigError as exc:
-        raise SystemExit(f"config error: {exc}") from exc
-
-    i = cfg.infra
-    click.echo(f"deploying {i.model} on {i.modal_gpu} via {i.provider}")
-    click.echo(
-        f"  tp={i.engine.tensor_parallel_size} pp={i.engine.pipeline_parallel_size} "
-        f"max_num_seqs={i.engine.max_num_seqs} "
-        f"prefix_caching={i.engine.enable_prefix_caching} "
-        f"scheduling={i.engine.scheduling_policy}"
-    )
-    click.echo(f"  {_auth_note()}")
-    click.echo("this takes a few minutes...")
-
-    try:
-        # Echoed as they arrive rather than at the end: a deploy that is
-        # downloading weights and one that is wedged look identical otherwise.
-        session = ModalProvider(cfg).up(on_line=lambda line: click.echo(f"  {line}"))
-    except ProvisionError as exc:
-        raise SystemExit(str(exc)) from exc
-
-    path = SessionStore().save(session)
-    click.echo(f"endpoint: {session.primary}")
-    click.echo(f"session:  {path}")
-    click.echo("next: admitperf infra smoke")
+    """Render a cluster config, and check a running engine."""
 
 
 @infra.command("status")
@@ -238,7 +159,7 @@ def _startup_budget(engine_url: str | None, default: float = 600.0) -> float:
     """How long this deployment said it needs to come up.
 
     An engine you started yourself is either up or it is not, so there is
-    nothing to wait for; a Modal deployment has a configured startup budget and
+    nothing to wait for; a rented cluster has a configured startup budget and
     that is the honest number to use.
     """
     if engine_url:
@@ -257,7 +178,7 @@ async def wait_for_engine(
 ) -> bool:
     """Poll until the engine answers, or the startup budget runs out.
 
-    `infra up` returns when Modal prints the URL, which is minutes before the
+    A bring-up returns when the pod reports ready, which is minutes before the
     engine can serve: the container is created on the first request, and then
     has to load weights. Checking once and reporting FAIL describes the clock,
     not the deployment.
@@ -317,7 +238,7 @@ def infra_smoke(engine_url: str | None, wait: bool, timeout: float | None) -> No
                 if not ready:
                     click.echo(
                         f"FAIL  engine did not answer within {budget:.0f}s. "
-                        "It may still be loading weights — `modal app logs admitperf-vllm` "
+                        "It may still be loading weights — the engine's own logs "
                         "will say."
                     )
                     return 1
@@ -409,23 +330,43 @@ def infra_calibrate(engine_url: str | None, samples: int) -> None:
         click.echo("no session to save into — pass these as absolute deadlines instead")
 
 
-@infra.command("down")
-def infra_down() -> None:
-    """Stop the engine and forget the session."""
-    from admitperf.core.session import SessionStore
-    from infra.providers.modal_provider import ModalProvider, ProvisionError
+@infra.command("render")
+@click.argument("config", type=click.Path(exists=True, dir_okay=False))
+@click.option("--host", help="only this host's manifests")
+@click.option("--env", "as_env", is_flag=True, help="print the gateway environment")
+@click.option("--plan", "as_plan", is_flag=True, help="print what lands where")
+@click.option("-o", "--out", type=click.Path(dir_okay=False))
+def infra_render(
+    config: str, host: str | None, as_env: bool, as_plan: bool, out: str | None
+) -> None:
+    """Turn a cluster config into manifests, or show what it would deploy.
 
-    store = SessionStore()
-    if not store.exists():
-        click.echo("no session to tear down")
-        return
-    session = store.load()
+    \b
+      admitperf infra render infra/config/single.yaml --plan
+      admitperf infra render infra/config/pair.yaml --env
+      admitperf infra render infra/config/pair.yaml --host gpu-1 | kubectl apply -f -
+    """
+    from infra.render import ConfigError as RenderError
+    from infra.render import gateway_env, load, plan, render
+
     try:
-        ModalProvider(ExperimentConfig()).down(session)
-    except ProvisionError as exc:
-        raise SystemExit(str(exc)) from exc
-    store.clear()
-    click.echo(f"stopped {session.provider} deployment of {session.model}")
+        cfg = load(Path(config))
+        if as_plan:
+            click.echo(plan(cfg))
+            return
+        if as_env:
+            for k, v in gateway_env(cfg).items():
+                click.echo(f"export {k}={v}")
+            return
+        text = render(cfg, host=host)
+    except RenderError as exc:
+        raise SystemExit(f"config error: {exc}") from exc
+
+    if out:
+        Path(out).write_text(text)
+        click.echo(f"wrote {out}", err=True)
+    else:
+        click.echo(text)
 
 
 # ---------------------------------------------------------------------------
@@ -498,83 +439,6 @@ def bench_run(
         )
     except KeyboardInterrupt:
         raise SystemExit("interrupted") from None
-
-
-@bench.command("sweep")
-@click.option("-c", "--config", required=True, help="Experiment YAML with a `matrix:` section")
-@click.option("--out", default=None, help="Output directory")
-@click.option("--keep-up", is_flag=True, help="Leave the last deployment running")
-def bench_sweep(config: str, out: str | None, keep_up: bool) -> None:
-    """Provision each deployment in the matrix and run every policy against it.
-
-    Comparisons stay inside a deployment. The sweep varies the hardware or
-    engine settings; it never pools results across them, because that would
-    measure the machine rather than the policy.
-    """
-    import asyncio as _asyncio
-
-    from admitperf.bench.experiment import run_sweep
-    from admitperf.core.config import Deployment
-    from admitperf.core.engine import VllmConfig, VllmEngine
-    from admitperf.core.session import Session, SessionStore
-    from infra.providers.modal_provider import ModalProvider, ProvisionError
-
-    try:
-        cfg = ExperimentConfig.load(config)
-    except ConfigError as exc:
-        raise SystemExit(f"config error: {exc}") from exc
-
-    store = SessionStore()
-    live: list[tuple[ModalProvider, Session]] = []
-
-    async def provision(dep: Deployment) -> tuple[str, str]:
-        entry = ExperimentConfig(name=cfg.name, infra=dep.infra)
-        i = dep.infra
-        click.echo(f"  deploying {i.model} on {i.modal_gpu} (seqs={i.engine.max_num_seqs})")
-        try:
-            session = ModalProvider(entry).up(on_line=lambda line: click.echo(f"    {line}"))
-        except ProvisionError as exc:
-            raise SystemExit(str(exc)) from exc
-        store.save(session)
-        live.clear()
-        live.append((ModalProvider(entry), session))
-
-        # A freshly deployed container is cold; the first request pays for the
-        # weights. Wait for readiness here so the run does not record a cold
-        # start as the policy's latency.
-        engine = VllmEngine(VllmConfig(base_url=session.primary, model=session.served_model_name))
-        try:
-            for _ in range(120):
-                if await engine.health():
-                    break
-                await _asyncio.sleep(5)
-            else:
-                raise SystemExit(f"engine never became ready at {session.primary}")
-        finally:
-            await engine.aclose()
-
-        click.echo(f"  ready: {session.primary}")
-        return session.primary, session.served_model_name
-
-    async def teardown() -> None:
-        if keep_up:
-            click.echo("  leaving deployment up (--keep-up)")
-            return
-        if not live:
-            return
-        provider, session = live[0]
-        try:
-            provider.down(session)
-            store.clear()
-            click.echo("  torn down")
-        except ProvisionError as exc:
-            # Report loudly but do not abort the sweep: a later deployment can
-            # still produce results, and a stranded app costs money either way.
-            click.echo(f"  WARNING: teardown failed: {exc}")
-
-    _asyncio.run(
-        run_sweep(cfg, provision=provision, teardown=teardown, out_dir=Path(out) if out else None)
-    )
 
 
 @bench.command("compare")

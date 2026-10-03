@@ -1,0 +1,94 @@
+# ===========================================================================
+#  signal-liveness — does the signal ever move?
+# ===========================================================================
+#  The question the survey says nobody answers. A policy that refuses above 0.90,
+#  run where pressure never passed 0.40, reports the same numbers as no policy at
+#  all — and a reader cannot tell the two apart.
+#
+#      admitperf run experiments/signal-liveness
+#
+#  WHAT IS DEPLOYED is not described here. It is in the cluster config below,
+#  which already declares the model, the engine flags, the topology AND the
+#  admission policy. This file says only what load to send and how many times.
+#
+#  That split is deliberate. The old schema carried its own `infra:` block, so
+#  the model was declared in two places and "same cluster, only the load changed"
+#  was unverifiable.
+# ===========================================================================
+name: signal-liveness
+
+# ---------------------------------------------------------------------------
+#  CLUSTER — what we are sending load at
+# ---------------------------------------------------------------------------
+#  Everything about the deployment comes from here, including which admission
+#  policy is active and at what threshold:
+#
+#      admission:
+#        policy: kv_threshold        <- resolved from src/admitperf/policies/
+#        params: {threshold: 0.90}
+#
+#  To test a different policy, point at a cluster config that declares it. To
+#  test the same policy under a different topology, point at pair.yaml or
+#  disagg.yaml. The experiment does not change either way.
+# ---------------------------------------------------------------------------
+cluster: infra/config/single.yaml
+
+# ---------------------------------------------------------------------------
+#  LOAD — what we send
+# ---------------------------------------------------------------------------
+#  kind      poisson | fixed. Poisson because real arrivals are bursty, and a
+#            fixed rate understates queueing
+#  n         total requests
+#  rate      arrivals per second, OFFERED. Whether the cluster serves them is
+#            the thing being measured
+#  seed      fixed, so two runs face the same trace. Without it, a difference
+#            between policies may be a difference between traces
+#  tokens    prompt and output length. These decide how long a request lives,
+#            and therefore concurrency: concurrency = rate x duration. Short
+#            requests cannot fill a cache no matter the arrival rate
+# ---------------------------------------------------------------------------
+load:
+  kind: poisson
+  n: 120
+  rate: 15
+  seed: 0
+  prompt_tokens: 2048
+  output_tokens: 256
+
+# ---------------------------------------------------------------------------
+#  BASELINE — what the policy is measured against
+# ---------------------------------------------------------------------------
+#  The same load with admission disabled. Without it, "the policy admitted 82%"
+#  has nothing to be 82% of, and any latency figure is uninterpretable.
+#
+#  Run as a separate arm against the SAME cluster, so the only difference is
+#  whether the policy was consulted.
+# ---------------------------------------------------------------------------
+baseline: no_admission
+
+# ---------------------------------------------------------------------------
+#  REPEATS — the error bar
+# ---------------------------------------------------------------------------
+#  One run has none, so a gap between two policies may be noise. Three is the
+#  minimum that gives a spread; reporting item 4 fails below it.
+# ---------------------------------------------------------------------------
+repeats: 3
+
+# ---------------------------------------------------------------------------
+#  EXPECTED — written before the run, checked after
+# ---------------------------------------------------------------------------
+#  Recorded here so the prediction cannot be edited to match the result. The
+#  report compares against it.
+#
+#  On single.yaml: 7B bf16 on one A100-40 leaves ~22 GB of KV, so ~12 concurrent
+#  at 32k. A 2048-token request at 256 output tokens lives long enough that 15
+#  arrivals/s should push past 12 concurrent and fill the cache.
+#
+#  If the signal stays flat, the run is INERT and the fix is the LOAD, not the
+#  policy: longer requests or a higher rate. That diagnosis is the whole point of
+#  reporting liveness.
+# ---------------------------------------------------------------------------
+expect:
+  signal: kv_used_fraction
+  reaches_threshold: true
+  limiter: kv

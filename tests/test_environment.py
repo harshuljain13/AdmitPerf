@@ -33,7 +33,7 @@ def test_local_environment_records_the_measuring_machine() -> None:
 def test_a_package_that_is_absent_is_recorded_as_absent() -> None:
     """None rather than a guess: a wrong version hides a mismatch, which is
     worse than an obviously missing one."""
-    assert "modal" in package_versions()  # may legitimately be None
+    assert "httpx" in package_versions()  # may legitimately be None
 
 
 def test_cache_config_is_parsed_from_the_metrics_labels() -> None:

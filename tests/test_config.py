@@ -42,12 +42,12 @@ def test_extra_args_pass_through() -> None:
     assert _args(EngineConfig(extra_args=["--foo", "bar"]))[-2:] == ["--foo", "bar"]
 
 
-def test_modal_gpu_spec_encodes_count() -> None:
+def test_gpu_spec_spec_encodes_count() -> None:
     cfg = ExperimentConfig.from_dict(
         {"infra": {"gpu": "A100", "gpu_count": 4, "engine": {"tensor_parallel_size": 4}}}
     )
-    assert cfg.infra.modal_gpu == "A100:4"
-    assert ExperimentConfig().infra.modal_gpu == "A10G"
+    assert cfg.infra.gpu_spec == "A100:4"
+    assert ExperimentConfig().infra.gpu_spec == "A10G"
 
 
 def test_parallelism_beyond_gpu_count_is_refused() -> None:
@@ -114,7 +114,7 @@ def test_yaml_round_trip(tmp_path: Path) -> None:
     )
     cfg = ExperimentConfig.load(p)
     assert cfg.name == "x"
-    assert cfg.infra.modal_gpu == "H100:2"
+    assert cfg.infra.gpu_spec == "H100:2"
     assert cfg.bench.repeats == 2
 
 
