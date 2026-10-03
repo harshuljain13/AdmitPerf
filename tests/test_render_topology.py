@@ -521,10 +521,17 @@ def test_an_unknown_card_does_not_block_a_quantization(cfg: dict[str, Any]) -> N
 
 
 def test_kv_bytes_per_token_follows_the_attention_shape(cfg: dict[str, Any]) -> None:
+    """2 x layers x kv_heads x head_dim x dtype_bytes, read from the config.
+
+    Deriving the expectation from the config rather than hardcoding today's model
+    keeps this a test of the arithmetic. The previous version asserted the 32B
+    numbers and broke the moment the model changed, which told us nothing.
+    """
     from infra.render import kv_bytes_per_token
 
-    # 2 x 64 layers x 8 kv_heads x 128 head_dim x 2 bytes = 256 KiB
-    assert kv_bytes_per_token(cfg) == 2 * 64 * 8 * 128 * 2
+    a = cfg["model"]["attention"]
+    expected = 2 * a["layers"] * a["kv_heads"] * a["head_dim"] * a["dtype_bytes"]
+    assert kv_bytes_per_token(cfg) == expected
 
 
 def test_kv_estimate_declines_without_a_declared_shape(cfg: dict[str, Any]) -> None:
@@ -558,7 +565,22 @@ def test_a_config_that_holds_fewer_than_one_sequence_is_refused(
     starts and then refuses every request, which is the failure the fit check
     existed to prevent and did not.
     """
-    pin(cfg, kind="A100", cards=2, hbm=40, quant="int8", tp=1, replicas=1)
+    pin(
+        cfg,
+        kind="A100",
+        cards=2,
+        hbm=40,
+        model="Qwen/Qwen2.5-32B-Instruct",
+        quant="int8",
+        tp=1,
+        replicas=1,
+    )
+    cfg["model"]["attention"] = {
+        "layers": 64,
+        "kv_heads": 8,
+        "head_dim": 128,
+        "dtype_bytes": 2,
+    }
     with pytest.raises(ConfigError, match="Fewer than one"):
         validate(cfg)
 

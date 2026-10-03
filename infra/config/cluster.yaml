@@ -6,26 +6,27 @@
 hosts:
   - name: gpu-a            # address: LAMBDA_HOST_GPU_A in .env (or LAMBDA)
     gpu:
-      kind: H100
+      kind: A100
       count: 4
-      hbm_gb: 80
+      hbm_gb: 40
 
   # - name: gpu-b
   #   gpu: {kind: H100, count: 4, hbm_gb: 80}
 
 
 model:
-  id: Qwen/Qwen2.5-32B-Instruct
-  quantization: fp8        # vLLM quantizes from the bf16 checkpoint at load;
-                           # H100 runs it natively. Refused on A100 (sm80).
+  id: Qwen/Qwen2.5-7B-Instruct
+  quantization: null       # bf16. A100 is sm80 and cannot execute fp8, and int8
+                           # needs a pre-quantized checkpoint. Full-precision
+                           # weights also keep KV scarce, which is the point.
   dtype: auto
   slicing: false           # whole GPUs; a slice cannot hold these weights
 
   # Declared, not fetched: the KV estimate must work before anything is rented.
   # Verify against the model's config.json once the cluster is up.
   attention:
-    layers: 64
-    kv_heads: 8
+    layers: 28
+    kv_heads: 4
     head_dim: 128
     dtype_bytes: 2
 
