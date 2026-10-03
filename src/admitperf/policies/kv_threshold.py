@@ -15,7 +15,9 @@ class KVThreshold(AdmissionPolicy):
     """Reject when KV cache utilization is at or above `threshold`."""
 
     name = "kv_threshold"
-    requires = frozenset({"kv_used_fraction"})
+    signal = "kv_used_fraction"
+    threshold = 0.90
+    objective = "deadline"
 
     def __init__(self, threshold: float = 0.90) -> None:
         if not 0.0 < threshold <= 1.0:

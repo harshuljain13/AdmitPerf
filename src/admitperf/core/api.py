@@ -98,9 +98,62 @@ class AdmissionPolicy(ABC):
     A policy is a decision function: given an arriving request and current
     system state, return a Decision. Policies must be deterministic given
     the same inputs and internal state so experiments are reproducible.
+
+    Declaring a policy
+    ------------------
+    Everything the report needs comes from class attributes, declared once::
+
+        class KVThreshold(AdmissionPolicy):
+            name = "kv_threshold"
+            signal = "kv_used_fraction"
+            threshold = 0.90
+
+    `signal` is the field of `SystemState` this policy reads to decide. One
+    declaration, four consumers: the capability check at wiring time, the
+    liveness verdict, the Signal axis of the policy card, and the range table in
+    the report. Naming it in four places is how they drift apart, and a drifted
+    `requires` fails at wiring while a drifted report fails silently.
+
+    `requires` is therefore DERIVED from `signal` unless a policy sets it
+    explicitly — a policy reading two signals still can.
     """
 
     name: str
+
+    #: The `SystemState` field this policy reads. Setting it is what makes the
+    #: run reportable: without it the report can show that decisions were made
+    #: but not whether the signal behind them ever moved.
+    signal: str | None = None
+
+    #: The value of `signal` at which this policy changes its mind. Liveness is
+    #: measured against it: a run where the signal never approached the
+    #: threshold is reported inert rather than as a null result.
+    threshold: float | None = None
+
+    #: The survey's taxonomy. Defaults cover the common case, so a policy
+    #: overrides only what differs.
+    unit: str = "request"
+    setting: str = "online"
+    objective: str = "deadline"
+
+    #: Class A is a pure function of (request, state). Class B needs engine
+    #: changes and cannot sit behind this interface at all, so the default is
+    #: the only value that can currently be true.
+    portability: str = "A"
+
+    requires: frozenset[str] = frozenset()
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        """Derive `requires` from `signal`, once, at class creation.
+
+        Done here rather than as a property so that `requires` stays a plain
+        frozenset for every existing caller, and so a policy that declares both
+        keeps the explicit one.
+        """
+        super().__init_subclass__(**kwargs)
+        declared = "requires" in cls.__dict__
+        if cls.signal and not declared:
+            cls.requires = frozenset({cls.signal})
 
     @abstractmethod
     def decide(self, req: Request, state: SystemState) -> Decision: ...
@@ -108,3 +161,21 @@ class AdmissionPolicy(ABC):
     def on_admit(self, req: Request, state: SystemState) -> None: ...
     def on_complete(self, req: Request, state: SystemState) -> None: ...
     def on_preempt(self, req: Request, state: SystemState) -> None: ...
+
+    def read_signal(self, state: SystemState) -> float | None:
+        """The value this policy's signal had at decision time.
+
+        The runner calls this for every decision, so liveness is recorded whether
+        or not a policy author thought about reporting. Returns None when the
+        policy declares no signal, which the report then says out loud.
+
+        The default reads `signal` as a field of `SystemState`, which covers any
+        policy watching a raw telemetry value. A policy whose signal is COMPUTED —
+        deadline slack, a schedulability margin, a predicted finish time — overrides
+        this and returns its own number. `signal` is then just the name the report
+        prints, and `requires` still lists the telemetry the computation needs.
+        """
+        if not self.signal:
+            return None
+        value = getattr(state, self.signal, None)
+        return float(value) if isinstance(value, (int, float)) else None
