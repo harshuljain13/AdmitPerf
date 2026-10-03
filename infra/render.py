@@ -94,10 +94,9 @@ class Host:
     gpu_kind: str
     gpu_count: int
     hbm_gb: float
-    #: Set when this host came from an inventory variable rather than a named
-    #: entry. Its address is then the Nth item of that list.
-    inventory_var: str | None = None
-    inventory_index: int = 0
+    #: Name of the .env variable holding this host's address. The NAME is not a
+    #: secret so it belongs in the config; the address is, so it does not.
+    address_env: str | None = None
 
     @property
     def env_suffix(self) -> str:
@@ -110,16 +109,13 @@ class Host:
         is ambiguous, and silently applying it to both would point every URL at
         one machine while the plan claimed two.
         """
-        # A per-host override beats the inventory, so one odd box can be pinned
-        # without abandoning the list form for the other four.
+        if self.address_env:
+            return env.get(self.address_env, "").strip()
+        # Falls back to a name-derived variable when the config does not name one,
+        # then to LAMBDA for a single host so the lab's scripts keep working.
         specific = env.get(f"LAMBDA_HOST_{self.env_suffix}", "").strip()
         if specific:
             return specific
-        if self.inventory_var:
-            items = [a.strip() for a in env.get(self.inventory_var, "").split(",") if a.strip()]
-            if self.inventory_index < len(items):
-                return items[self.inventory_index]
-            return ""
         return env.get("LAMBDA", "").strip() if sole else ""
 
     def key(self, env: Mapping[str, str]) -> str:
@@ -129,9 +125,7 @@ class Host:
         )
 
     def env_var(self) -> str:
-        if self.inventory_var:
-            return f"{self.inventory_var}[{self.inventory_index}]"
-        return f"LAMBDA_HOST_{self.env_suffix}"
+        return self.address_env or f"LAMBDA_HOST_{self.env_suffix}"
 
 
 @dataclass(frozen=True)
@@ -207,52 +201,18 @@ def hosts_from(
 ) -> dict[str, Host]:
     """The machines, either listed explicitly or derived from an inventory.
 
-    Two forms. The list form names every host and suits a heterogeneous fleet.
-    The inventory form says "however many addresses are in this variable, all this
-    shape", which makes adding a fifth box a one-token edit to .env:
+    Every host is declared, with its own GPU kind, count and HBM, because a fleet
+    is not necessarily uniform. Each names the .env variable holding its address:
 
         hosts:
-          from_env: LAMBDA_HOSTS
-          prefix: gpu
-          gpu: {kind: A100, count: 4, hbm_gb: 40}
+          - name: gpu-1
+            address_env: LAMBDA_HOST_1
+            gpu: {kind: A100, count: 1, hbm_gb: 40}
 
-    Names are derived as gpu-1..gpu-N in the order the addresses appear, so a host
-    keeps its identity as long as the list order does. Sorting the list would
-    silently re-map names when a box is inserted, and a manifest pinned to gpu-2
-    would then land somewhere else.
+    The variable NAME is not a secret, so it lives in the committed config. The
+    address is, so it does not.
     """
     raw = cfg.get("hosts") or []
-
-    if isinstance(raw, dict) and raw.get("from_env"):
-        env = load_dotenv() if env is None else env
-        var = str(raw["from_env"])
-        addresses = [a.strip() for a in env.get(var, "").split(",") if a.strip()]
-        shape = raw.get("gpu") or {}
-        prefix = str(raw.get("prefix", "gpu"))
-        if not addresses:
-            # One host so `--plan` still works before anything is rented. The
-            # address is resolved later and refuses by name if still unset.
-            return {
-                f"{prefix}-1": Host(
-                    name=f"{prefix}-1",
-                    gpu_kind=str(shape.get("kind", "unknown")),
-                    gpu_count=int(shape.get("count", 0)),
-                    hbm_gb=float(shape.get("hbm_gb", 0)),
-                    inventory_var=var,
-                    inventory_index=0,
-                )
-            }
-        return {
-            f"{prefix}-{i + 1}": Host(
-                name=f"{prefix}-{i + 1}",
-                gpu_kind=str(shape.get("kind", "unknown")),
-                gpu_count=int(shape.get("count", 0)),
-                hbm_gb=float(shape.get("hbm_gb", 0)),
-                inventory_var=var,
-                inventory_index=i,
-            )
-            for i in range(len(addresses))
-        }
 
     if not raw:
         raise ConfigError("no hosts declared. At least one is required.")
@@ -271,6 +231,7 @@ def hosts_from(
                 )
         out[name] = Host(
             name=name,
+            address_env=(str(h["address_env"]) if h.get("address_env") else None),
             gpu_kind=str(gpu.get("kind", "unknown")),
             gpu_count=int(gpu.get("count", 0)),
             hbm_gb=float(gpu.get("hbm_gb", 0)),

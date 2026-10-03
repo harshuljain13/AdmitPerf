@@ -1,37 +1,84 @@
-# The cluster, in one file. Rendered by `python -m infra.render`.
-# Why each choice is what it is: infra/docs/topology.md
+# ===========================================================================
+#  AdmitPerf — cluster configuration
+# ===========================================================================
+#  Everything about what gets served and where it lands is in this file.
+#  `python -m infra.render` turns it into Kubernetes manifests and the
+#  environment the gateway reads, so no value is typed in two places.
 #
-# No addresses and no secrets here — this file is committed. They come from .env.
+#  Commands        python -m infra.render infra/config/cluster.yaml --plan
+#                  python -m infra.render infra/config/cluster.yaml --env
+#                  python -m infra.render infra/config/cluster.yaml --host gpu-1
+#
+#  Rationale       infra/docs/topology.md
+#  Secrets         none here. This file is committed; .env holds addresses
+#                  and keys, and the renderer refuses either if found below.
+# ===========================================================================
 
-# Addresses come from one list in .env, so adding a box is one token:
-#   LAMBDA_HOSTS=ubuntu@10.0.0.1,ubuntu@10.0.0.2
-# Names are derived in list order: gpu-1, gpu-2, ...
+
+# ---------------------------------------------------------------------------
+#  HOSTS — the machines
+# ---------------------------------------------------------------------------
+#  name           identifier used in manifests, ports and `--host`
+#  address_env    .env variable holding `user@ip`. The NAME is not a secret so
+#                 it belongs here; the address is, so it does not
+#  gpu.kind       card model. Decides what quantizations are possible:
+#                 fp8 needs sm89+, so A100 (sm80) cannot run it
+#  gpu.count      whole GPUs on this host. A tensor-parallel group cannot
+#                 exceed it, because TP all-reduces every layer
+#  gpu.hbm_gb     memory per card, before gpu_memory_utilization
+#
+#  Each host declares its own shape, because a fleet need not be uniform.
+#
+#  THIS FLEET: four SEPARATE 1x A100 instances, not one 4-GPU box. One card per
+#  host forces TP=1 and puts the KV hop on the network. For 7B that still pays
+#  off above ~3.8 Gbps.
+# ---------------------------------------------------------------------------
 hosts:
-  from_env: LAMBDA_HOSTS
-  prefix: gpu
-  gpu:
-    kind: A100
-    count: 4
-    hbm_gb: 40
+  - name: gpu-1
+    address_env: LAMBDA_HOST_1
+    gpu: {kind: A100, count: 1, hbm_gb: 40}
 
-# Heterogeneous fleet? List them instead, each with its own shape:
-# hosts:
-#   - name: big
-#     gpu: {kind: A100, count: 4, hbm_gb: 40}
-#   - name: small
-#     gpu: {kind: A10, count: 1, hbm_gb: 24}
+  - name: gpu-2
+    address_env: LAMBDA_HOST_2
+    gpu: {kind: A100, count: 1, hbm_gb: 40}
+
+  - name: gpu-3
+    address_env: LAMBDA_HOST_3
+    gpu: {kind: A100, count: 1, hbm_gb: 40}
+
+  - name: gpu-4
+    address_env: LAMBDA_HOST_4
+    gpu: {kind: A100, count: 1, hbm_gb: 40}
 
 
+# ---------------------------------------------------------------------------
+#  MODEL — what is served
+# ---------------------------------------------------------------------------
+#  id             Hugging Face repo. Weight size is estimated from the
+#                 parameter count in this name, to refuse a bad fit early
+#  quantization   null = bf16 | fp8 | int8 | awq | gptq
+#  dtype          auto lets vLLM pick from the checkpoint
+#  slicing        false = whole GPUs. HAMi slicing is refused: two slices of
+#                 one card satisfying a two-GPU request would masquerade as
+#                 TP=2 across two cards, and every number would be wrong
+#  attention      used to compute kv_bytes_per_token, and therefore how many
+#                 sequences fit. DECLARED, not read from the model, because
+#                 the estimate must work before anything is rented
+# ---------------------------------------------------------------------------
 model:
   id: Qwen/Qwen2.5-7B-Instruct
-  quantization: null       # bf16. A100 is sm80 and cannot execute fp8, and int8
-                           # needs a pre-quantized checkpoint. Full-precision
-                           # weights also keep KV scarce, which is the point.
-  dtype: auto
-  slicing: false           # whole GPUs; a slice cannot hold these weights
 
-  # Declared, not fetched: the KV estimate must work before anything is rented.
-  # Verify against the model's config.json once the cluster is up.
+  # bf16. A100 cannot execute fp8 at all, and int8 would need a pre-quantized
+  # checkpoint. Full-precision weights also leave LESS room for KV, which is
+  # the direction this experiment wants.
+  quantization: null
+  dtype: auto
+  slicing: false
+
+  # VERIFY against the model's config.json once the cluster is up. Wrong by 2x
+  # moves every concurrency figure by 2x.
+  #   kv_bytes_per_token = 2 x layers x kv_heads x head_dim x dtype_bytes
+  #                      = 2 x 28 x 4 x 128 x 2 = 56 KiB
   attention:
     layers: 28
     kv_heads: 4
@@ -39,58 +86,131 @@ model:
     dtype_bytes: 2
 
 
+# ---------------------------------------------------------------------------
+#  ENGINE — vLLM flags, declared once
+# ---------------------------------------------------------------------------
+#  max_model_len            context ceiling. Sets KV per sequence, so it is the
+#                           strongest lever on how many fit
+#  gpu_memory_utilization   fraction of HBM vLLM may claim
+#  max_num_seqs             scheduler's concurrency cap. Keep ABOVE what KV
+#                           allows, or the scheduler refuses before the cache
+#                           does and the run measures a setting, not hardware
+#  enable_prefix_caching    an agent resends its system prompt every turn.
+#                           Also an experiment axis — but do not compare a
+#                           policy across it, since the cache state is what
+#                           changed rather than the policy
+#  scheduling_policy        priority | fcfs
+#  tool_call_parser         the agent needs tool calls to work at all
+# ---------------------------------------------------------------------------
 engine:
   max_model_len: 32768
   gpu_memory_utilization: 0.90
   max_num_seqs: 64
-  enable_prefix_caching: true    # an agent resends its prompt every turn
+  enable_prefix_caching: true
   distributed_executor_backend: mp
   scheduling_policy: priority
   tool_call_parser: hermes
   enable_auto_tool_choice: true
 
 
+# ---------------------------------------------------------------------------
+#  TOPOLOGY — how the fleet is shaped
+# ---------------------------------------------------------------------------
+#  mode           aggregated     one pool; each engine does prefill and decode
+#                 disaggregated  prefill pool feeds decode pool over the hop
+#
+#  split          phase       prefill pool / decode pool. The normal meaning
+#                 capability  OVERLOADED: the gateway then reads PREFILL_URLS
+#                             as a TEXT pool and DECODE_URLS as a VISION pool,
+#                             with no hop at all
+#
+#  kv_transport   mooncake is the only backend that moves bytes. nccl and nixl
+#                 are no-op stubs, so zero hops on a dashboard does not prove
+#                 the hop did not happen. Required by disaggregated, refused
+#                 by aggregated where it would be read by nothing
+#
+#  pools          names are the gateway's contract, not labels:
+#                   aggregated    -> engine
+#                   disaggregated -> prefill, decode
+#    replicas               independent servers in this pool
+#    tensor_parallel_size   GPUs one server shards across. Cannot span hosts
+#    pipeline_parallel_size usually 1
+#    host                   pin to a named host. Omit and the renderer places
+#                           it, first-fit, and prints the assignment
+# ---------------------------------------------------------------------------
 topology:
-  mode: disaggregated      # aggregated | disaggregated
-  split: phase             # phase | capability
-  kv_transport: mooncake   # required by disaggregated, refused by aggregated
+  mode: disaggregated
+  split: phase
+  kv_transport: mooncake
 
-  # Two replicas per pool so placement is a real decision, TP=1 so four workers
-  # fit on four cards. At TP=2 there would be one replica per pool and placement
-  # would have a single destination.
+  # Two replicas per pool so placement is a real decision — with one each the
+  # gateway picks a destination with no alternatives, which is routing rather
+  # than a decision and leaves nothing to measure.
   pools:
     prefill:
       replicas: 2
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
-      # host: gpu-2   # pin to a box; omitted means the renderer places it
+      # host: gpu-1
 
     decode:
       replicas: 2
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
 
-  # aggregated instead:
-  # pools:
-  #   engine: {replicas: 2, tensor_parallel_size: 2}
+  # Aggregated instead? Replace both pools with one:
+  #   pools:
+  #     engine: {replicas: 2, tensor_parallel_size: 2}
 
 
+# ---------------------------------------------------------------------------
+#  PLACEMENT — choosing among replicas in a pool, per request
+# ---------------------------------------------------------------------------
+#  strategy   least_loaded     fewest in flight
+#             round_robin      ignores load; a baseline
+#             prefix_affinity  prefers a worker that already cached the prefix
+# ---------------------------------------------------------------------------
 placement:
-  strategy: least_loaded   # least_loaded | round_robin | prefix_affinity
+  strategy: least_loaded
 
 
+# ---------------------------------------------------------------------------
+#  OVERFLOW — paid capacity for when we refuse
+# ---------------------------------------------------------------------------
+#  provider       external service name
+#  base_url       its OpenAI-compatible endpoint
+#  model          a 4B standing in for our 7B: a relief valve, NOT an equal
+#                 service. Never pool these responses with local ones
+#  max_requests   LIFETIME counter per gateway process, not a rate. Once spent,
+#                 overflow turns itself off and requests fall back to the local
+#                 refusal — which reads as "overflow did not help" when it
+#                 means "overflow went away"
+#  max_tokens     output cap on the overflow path only
+#  on             status codes that may leave. NEVER 429: a tenant over its own
+#                 quota served on capacity we pay for is overspend
+#
+#  The API key is NOT here. It is OVERFLOW_API_KEY in .env.
+# ---------------------------------------------------------------------------
 overflow:
   provider: superlinked
   base_url: https://api.superlinked.com/v1
-  model: Qwen/Qwen3.5-4B   # a 4B standing in for a 72B; not an equal service
-  max_requests: 20         # lifetime counter per process, not a rate
+  model: Qwen/Qwen3.5-4B
+  max_requests: 20
   max_tokens: 64
-  on: [503, 529]           # never 429 — a quota refusal stays local
-  # key: OVERFLOW_API_KEY in .env
+  on: [503, 529]
 
 
+# ---------------------------------------------------------------------------
+#  ADMISSION — the point of the whole repository
+# ---------------------------------------------------------------------------
+#  policy              resolved from AdmitPerf's registry. `admitperf policies`
+#                      lists them with the signal each one watches
+#  params              passed to the policy's constructor
+#  require_saturation  fail a run whose signal never reached its threshold,
+#                      rather than reporting it as a null result
+# ---------------------------------------------------------------------------
 admission:
-  policy: kv_threshold     # resolved from admitperf's registry
+  policy: kv_threshold
   params:
     threshold: 0.90
-  require_saturation: true # a run whose signal never moved is reported inert
+  require_saturation: true
