@@ -164,151 +164,14 @@ def test_palette_matches_the_banner_asset() -> None:
     assert "Helvetica" in theme.FONT
 
 
-def test_admitted_uses_the_brand_yellow() -> None:
-    """The wordmark spells "Admit" in yellow, so yellow means admitted
-    throughout — one less legend to learn."""
-    import theme
-
-    assert theme.DECISION_COLORS["admit"] == theme.YELLOW
-    assert theme.DECISION_COLORS["reject"] != theme.YELLOW
-
-
-def test_a_policy_keeps_its_colour_across_charts() -> None:
-    import theme
-
-    first = theme.policy_color_map(["a", "b", "c"])
-    again = theme.policy_color_map(["c", "b", "a"])
-    assert first == again
-
-
-def test_chart_theme_uses_the_brand_surface() -> None:
-    """Charts on a light ground inside a dark page look borrowed from another
-    application."""
-    import theme
-
-    cfg = theme.chart_theme()["config"]
-    assert cfg["background"] == "transparent"
-    assert theme.POLICY_COLORS[0] == theme.YELLOW
-
-
-# --- pages ----------------------------------------------------------------
-
-
-@pytest.mark.parametrize("page", ["experiments", "algorithms", "run", "results", "terminology"])
-def test_every_page_renders(page: str) -> None:
-    """Rendering is where the real failures live — a chart encoding that does
-    not match the frame, or a column added to one page and not another. A
-    plain HTTP check would call all of those healthy."""
-    from streamlit.testing.v1 import AppTest
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / f"{page}.py"), default_timeout=120)
-    app.run()
-    assert not app.exception, [str(e.value) for e in app.exception]
-
-
-def test_experiments_page_offers_every_registered_policy() -> None:
-    """The form must not hard-code a policy list that drifts from the registry."""
-    from streamlit.testing.v1 import AppTest
-
-    from admitperf.core.registry import available
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / "experiments.py"), default_timeout=120)
-    app.run()
-    offered = set(app.multiselect[0].options)
-    assert set(available()) <= offered
-
-
-def test_experiments_page_validates_with_the_same_rules_as_the_cli() -> None:
-    """A setting that would fail at deploy time should fail in the form, in
-    milliseconds rather than ten minutes into provisioning."""
-    from streamlit.testing.v1 import AppTest
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / "experiments.py"), default_timeout=120)
-    app.run()
-    text = " ".join(m.value for m in app.markdown) + " ".join(c.value for c in app.code)
-    assert "policies" in text  # the generated YAML is shown for review
-
-
-def test_the_run_page_offers_only_engines_it_can_reach() -> None:
-    """A control that cannot work is worse than no control.
-
-    The page used to offer "Provision a GPU", which called Modal. Modal is gone
-    and bringing a cluster up is now an SSH sequence against rented machines, so
-    the option is removed rather than left to fail.
-    """
-    from streamlit.testing.v1 import AppTest
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
-    app.run()
-    # Two options only. There is no provision button: bringing a cluster up is
-    # an SSH sequence, and offering a control that cannot work is worse than
-    # offering none.
-    assert [o for o in app.radio[0].options] == [
-        "Mock engine (free, no GPU)",
-        "Already running (paste a URL)",
-    ]
-
-    app.radio[0].set_value("Already running (paste a URL)").run()
-    assert app.text_input, "an engine URL must be askable"
-
-
-def test_the_run_page_shows_the_whole_pipeline_before_starting() -> None:
-    """Including the report stage: a run that produces no artifact is half a
-    result, and a plan that hides a stage cannot be checked before it costs
-    money."""
-    from streamlit.testing.v1 import AppTest
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
-    app.run()
-    text = " ".join(m.value for m in app.markdown)
-    for stage in (
-        "Render the cluster",
-        "Run the experiment",
-        "Aggregate",
-        "Write the report",
-    ):
-        assert stage in text, f"pipeline stage {stage!r} not shown before starting"
-
-
-def test_the_plan_says_which_steps_will_actually_run() -> None:
-    """A step that will not run has to look different from one that has not run
-    yet, or the plan reads as a list of promises it is not making. Only the
-    steps that will run are numbered."""
-    from streamlit.testing.v1 import AppTest
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
-    app.run()
-    text = " ".join(m.value for m in app.markdown)
-
-    assert "steps will run" in text, "plan does not say how many steps will run"
-    assert "skipped —" in text, "a skipped step does not say why"
-    assert "will run<" in text, "a step that will run is not labelled as such"
-
-
-def test_the_run_page_does_not_claim_to_tear_anything_down() -> None:
-    """A GPU left running bills by the minute, and this page cannot stop one.
-
-    It used to offer a teardown checkbox, which was true when provisioning went
-    through Modal. Now the machines are rented outside this tool, so the page must
-    not imply it will clean up — a promise it cannot keep is worse than silence.
-    """
-    from streamlit.testing.v1 import AppTest
-
-    app = AppTest.from_file(str(DASHBOARD / "views" / "run.py"), default_timeout=120)
-    app.run()
-    app.radio[0].set_value("Already running (paste a URL)").run()
-    labels = [c.label for c in app.checkbox]
-    assert not any("Tear the deployment down" in label for label in labels), labels
-
-
-def test_the_algorithms_page_lists_every_installed_policy() -> None:
+def test_the_policies_page_lists_every_installed_policy() -> None:
     """It reads the live registry, so installing a policy makes it appear
     without anyone editing the page."""
     from streamlit.testing.v1 import AppTest
 
     from admitperf.core.registry import available
 
-    app = AppTest.from_file(str(DASHBOARD / "views" / "algorithms.py"), default_timeout=120)
+    app = AppTest.from_file(str(DASHBOARD / "views" / "policies.py"), default_timeout=120)
     app.run()
     text = " ".join(e.label for e in app.expander)
     for name in available():
@@ -341,7 +204,11 @@ def test_page_file_title_and_url_are_the_same_word() -> None:
         app_source,
         re.S,
     )
-    assert len(entries) >= 5, "expected every page to declare an explicit url_path"
+    assert len(entries) == 3, (
+        "three pages. Four were removed for rendering shapes that no longer exist: "
+        "a config builder writing the old experiment schema, a pipeline runner "
+        "duplicating `admitperf run`, and a results view reading deleted bundles."
+    )
 
     for filename, title, url in entries:
         assert filename == url, f"{filename}.py is served at /{url}"

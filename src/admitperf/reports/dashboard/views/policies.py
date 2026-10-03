@@ -60,24 +60,6 @@ NOTES: dict[str, dict[str, str]] = {
         "as accept-everything, scoring identically to the baseline while appearing "
         "to work.",
     },
-    "chronos_inspired": {
-        "one_line": "Refuses requests it can show will miss their deadline.",
-        "how": "Three checks in order: is the server oversubscribed; would this "
-        "request's predicted wait exceed its own deadline; would one more response "
-        "break the token rhythm. The rejection reason records which one fired.",
-        "fits": "Mixed traffic where requests promise different things. It is the "
-        "only policy here that reads the request rather than only the server, so "
-        "two requests arriving into identical conditions can get different answers.",
-        "fails": "It depends on a cost model of the hardware. One parameter cannot "
-        "be measured from engine telemetry, so on hardware unlike the paper's it "
-        "over-estimates cost, over-estimates load, and degenerates into a blunt "
-        "rate limiter — which is exactly the baseline the paper argues against.",
-        "source": "Marref, Tarmissi & Chaibi, *Frontiers in Computer Science* 8 "
-        "(2026). doi.org/10.3389/fcomp.2026.1873627",
-        "fidelity": "Named *inspired* because the algorithm is the paper's but the "
-        "parameters are fitted from a live engine rather than derived from a "
-        "roofline model. It runs their test; it does not reproduce their guarantee.",
-    },
 }
 
 SIGNALS = {
@@ -106,7 +88,6 @@ def render() -> None:
 |---|---|---|
 | the concurrency cap | `queue_depth` | queue depth is what moves |
 | KV memory | `kv_threshold` | cache pressure is what moves |
-| meeting per-request deadlines | `chronos_inspired` | it is the only one that reads the deadline |
 | nothing — you need a baseline | `no_admission` | it is the thing to beat |
 """
     )

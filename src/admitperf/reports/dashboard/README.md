@@ -148,7 +148,7 @@ with lowercase filenames. Two page mechanisms competing over one directory is
 not worth the convenience, and a test asserts `dashboard/pages/` does not exist.
 
 File name, sidebar title and URL path are the same word for every page:
-`experiments.py` → **Experiments** → `/experiments`. A page titled one thing
+`report.py` → **Report** → `/report`. A page titled one thing
 and filed under another is a trap for whoever reads the sidebar and then goes
 looking for the code.
 

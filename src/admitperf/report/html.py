@@ -199,3 +199,78 @@ def render_html(payload: dict[str, Any]) -> str:
 
 <footer>AdmitPerf · report schema {e(payload["schema_version"])}</footer>
 </main></body></html>"""
+
+
+INDEX_CSS = (
+    CSS
+    + """
+.arms { width:100%; border-collapse:collapse; font-size:.92rem; margin-top:.5rem }
+.arms th { text-align:left; font-size:.78rem; text-transform:uppercase;
+           letter-spacing:.07em; color:var(--dim); padding:.5rem .6rem }
+.arms td { padding:.6rem; border-top:1px solid var(--line); vertical-align:middle }
+.arms tr:hover td { background:#fafafa }
+.v { font:700 .74rem var(--mono); padding:.18rem .5rem; border-radius:4px; color:#fff }
+.bar { height:6px; border-radius:3px; background:var(--line); position:relative;
+       min-width:90px }
+.bar > i { position:absolute; left:0; top:0; bottom:0; border-radius:3px }
+a.open { font:600 .82rem var(--mono); text-decoration:none; color:#1971c2 }
+"""
+)
+
+
+def render_index(reports: list[tuple[str, dict[str, Any]]], *, title: str) -> str:
+    """One page listing every arm of an experiment, with its verdict.
+
+    The comparison is the point. Two arms differing only in which policy was
+    consulted sit on adjacent rows, and a reader can see at a glance whether either
+    run was capable of showing anything — which a conventional results table, listing
+    only outcomes, cannot.
+    """
+    e = escape
+    rows = []
+    for name, payload in reports:
+        live, sig, d = payload["liveness"], payload["signal"], payload["decisions"]
+        fg, bg = VERDICT_COLOUR.get(live["verdict"], VERDICT_COLOUR["UNKNOWN"])
+        thr = sig.get("threshold")
+        mx = sig.get("max")
+        # The bar is the signal's peak against its threshold, so an inert run is
+        # visibly short rather than merely labelled.
+        frac = 0.0 if not (thr and mx) else min(1.0, float(mx) / float(thr))
+        harness = payload.get("harness") or {}
+        failed = harness.get("scrapes_failed", 0)
+        rows.append(
+            f"<tr><td><b>{e(name)}</b></td>"
+            f'<td><span class="v" style="background:{fg}">{e(live["verdict"])}</span></td>'
+            f'<td><div class="bar"><i style="width:{frac * 100:.0f}%;background:{fg}"></i></div></td>'
+            f'<td class="n">{"" if mx is None else f"{float(mx):.3g}"}'
+            f"{'' if thr is None else f' / {float(thr):.3g}'}</td>"
+            f'<td class="n">{d["rejected"]} / {d["total"]}</td>'
+            f'<td class="n">{"" if not failed else f"{failed} scrape(s) failed"}</td>'
+            f'<td><a class="open" href="{e(name)}/report.html">open &rarr;</a></td></tr>'
+        )
+
+    worst = [n for n, p in reports if p["liveness"]["verdict"] in ("INERT", "UNKNOWN")]
+    banner = ""
+    if worst:
+        banner = (
+            f'<p class="note">{len(worst)} of {len(reports)} arm(s) could not have '
+            f"fired: {e(', '.join(worst))}. Those rows are not evidence about the "
+            "policy — the signal never reached its threshold. The usual cause is "
+            "load, not the policy: concurrency is rate x request duration, so short "
+            "requests cannot fill a cache at any arrival rate.</p>"
+        )
+
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdmitPerf — {e(title)}</title><style>{INDEX_CSS}</style></head>
+<body><main>
+<h1>AdmitPerf</h1>
+<p class="meta">{e(title)} &middot; {len(reports)} arm(s)</p>
+{banner}
+<table class="arms"><thead><tr>
+<th>Arm</th><th>Liveness</th><th>Signal vs threshold</th><th></th>
+<th>Rejected</th><th>Harness</th><th></th>
+</tr></thead><tbody>{"".join(rows)}</tbody></table>
+<footer>AdmitPerf &middot; report schema {e(reports[0][1]["schema_version"]) if reports else "-"}</footer>
+</main></body></html>"""

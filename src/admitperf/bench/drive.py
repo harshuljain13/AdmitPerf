@@ -387,4 +387,10 @@ def write_arm(
     }
     payload["expect"] = exp.expect
     (out / "report.json").write_text(json.dumps(payload, indent=2) + "\n")
+
+    # Written here rather than on demand, so the page and the data are produced
+    # together and a stale HTML cannot outlive the json it came from.
+    from admitperf.report import render_html
+
+    (out / "report.html").write_text(render_html(payload) + "\n")
     return out

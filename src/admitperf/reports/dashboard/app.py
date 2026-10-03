@@ -70,39 +70,29 @@ except AttributeError:  # pragma: no cover - altair < 5.5
 # reads the sidebar and then goes looking for the file.
 st.navigation(
     {
-        "Set Up": [
-            st.Page(
-                HERE / "views" / "experiments.py",
-                title="Experiments",
-                icon=":material/science:",
-                url_path="experiments",
-                default=True,
-            ),
-            st.Page(
-                HERE / "views" / "algorithms.py",
-                title="Algorithms",
-                icon=":material/tune:",
-                url_path="algorithms",
-            ),
-        ],
-        "Measure": [
-            st.Page(
-                HERE / "views" / "run.py", title="Run", icon=":material/play_arrow:", url_path="run"
-            ),
-            st.Page(
-                HERE / "views" / "results.py",
-                title="Results",
-                icon=":material/bar_chart:",
-                url_path="results",
-            ),
+        # Three pages, and every one of them reads something that exists.
+        #
+        # Four were removed: a config builder that wrote the old experiment schema,
+        # a pipeline runner that duplicated `admitperf run` in the shape it had
+        # before provisioning was removed, and a results view reading bundles that
+        # were deleted for being unreproducible. A page that renders stale shapes is
+        # worse than no page: it invites you to trust what it shows.
+        "Reports": [
             st.Page(
                 HERE / "views" / "report.py",
                 title="Report",
                 icon=":material/fact_check:",
                 url_path="report",
+                default=True,
             ),
         ],
         "Reference": [
+            st.Page(
+                HERE / "views" / "policies.py",
+                title="Policies",
+                icon=":material/policy:",
+                url_path="policies",
+            ),
             st.Page(
                 HERE / "views" / "terminology.py",
                 title="Terminology",

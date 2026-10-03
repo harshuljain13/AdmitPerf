@@ -559,7 +559,13 @@ def bench_report(path: str, out: str | None) -> None:
 
 @main.command()
 @click.argument("decisions", type=click.Path(exists=True, dir_okay=False))
-@click.option("--policy", "policy_name", required=True, help="policy the run used")
+@click.option(
+    "--policy",
+    "policy_name",
+    default=None,
+    help="policy the run used. Required for a decision log; a report.json already "
+    "carries its policy card.",
+)
 @click.option("--threshold", type=float, help="override the policy's default")
 @click.option("--run-id", help="defaults to the decision log's filename")
 @click.option("--cluster", help="e.g. '4x H100-80 - 2 prefill + 2 decode'")
@@ -596,7 +602,15 @@ def report(
     out: str | None,
     **facts: object,
 ) -> None:
-    """Render the AdmitPerf Report from a decision log.
+    """Render the AdmitPerf Report, from a report.json or a decision log.
+
+    \b
+      admitperf report results/kv_threshold-r1/report.json
+      admitperf report results/kv_threshold-r1/report.json --format html -o r.html
+      admitperf report decisions.jsonl --policy kv_threshold
+
+    A report.json renders directly, since it is the artifact and every format is a
+    pure function of it. A decision log is re-derived, which needs --policy.
 
     DECISIONS is JSON Lines, one object per admission decision. The signal value
     is read by the policy's own signal name, falling back to `signal_value`, so a
@@ -612,6 +626,14 @@ def report(
     rows = [json.loads(line) for line in Path(decisions).read_text().splitlines() if line.strip()]
     if not rows:
         raise click.ClickException(f"{decisions} has no decisions in it")
+
+    if not policy_name:
+        raise click.ClickException(
+            f"{decisions} is a decision log, so --policy is needed: the signal name "
+            "and threshold come from the policy, and liveness cannot be judged "
+            "without them. A report.json carries its own policy card and needs no "
+            "flag."
+        )
 
     kwargs: dict[str, object] = {}
     if threshold is not None:
@@ -773,8 +795,68 @@ def run(
             proc.terminate()
             proc.wait(timeout=10)
 
-    click.echo(f"\nreports in {out_root}/")
-    click.echo("  admitperf report-view        # or: streamlit run the dashboard")
+    from admitperf.report.html import render_index
+
+    found = sorted(out_root.glob("*/report.json"))
+    reports = [(q.parent.name, json.loads(q.read_text())) for q in found]
+    index = out_root / "index.html"
+    index.write_text(render_index(reports, title=exp.name) + "\n")
+
+    click.echo(f"\n{len(reports)} arm(s) in {out_root}/")
+    click.echo(f"\n  open {index}")
+    click.echo("\nor, for every experiment at once:")
+    click.echo("  admitperf dashboard")
+
+
+@main.command()
+@click.option("--port", type=int, default=8501, show_default=True)
+def dashboard(port: int) -> None:
+    """Open the dashboard: every experiment's reports, in a browser.
+
+    Moves to the next free port if the one asked for is taken. Streamlit's own
+    behaviour is to print "Port 8501 is not available" and exit, which is a dead end
+    when the thing holding the port is a dashboard you opened an hour ago.
+    """
+    import socket
+    import subprocess
+    import sys as _sys
+
+    def free(candidate: int) -> bool:
+        """Bind exactly as Streamlit will, or the answer is about a different socket.
+
+        Two mistakes, both of which made this probe report a held port as free:
+        SO_REUSEADDR lets a bind succeed on macOS while another process is
+        listening, and binding 127.0.0.1 says nothing about 0.0.0.0, which is what
+        Streamlit uses. The combination reported "free" for a port that was in use
+        by a dashboard opened an hour earlier.
+        """
+        with socket.socket() as s:
+            try:
+                s.bind(("0.0.0.0", candidate))  # noqa: S104 — matches Streamlit
+            except OSError:
+                return False
+        return True
+
+    chosen = next((c for c in range(port, port + 20) if free(c)), None)
+    if chosen is None:
+        raise SystemExit(f"no free port between {port} and {port + 19}")
+    if chosen != port:
+        click.echo(f"{port} is taken, using {chosen}", err=True)
+
+    app = Path(__file__).resolve().parent / "reports" / "dashboard" / "app.py"
+    raise SystemExit(
+        subprocess.call(
+            [
+                _sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(app),
+                "--server.port",
+                str(chosen),
+            ]
+        )
+    )
 
 
 if __name__ == "__main__":
