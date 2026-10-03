@@ -44,24 +44,24 @@ def cfg() -> dict[str, Any]:
 
 
 def test_shipped_config_is_deployable(cfg: dict[str, Any]) -> None:
-    validate(cfg)
+    validate(cfg, ENV)
 
 
 def test_shipped_config_uses_every_gpu_it_claims(cfg: dict[str, Any]) -> None:
     """4 GPUs declared, 4 used. A spare GPU is a topology that is not what it says."""
-    host = hosts_from(cfg)["gpu-a"]
-    assert sum(w.gpus for w in workers_from(cfg)) == host.gpu_count
+    host = next(iter(hosts_from(cfg, ENV).values()))
+    assert sum(w.gpus for w in workers_from(cfg, ENV)) == host.gpu_count
 
 
 def test_disaggregated_gives_two_pools_on_distinct_ports(cfg: dict[str, Any]) -> None:
-    workers = workers_from(cfg)
+    workers = workers_from(cfg, ENV)
     assert {w.pool for w in workers} == {"prefill", "decode"}
     assert len({w.host_port for w in workers}) == len(workers)
 
 
 def test_manifests_request_whole_gpus_and_never_a_slice(cfg: dict[str, Any]) -> None:
     """Two slices of one card would masquerade as TP=2 across two cards."""
-    text = render(cfg)
+    text = render(cfg, env=ENV)
     assert "nvidia.com/gpu" in text
     assert "gpumem" not in text
     assert "gpucores" not in text
@@ -69,7 +69,7 @@ def test_manifests_request_whole_gpus_and_never_a_slice(cfg: dict[str, Any]) -> 
 
 def test_every_worker_has_a_readiness_probe(cfg: dict[str, Any]) -> None:
     """READY 1/1 lies while torch.compile captures CUDA-graph buckets."""
-    docs = [d for d in yaml.safe_load_all(render(cfg)) if d and d["kind"] == "Deployment"]
+    docs = [d for d in yaml.safe_load_all(render(cfg, env=ENV)) if d and d["kind"] == "Deployment"]
     assert docs
     for d in docs:
         container = d["spec"]["template"]["spec"]["containers"][0]
@@ -78,7 +78,7 @@ def test_every_worker_has_a_readiness_probe(cfg: dict[str, Any]) -> None:
 
 def test_engine_flags_appear_once_per_worker(cfg: dict[str, Any]) -> None:
     """The lab hardcoded model and TP twice. That is what this prevents."""
-    for w in workers_from(cfg):
+    for w in workers_from(cfg, ENV):
         from infra.render import engine_args
 
         args = engine_args(cfg, w)
@@ -90,7 +90,7 @@ def test_engine_flags_appear_once_per_worker(cfg: dict[str, Any]) -> None:
 def test_prefix_caching_reaches_the_engine(cfg: dict[str, Any]) -> None:
     from infra.render import engine_args
 
-    w = workers_from(cfg)[0]
+    w = workers_from(cfg, ENV)[0]
     assert "--enable-prefix-caching" in engine_args(cfg, w)
 
     cfg["engine"]["enable_prefix_caching"] = False
@@ -99,7 +99,8 @@ def test_prefix_caching_reaches_the_engine(cfg: dict[str, Any]) -> None:
 
 def test_plan_names_the_host_the_mode_and_the_fit(cfg: dict[str, Any]) -> None:
     out = plan(cfg, ENV)
-    assert "gpu-a" in out
+    # gpu-1, because the shipped config derives names from the inventory order.
+    assert "gpu-1" in out
     assert "disaggregated" in out
     assert "GB/card" in out
 
@@ -109,7 +110,27 @@ def test_plan_names_the_host_the_mode_and_the_fit(cfg: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------
 
 
-ENV = {"LAMBDA_HOST_GPU_A": "ubuntu@10.0.0.1", "LAMBDA_HOST_GPU_B": "ubuntu@10.0.0.2"}
+ENV = {
+    "LAMBDA_HOST_GPU_A": "ubuntu@10.0.0.1",
+    "LAMBDA_HOST_GPU_B": "ubuntu@10.0.0.2",
+    "LAMBDA_HOSTS": "ubuntu@10.0.0.1,ubuntu@10.0.0.2",
+}
+#: A single-host inventory, for the tests that only need the shipped shape.
+ENV_ONE = {"LAMBDA_HOSTS": "ubuntu@10.0.0.1"}
+
+
+def named(
+    cfg: dict[str, Any], *names: str, kind: str = "A100", cards: int = 4, hbm: float = 40
+) -> dict[str, Any]:
+    """Switch the config to the EXPLICIT list form with these host names.
+
+    The address-resolution tests are about named hosts and the LAMBDA fallback, so
+    they have to declare named hosts. The shipped config uses the inventory form.
+    """
+    cfg["hosts"] = [
+        {"name": n, "gpu": {"kind": kind, "count": cards, "hbm_gb": hbm}} for n in names
+    ]
+    return cfg
 
 
 def pin(
@@ -129,7 +150,11 @@ def pin(
     numbers they had inherited rather than numbers they had declared. A test that
     moves with the config is measuring today's deployment, not the code.
     """
-    cfg["hosts"][0]["gpu"].update(kind=kind, count=cards, hbm_gb=hbm)
+    # Always the EXPLICIT list form. A test asserting a specific shape should
+    # declare that shape, not inherit whatever the shipped config happens to use —
+    # the shipped one is an inventory now, and a test that follows it is testing
+    # today's deployment rather than the code.
+    cfg["hosts"] = [{"name": "gpu-a", "gpu": {"kind": kind, "count": cards, "hbm_gb": hbm}}]
     if model:
         cfg["model"]["id"] = model
     if quant != "__keep__":
@@ -152,7 +177,7 @@ def test_aggregated_env_points_both_lists_at_one_pool(cfg: dict[str, Any]) -> No
     """pools.py treats equal lists as a single set of engines doing both phases."""
     cfg["topology"] = {
         "mode": "aggregated",
-        "pools": {"engine": {"replicas": 2, "tensor_parallel_size": 2, "host": "gpu-a"}},
+        "pools": {"engine": {"replicas": 2, "tensor_parallel_size": 2}},
     }
     env = gateway_env(cfg, ENV)
     assert env["LAB_TOPOLOGY"] == "aggregated"
@@ -169,20 +194,20 @@ def test_aggregated_env_points_both_lists_at_one_pool(cfg: dict[str, Any]) -> No
 def test_pools_must_match_the_mode(cfg: dict[str, Any]) -> None:
     cfg["topology"]["mode"] = "aggregated"  # still has prefill/decode pools
     with pytest.raises(ConfigError, match="needs pools"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_unknown_mode_is_refused(cfg: dict[str, Any]) -> None:
     cfg["topology"]["mode"] = "hybrid"
     with pytest.raises(ConfigError, match="topology.mode must be one of"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_disaggregated_without_a_transport_is_refused(cfg: dict[str, Any]) -> None:
     """Decode engines with no KV to consume."""
     cfg["topology"].pop("kv_transport")
     with pytest.raises(ConfigError, match="needs topology.kv_transport"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_aggregated_with_a_transport_is_refused(cfg: dict[str, Any]) -> None:
@@ -193,36 +218,36 @@ def test_aggregated_with_a_transport_is_refused(cfg: dict[str, Any]) -> None:
         "pools": {"engine": {"replicas": 2, "tensor_parallel_size": 2, "host": "gpu-a"}},
     }
     with pytest.raises(ConfigError, match="no hop"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_slicing_is_refused(cfg: dict[str, Any]) -> None:
     cfg["model"]["slicing"] = True
     with pytest.raises(ConfigError, match="slice"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_more_gpus_than_the_host_has_is_refused(cfg: dict[str, Any]) -> None:
-    cfg["hosts"][0]["gpu"]["count"] = 2  # pools still need 4
+    pin(cfg, cards=2, kind="A100", hbm=40)  # pools still need 4
     with pytest.raises(ConfigError, match="has 2 GPUs but its pools need 4"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_a_tp_group_may_not_exceed_one_host(cfg: dict[str, Any]) -> None:
     """TP all-reduces every layer. Across Ethernet it is unusable, not merely slow."""
-    cfg["hosts"][0]["gpu"]["count"] = 4
+    pin(cfg, cards=4, kind="A100", hbm=40)
     cfg["topology"]["pools"] = {
         "prefill": {"replicas": 1, "tensor_parallel_size": 8, "host": "gpu-a"},
         "decode": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
     }
     with pytest.raises(ConfigError, match="cannot span hosts|pools need"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_a_pool_on_an_undeclared_host_is_refused(cfg: dict[str, Any]) -> None:
     cfg["topology"]["pools"]["decode"]["host"] = "gpu-z"
     with pytest.raises(ConfigError, match="not declared"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_weights_that_do_not_fit_are_refused_before_the_download(
@@ -240,13 +265,13 @@ def test_weights_that_do_not_fit_are_refused_before_the_download(
     """
     pin(cfg, model="Qwen/Qwen2.5-72B-Instruct", quant=None, tp=2, replicas=1)
     with pytest.raises(ConfigError, match="does not fit"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_fp8_does_fit_the_same_topology(cfg: dict[str, Any]) -> None:
     """The counterpart: the check is not simply refusing everything at 72B."""
     pin(cfg, model="Qwen/Qwen2.5-72B-Instruct", quant="fp8", tp=2, replicas=1)
-    validate(cfg)
+    validate(cfg, ENV)
 
 
 def test_the_shipped_shape_gives_a_hop_and_a_placement_decision(
@@ -258,7 +283,7 @@ def test_the_shipped_shape_gives_a_hop_and_a_placement_decision(
     somewhere to choose. At TP=2 there would be one replica per pool and
     placement would have a single destination, which is not a decision.
     """
-    validate(cfg)
+    validate(cfg, ENV)
     assert cfg["topology"]["mode"] == "disaggregated"
     assert cfg["topology"]["kv_transport"]
     for pool in ("prefill", "decode"):
@@ -269,31 +294,34 @@ def test_32b_fp8_fits_one_h100_with_room_to_serve(cfg: dict[str, Any]) -> None:
     """~32 GB of weights against ~72 GB usable leaves ~40 GB of KV, about five
     sequences at 32k — scarce enough that admission bites, which is the point."""
     pin(cfg, quant="fp8")
-    validate(cfg)
+    validate(cfg, ENV)
 
 
 def test_overflow_on_429_is_refused(cfg: dict[str, Any]) -> None:
     cfg["overflow"]["on"] = [429, 503]
     with pytest.raises(ConfigError, match="overspend"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_no_hosts_is_refused(cfg: dict[str, Any]) -> None:
-    cfg["hosts"] = []
+    cfg["hosts"] = []  # neither a list nor an inventory
     with pytest.raises(ConfigError, match="no hosts"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_duplicate_host_names_are_refused(cfg: dict[str, Any]) -> None:
-    cfg["hosts"].append(copy.deepcopy(cfg["hosts"][0]))
+    cfg["hosts"] = [
+        {"name": "gpu-a", "gpu": {"kind": "A100", "count": 4, "hbm_gb": 40}},
+        {"name": "gpu-a", "gpu": {"kind": "A100", "count": 4, "hbm_gb": 40}},
+    ]
     with pytest.raises(ConfigError, match="duplicate host"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_bad_memory_utilization_is_refused(cfg: dict[str, Any]) -> None:
     cfg["engine"]["gpu_memory_utilization"] = 1.4
     with pytest.raises(ConfigError, match="must be in"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 # --------------------------------------------------------------------------
@@ -302,15 +330,21 @@ def test_bad_memory_utilization_is_refused(cfg: dict[str, Any]) -> None:
 
 
 def _two_hosts(cfg: dict[str, Any]) -> dict[str, Any]:
-    cfg["hosts"].append({"name": "gpu-b", "gpu": {"kind": "H100", "count": 4, "hbm_gb": 80}})
+    """Two NAMED hosts, one pool pinned to each.
+
+    The explicit list form, because these tests are about named hosts and the
+    LAMBDA fallback. The shipped config derives its hosts from an inventory.
+    """
+    named(cfg, "gpu-a", "gpu-b")
+    cfg["topology"]["pools"]["prefill"]["host"] = "gpu-a"
     cfg["topology"]["pools"]["decode"]["host"] = "gpu-b"
     return cfg
 
 
 def test_pools_split_across_hosts(cfg: dict[str, Any]) -> None:
     cfg = _two_hosts(cfg)
-    validate(cfg)
-    by_host = {w.host.name for w in workers_from(cfg)}
+    validate(cfg, ENV)
+    by_host = {w.host.name for w in workers_from(cfg, ENV)}
     assert by_host == {"gpu-a", "gpu-b"}
 
 
@@ -324,7 +358,7 @@ def test_ports_restart_per_host_so_they_do_not_collide(cfg: dict[str, Any]) -> N
     """
     cfg = _two_hosts(cfg)
     ports: dict[str, list[int]] = {}
-    for w in workers_from(cfg):
+    for w in workers_from(cfg, ENV):
         ports.setdefault(w.host.name, []).append(w.host_port)
     for host, got in ports.items():
         assert got == list(range(8000, 8000 + len(got))), host
@@ -333,15 +367,20 @@ def test_ports_restart_per_host_so_they_do_not_collide(cfg: dict[str, Any]) -> N
 
 def test_render_can_target_one_host(cfg: dict[str, Any]) -> None:
     cfg = _two_hosts(cfg)
-    text = render(cfg, host="gpu-b")
+    text = render(cfg, host="gpu-b", env=ENV)
     assert "vllm-decode-0" in text
     assert "vllm-prefill-0" not in text
 
 
 def test_render_refuses_a_host_with_no_pools(cfg: dict[str, Any]) -> None:
-    cfg["hosts"].append({"name": "gpu-idle", "gpu": {"count": 4, "hbm_gb": 80}})
+    cfg["hosts"] = [
+        {"name": "gpu-a", "gpu": {"kind": "A100", "count": 4, "hbm_gb": 40}},
+        {"name": "gpu-idle", "gpu": {"kind": "A100", "count": 4, "hbm_gb": 40}},
+    ]
+    cfg["topology"]["pools"]["prefill"]["host"] = "gpu-a"
+    cfg["topology"]["pools"]["decode"]["host"] = "gpu-a"
     with pytest.raises(ConfigError, match="no pools are placed"):
-        render(cfg, host="gpu-idle")
+        render(cfg, host="gpu-idle", env=ENV)
 
 
 def test_urls_span_hosts(cfg: dict[str, Any]) -> None:
@@ -393,24 +432,35 @@ def test_config_declares_no_address_and_no_key(cfg: dict[str, Any]) -> None:
 def test_an_address_in_the_config_is_refused(cfg: dict[str, Any]) -> None:
     """Refused rather than ignored: ignoring it means someone commits a key path
     and believes it is being used."""
+    named(cfg, "gpu-a")
     cfg["hosts"][0]["ssh"] = "ubuntu@1.2.3.4"
     with pytest.raises(ConfigError, match="do not belong"):
-        hosts_from(cfg)
+        hosts_from(cfg, ENV)
 
 
 def test_a_key_in_the_config_is_refused(cfg: dict[str, Any]) -> None:
+    named(cfg, "gpu-a")
     cfg["hosts"][0]["ssh_key"] = "~/.ssh/id_ed25519"
     with pytest.raises(ConfigError, match="do not belong"):
-        hosts_from(cfg)
+        hosts_from(cfg, ENV)
 
 
 def test_unset_address_names_the_variable_to_set(cfg: dict[str, Any]) -> None:
+    named(cfg, "gpu-a")
     with pytest.raises(ConfigError, match="LAMBDA_HOST_GPU_A"):
+        gateway_env(cfg, {})
+
+
+def test_an_unset_inventory_names_the_list_and_the_slot(cfg: dict[str, Any]) -> None:
+    """The shipped form. The message has to say which entry is missing, not just
+    that something is."""
+    with pytest.raises(ConfigError, match=r"LAMBDA_HOSTS\[0\]"):
         gateway_env(cfg, {})
 
 
 def test_lambda_works_for_a_single_host(cfg: dict[str, Any]) -> None:
     """The lab's existing variable keeps working when there is only one box."""
+    named(cfg, "gpu-a")
     env = gateway_env(cfg, {"LAMBDA": "ubuntu@10.1.1.5"})
     assert "10.1.1.5" in env["PREFILL_URLS"]
 
@@ -455,7 +505,7 @@ def test_the_overflow_api_key_is_never_emitted(cfg: dict[str, Any]) -> None:
     rendered environment, a manifest, or the plan."""
     assert "OVERFLOW_API_KEY" not in gateway_env(cfg, ENV)
     assert "OVERFLOW_API_KEY" not in plan(cfg, ENV)
-    assert "OVERFLOW_API_KEY" not in render(cfg)
+    assert "OVERFLOW_API_KEY" not in render(cfg, env=ENV)
 
 
 def test_the_config_file_assigns_no_secret() -> None:
@@ -493,31 +543,30 @@ def test_fp8_on_an_a100_is_refused(cfg: dict[str, Any]) -> None:
     """A100 is sm80. fp8 tensor cores arrived with Hopper and Ada, so an fp8
     checkpoint fails after the weights download — the most expensive way to
     learn it."""
-    cfg["hosts"][0]["gpu"]["kind"] = "A100"
+    cfg["hosts"] = [{"name": "gpu-a", "gpu": {"kind": "A100", "count": 4, "hbm_gb": 40}}]
     cfg["model"]["quantization"] = "fp8"
     with pytest.raises(ConfigError, match="compute capability"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_fp8_on_an_h100_is_allowed(cfg: dict[str, Any]) -> None:
-    cfg["hosts"][0]["gpu"]["kind"] = "H100"
-    cfg["hosts"][0]["gpu"]["hbm_gb"] = 80
+    cfg["hosts"] = [{"name": "gpu-a", "gpu": {"kind": "H100", "count": 4, "hbm_gb": 80}}]
     cfg["model"]["quantization"] = "fp8"
-    validate(cfg)
+    validate(cfg, ENV)
 
 
 def test_int8_on_an_a100_is_allowed(cfg: dict[str, Any]) -> None:
-    cfg["hosts"][0]["gpu"]["kind"] = "A100"
+    cfg["hosts"] = [{"name": "gpu-a", "gpu": {"kind": "A100", "count": 4, "hbm_gb": 40}}]
     cfg["model"]["quantization"] = "int8"
-    validate(cfg)
+    validate(cfg, ENV)
 
 
 def test_an_unknown_card_does_not_block_a_quantization(cfg: dict[str, Any]) -> None:
     """Refusing what we cannot verify would make the config unusable on new
     hardware. The fit check still applies."""
-    cfg["hosts"][0]["gpu"]["kind"] = "B200"
+    cfg["hosts"] = [{"name": "gpu-a", "gpu": {"kind": "B200", "count": 4, "hbm_gb": 80}}]
     cfg["model"]["quantization"] = "fp8"
-    validate(cfg)
+    validate(cfg, ENV)
 
 
 def test_kv_bytes_per_token_follows_the_attention_shape(cfg: dict[str, Any]) -> None:
@@ -582,10 +631,133 @@ def test_a_config_that_holds_fewer_than_one_sequence_is_refused(
         "dtype_bytes": 2,
     }
     with pytest.raises(ConfigError, match="Fewer than one"):
-        validate(cfg)
+        validate(cfg, ENV)
 
 
 def test_the_same_shape_passes_once_it_can_hold_a_sequence(cfg: dict[str, Any]) -> None:
     """int4 on the same two cards leaves 20 GB and holds ~2 sequences."""
     pin(cfg, kind="A100", cards=2, hbm=40, quant="awq", tp=1, replicas=1)
-    validate(cfg)
+    validate(cfg, ENV)
+
+
+# --------------------------------------------------------------------------
+# The inventory form: adding a host is one token in .env
+# --------------------------------------------------------------------------
+
+
+def _inv(n: int) -> dict[str, str]:
+    return {"LAMBDA_HOSTS": ",".join(f"ubuntu@10.0.0.{i + 1}" for i in range(n))}
+
+
+@pytest.mark.parametrize("n", [1, 2, 5, 17])
+def test_host_count_follows_the_inventory_length(cfg: dict[str, Any], n: int) -> None:
+    """The whole point. Five hosts tomorrow is one comma-separated edit, with no
+    change to the committed config at all."""
+    hosts = hosts_from(cfg, _inv(n))
+    assert len(hosts) == n
+    assert list(hosts) == [f"gpu-{i + 1}" for i in range(n)]
+
+
+def test_each_derived_host_gets_its_own_address(cfg: dict[str, Any]) -> None:
+    hosts = hosts_from(cfg, _inv(3))
+    env = _inv(3)
+    got = [h.address(env) for h in hosts.values()]
+    assert got == ["ubuntu@10.0.0.1", "ubuntu@10.0.0.2", "ubuntu@10.0.0.3"]
+
+
+def test_names_follow_list_order_not_sorted_order(cfg: dict[str, Any]) -> None:
+    """Sorting would silently re-map names when a box is inserted, and a pool
+    pinned to gpu-2 would then land on a different machine."""
+    env = {"LAMBDA_HOSTS": "ubuntu@10.0.0.9,ubuntu@10.0.0.2"}
+    hosts = hosts_from(cfg, env)
+    assert hosts["gpu-1"].address(env) == "ubuntu@10.0.0.9"
+    assert hosts["gpu-2"].address(env) == "ubuntu@10.0.0.2"
+
+
+def test_a_per_host_override_beats_the_inventory(cfg: dict[str, Any]) -> None:
+    """One odd box can be pinned without abandoning the list form for the rest."""
+    env = _inv(2) | {"LAMBDA_HOST_GPU_2": "ubuntu@192.168.1.7"}
+    hosts = hosts_from(cfg, env)
+    assert hosts["gpu-1"].address(env) == "ubuntu@10.0.0.1"
+    assert hosts["gpu-2"].address(env) == "ubuntu@192.168.1.7"
+
+
+def test_an_empty_inventory_still_plans(cfg: dict[str, Any]) -> None:
+    """Planning a topology must not require having rented anything."""
+    assert len(hosts_from(cfg, {})) == 1
+    assert "unset" in plan(cfg, {})
+
+
+def test_a_custom_prefix_is_honoured(cfg: dict[str, Any]) -> None:
+    cfg["hosts"]["prefix"] = "box"
+    assert list(hosts_from(cfg, _inv(2))) == ["box-1", "box-2"]
+
+
+# --------------------------------------------------------------------------
+# Automatic placement
+# --------------------------------------------------------------------------
+
+
+def test_spare_hosts_are_reported_as_idle(cfg: dict[str, Any]) -> None:
+    """Adding a host does not silently add workers. Capacity that appeared without
+    anyone asking would change what a run measured."""
+    out = plan(cfg, _inv(2))
+    assert "using 0/4" in out
+    assert "no pools placed here" in out
+
+
+def test_replicas_spread_across_hosts(cfg: dict[str, Any]) -> None:
+    """Placement is PER REPLICA, not per pool. A replica is an independent server,
+    so six of them may use two four-GPU boxes. Placing per pool refused that, and
+    it is a real topology."""
+    cfg["topology"]["pools"]["prefill"]["replicas"] = 6
+    cfg["topology"]["pools"]["decode"]["replicas"] = 2
+    by_host: dict[str, list[str]] = {}
+    for w in workers_from(cfg, _inv(2)):
+        by_host.setdefault(w.host.name, []).append(w.name)
+    assert len(by_host) == 2
+    assert sum(len(v) for v in by_host.values()) == 8
+
+
+def test_placement_is_deterministic(cfg: dict[str, Any]) -> None:
+    """Two renders of the same config and inventory must assign identically, or a
+    rerun measures a different deployment while claiming to be a repeat."""
+    env = _inv(3)
+    first = [(w.name, w.host.name, w.host_port) for w in workers_from(cfg, env)]
+    second = [(w.name, w.host.name, w.host_port) for w in workers_from(cfg, env)]
+    assert first == second
+
+
+def test_a_pinned_pool_stays_where_it_is_pinned(cfg: dict[str, Any]) -> None:
+    cfg["topology"]["pools"]["decode"]["host"] = "gpu-2"
+    placed = {
+        w.pool: {x.host.name for x in workers_from(cfg, _inv(2)) if x.pool == w.pool}
+        for w in workers_from(cfg, _inv(2))
+    }
+    assert placed["decode"] == {"gpu-2"}
+
+
+def test_placement_works_around_a_pinned_pool(cfg: dict[str, Any]) -> None:
+    """The pinned pool claims its GPUs first, so an unpinned pool is not handed
+    cards the pinned one is about to need."""
+    cfg["topology"]["pools"]["prefill"]["replicas"] = 4
+    cfg["topology"]["pools"]["prefill"]["host"] = "gpu-1"
+    cfg["topology"]["pools"]["decode"]["replicas"] = 4
+    hosts = {w.host.name for w in workers_from(cfg, _inv(2)) if w.pool == "decode"}
+    assert hosts == {"gpu-2"}
+
+
+def test_too_few_gpus_for_an_unpinned_pool_is_refused(cfg: dict[str, Any]) -> None:
+    cfg["topology"]["pools"]["prefill"]["replicas"] = 9
+    with pytest.raises(ConfigError, match="no host has"):
+        workers_from(cfg, _inv(2))
+
+
+def test_the_plan_shows_which_host_each_worker_landed_on(cfg: dict[str, Any]) -> None:
+    """An automatic assignment that is not printed is an assignment nobody can
+    check against the run it produced."""
+    out = plan(cfg, _inv(2))
+    for line in out.splitlines():
+        if "vllm-" in line:
+            assert line.startswith("    ")
+    assert "gpu-1" in out and "gpu-2" in out

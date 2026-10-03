@@ -3,15 +3,23 @@
 #
 # No addresses and no secrets here — this file is committed. They come from .env.
 
+# Addresses come from one list in .env, so adding a box is one token:
+#   LAMBDA_HOSTS=ubuntu@10.0.0.1,ubuntu@10.0.0.2
+# Names are derived in list order: gpu-1, gpu-2, ...
 hosts:
-  - name: gpu-a            # address: LAMBDA_HOST_GPU_A in .env (or LAMBDA)
-    gpu:
-      kind: A100
-      count: 4
-      hbm_gb: 40
+  from_env: LAMBDA_HOSTS
+  prefix: gpu
+  gpu:
+    kind: A100
+    count: 4
+    hbm_gb: 40
 
-  # - name: gpu-b
-  #   gpu: {kind: H100, count: 4, hbm_gb: 80}
+# Heterogeneous fleet? List them instead, each with its own shape:
+# hosts:
+#   - name: big
+#     gpu: {kind: A100, count: 4, hbm_gb: 40}
+#   - name: small
+#     gpu: {kind: A10, count: 1, hbm_gb: 24}
 
 
 model:
@@ -55,17 +63,16 @@ topology:
       replicas: 2
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
-      host: gpu-a
+      # host: gpu-2   # pin to a box; omitted means the renderer places it
 
     decode:
       replicas: 2
       tensor_parallel_size: 1
       pipeline_parallel_size: 1
-      host: gpu-a
 
   # aggregated instead:
   # pools:
-  #   engine: {replicas: 2, tensor_parallel_size: 2, host: gpu-a}
+  #   engine: {replicas: 2, tensor_parallel_size: 2}
 
 
 placement:

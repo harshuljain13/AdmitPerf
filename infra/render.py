@@ -94,6 +94,10 @@ class Host:
     gpu_kind: str
     gpu_count: int
     hbm_gb: float
+    #: Set when this host came from an inventory variable rather than a named
+    #: entry. Its address is then the Nth item of that list.
+    inventory_var: str | None = None
+    inventory_index: int = 0
 
     @property
     def env_suffix(self) -> str:
@@ -106,9 +110,16 @@ class Host:
         is ambiguous, and silently applying it to both would point every URL at
         one machine while the plan claimed two.
         """
+        # A per-host override beats the inventory, so one odd box can be pinned
+        # without abandoning the list form for the other four.
         specific = env.get(f"LAMBDA_HOST_{self.env_suffix}", "").strip()
         if specific:
             return specific
+        if self.inventory_var:
+            items = [a.strip() for a in env.get(self.inventory_var, "").split(",") if a.strip()]
+            if self.inventory_index < len(items):
+                return items[self.inventory_index]
+            return ""
         return env.get("LAMBDA", "").strip() if sole else ""
 
     def key(self, env: Mapping[str, str]) -> str:
@@ -118,6 +129,8 @@ class Host:
         )
 
     def env_var(self) -> str:
+        if self.inventory_var:
+            return f"{self.inventory_var}[{self.inventory_index}]"
         return f"LAMBDA_HOST_{self.env_suffix}"
 
 
@@ -189,8 +202,58 @@ def load(path: Path) -> dict[str, Any]:
     return raw
 
 
-def hosts_from(cfg: dict[str, Any]) -> dict[str, Host]:
+def hosts_from(
+    cfg: dict[str, Any], env: Mapping[str, str] | None = None
+) -> dict[str, Host]:
+    """The machines, either listed explicitly or derived from an inventory.
+
+    Two forms. The list form names every host and suits a heterogeneous fleet.
+    The inventory form says "however many addresses are in this variable, all this
+    shape", which makes adding a fifth box a one-token edit to .env:
+
+        hosts:
+          from_env: LAMBDA_HOSTS
+          prefix: gpu
+          gpu: {kind: A100, count: 4, hbm_gb: 40}
+
+    Names are derived as gpu-1..gpu-N in the order the addresses appear, so a host
+    keeps its identity as long as the list order does. Sorting the list would
+    silently re-map names when a box is inserted, and a manifest pinned to gpu-2
+    would then land somewhere else.
+    """
     raw = cfg.get("hosts") or []
+
+    if isinstance(raw, dict) and raw.get("from_env"):
+        env = load_dotenv() if env is None else env
+        var = str(raw["from_env"])
+        addresses = [a.strip() for a in env.get(var, "").split(",") if a.strip()]
+        shape = raw.get("gpu") or {}
+        prefix = str(raw.get("prefix", "gpu"))
+        if not addresses:
+            # One host so `--plan` still works before anything is rented. The
+            # address is resolved later and refuses by name if still unset.
+            return {
+                f"{prefix}-1": Host(
+                    name=f"{prefix}-1",
+                    gpu_kind=str(shape.get("kind", "unknown")),
+                    gpu_count=int(shape.get("count", 0)),
+                    hbm_gb=float(shape.get("hbm_gb", 0)),
+                    inventory_var=var,
+                    inventory_index=0,
+                )
+            }
+        return {
+            f"{prefix}-{i + 1}": Host(
+                name=f"{prefix}-{i + 1}",
+                gpu_kind=str(shape.get("kind", "unknown")),
+                gpu_count=int(shape.get("count", 0)),
+                hbm_gb=float(shape.get("hbm_gb", 0)),
+                inventory_var=var,
+                inventory_index=i,
+            )
+            for i in range(len(addresses))
+        }
+
     if not raw:
         raise ConfigError("no hosts declared. At least one is required.")
     out: dict[str, Host] = {}
@@ -215,14 +278,46 @@ def hosts_from(cfg: dict[str, Any]) -> dict[str, Host]:
     return out
 
 
-def workers_from(cfg: dict[str, Any]) -> list[Worker]:
-    """Expand pools into one Worker per replica, numbered per host."""
-    hosts = hosts_from(cfg)
+def workers_from(
+    cfg: dict[str, Any], env: Mapping[str, str] | None = None
+) -> list[Worker]:
+    """Expand pools into one Worker per replica, numbered per host.
+
+    A pool naming a `host` is pinned there. A pool without one is PLACED, by
+    filling hosts in declaration order until each is full. The assignment is
+    deterministic given the same config and the same inventory order, and `--plan`
+    prints it — an assignment that moved silently when .env changed would mean a
+    rerun measured a different deployment while claiming to be a repeat.
+    """
+    hosts = hosts_from(cfg, env)
     topo = cfg["topology"]
     model = cfg["model"]
     pools = topo.get("pools") or {}
     per_host_index: dict[str, int] = dict.fromkeys(hosts, 0)
+    free: dict[str, int] = {n: h.gpu_count for n, h in hosts.items()}
     out: list[Worker] = []
+
+    # Pinned pools claim their GPUs first, so placement works around them rather
+    # than handing out cards a pinned pool is going to need.
+    for spec in (topo.get("pools") or {}).values():
+        pinned_at = spec.get("host")
+        if pinned_at in free:
+            need = int(spec.get("replicas", 1)) * int(
+                spec.get("tensor_parallel_size", 1)
+            ) * int(spec.get("pipeline_parallel_size", 1))
+            free[pinned_at] -= need
+
+    def place(need: int) -> str:
+        """First host in declaration order with room. Not least-loaded: stable
+        beats balanced here, because a stable mapping is what makes two runs
+        comparable."""
+        for name, left in free.items():
+            if left >= need:
+                return name
+        raise ConfigError(
+            f"no host has {need} free GPU(s) for an unpinned pool. "
+            f"Remaining: {', '.join(f'{n}:{v}' for n, v in free.items())}"
+        )
 
     # Iterate in the mode's declared pool order so ports and URL lists are
     # stable across renders. Dict order would depend on how the YAML was typed.
@@ -230,15 +325,31 @@ def workers_from(cfg: dict[str, Any]) -> list[Worker]:
         spec = pools.get(pool_name)
         if spec is None:
             continue
-        host_name = str(spec.get("host", ""))
-        if host_name not in hosts:
+        declared = str(spec.get("host", "") or "")
+        if declared and declared != "auto" and declared not in hosts:
             raise ConfigError(
-                f"pool {pool_name!r} names host {host_name!r}, which is not declared. "
-                f"Known hosts: {', '.join(sorted(hosts)) or 'none'}"
+                f"pool {pool_name!r} names host {declared!r}, which is not "
+                f"declared. Known hosts: {', '.join(hosts) or 'none'}"
             )
-        host = hosts[host_name]
+        pinned = declared if declared and declared != "auto" else None
+        tp = int(spec.get("tensor_parallel_size", 1))
+        pp = int(spec.get("pipeline_parallel_size", 1))
+        per = tp * pp
         m = spec.get("model") or {}
+
         for replica in range(int(spec.get("replicas", 1))):
+            # Placed PER REPLICA, not per pool. A replica is an independent
+            # server, so two replicas of one pool may sit on different boxes —
+            # only a tensor-parallel group is forbidden from spanning hosts,
+            # because it all-reduces every layer. Placing per pool meant six
+            # replicas could not use two four-GPU hosts, which is a real
+            # topology and was refused for no reason.
+            if pinned:
+                host_name = pinned
+            else:
+                host_name = place(per)
+                free[host_name] -= per
+            host = hosts[host_name]
             out.append(
                 Worker(
                     pool=pool_name,
@@ -249,8 +360,8 @@ def workers_from(cfg: dict[str, Any]) -> list[Worker]:
                     served_name=m.get("served_name", model.get("served_name", "lab")),
                     capability=m.get("capability", model.get("capability", "text")),
                     quantization=m.get("quantization", model.get("quantization")),
-                    tp=int(spec.get("tensor_parallel_size", 1)),
-                    pp=int(spec.get("pipeline_parallel_size", 1)),
+                    tp=tp,
+                    pp=pp,
                 )
             )
             per_host_index[host_name] += 1
@@ -310,8 +421,12 @@ def concurrency_estimate(cfg: dict[str, Any], kv_gb_total: float) -> float | Non
     return kv_gb_total * 1e9 / per_seq
 
 
-def validate(cfg: dict[str, Any]) -> None:
-    """Refuse what would otherwise fail ten minutes into a deploy."""
+def validate(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> None:
+    """Refuse what would otherwise fail ten minutes into a deploy.
+
+    Takes `env` because the host set can come from an inventory variable, and a
+    check whose result depends on the machine it runs on is not a check.
+    """
     topo = cfg["topology"]
     mode = str(topo.get("mode", ""))
     if mode not in POOLS_FOR_MODE:
@@ -362,13 +477,13 @@ def validate(cfg: dict[str, Any]) -> None:
     if not 0.0 < util <= 1.0:
         raise ConfigError(f"gpu_memory_utilization must be in (0, 1], got {util}")
 
-    workers = workers_from(cfg)
+    workers = workers_from(cfg, env)
     if not workers:
         raise ConfigError("the topology expands to zero workers")
 
     # GPUs are accounted PER HOST. A global count would happily approve two
     # workers needing 4 GPUs spread over two 2-GPU boxes, which cannot run.
-    for host_name, host in hosts_from(cfg).items():
+    for host_name, host in hosts_from(cfg, env).items():
         mine = [w for w in workers if w.host.name == host_name]
         if not mine:
             continue
@@ -601,10 +716,12 @@ class _NoAliases(yaml.SafeDumper):
         return True
 
 
-def render(cfg: dict[str, Any], host: str | None = None) -> str:
+def render(
+    cfg: dict[str, Any], host: str | None = None, env: Mapping[str, str] | None = None
+) -> str:
     """Manifests for one host, or for all of them when host is None."""
-    validate(cfg)
-    workers = [w for w in workers_from(cfg) if host is None or w.host.name == host]
+    validate(cfg, env)
+    workers = [w for w in workers_from(cfg, env) if host is None or w.host.name == host]
     if host is not None and not workers:
         raise ConfigError(f"no pools are placed on host {host!r}")
     docs: list[dict[str, Any]] = []
@@ -637,12 +754,12 @@ def gateway_env(
     block and it stays in .env; everything else is emitted from the config so it
     cannot be typed twice and drift.
     """
-    validate(cfg)
     env = load_dotenv() if env is None else dict(env)
+    validate(cfg, env)
     topo = cfg["topology"]
     mode, split = str(topo["mode"]), str(topo.get("split", "phase"))
-    workers = workers_from(cfg)
-    hosts = hosts_from(cfg)
+    workers = workers_from(cfg, env)
+    hosts = hosts_from(cfg, env)
     sole = len(hosts) == 1
 
     addr: dict[str, str] = {}
@@ -698,8 +815,9 @@ def plan(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> str:
     Takes `env` explicitly so a caller — a test especially — is never at the mercy
     of whether a .env happens to exist on the machine running it.
     """
-    validate(cfg)
-    hosts, workers = hosts_from(cfg), workers_from(cfg)
+    env = load_dotenv() if env is None else dict(env)
+    validate(cfg, env)
+    hosts, workers = hosts_from(cfg, env), workers_from(cfg, env)
     topo, util = cfg["topology"], float(cfg["engine"]["gpu_memory_utilization"])
     lines = [
         f"mode={topo['mode']} split={topo.get('split', 'phase')} "
