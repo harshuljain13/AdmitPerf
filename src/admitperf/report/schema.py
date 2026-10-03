@@ -18,7 +18,12 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from admitperf.report.items import ItemStatus, RunFacts, evaluate
+from admitperf.report.items import (
+    GOODPUT_DENOMINATOR,
+    ItemStatus,
+    RunFacts,
+    evaluate,
+)
 from admitperf.report.liveness import SignalRange, Verdict
 from admitperf.report.render import RunHeader
 from admitperf.report.taxonomy import AXIS_HELP, PolicyCard
@@ -26,7 +31,14 @@ from admitperf.report.taxonomy import AXIS_HELP, PolicyCard
 #: Bump the minor for an added field, the major for a removed or re-meaning one.
 #: A report from today has to stay readable, or the cross-run comparison this
 #: format exists to enable breaks the first time the schema moves.
-SCHEMA_VERSION = "1.0"
+#:
+#: 2.0 — the policy card became the survey's seven applicability columns.
+#: `objective` is `slo_awareness`; `signal` split into `signal_quantity` (the
+#: survey's taxonomy term, which is what makes two policies comparable) and
+#: `signal_field` (the SystemState field this implementation reads);
+#: `metadata_assumed` and `signal_structure` were added. A 1.0 report cannot be
+#: rendered against these keys, so it is refused by name rather than part-read.
+SCHEMA_VERSION = "2.0"
 
 
 def _num(value: float | None) -> float | None:
@@ -61,15 +73,23 @@ def to_dict(facts: RunFacts, header: RunHeader) -> dict[str, Any]:
             # Negative once the threshold was crossed.
             "headroom_fraction": _num(sig.headroom),
         },
+        # The survey's applicability columns. Six declared, one measured.
         "policy": {
             "name": card.name,
             "unit": card.unit,
             "setting": card.setting,
-            "objective": card.objective,
-            "signal": card.signal,
+            "concurrency_context": card.concurrency_context,
+            "slo_awareness": card.slo_awareness,
+            "slo_granularity": card.slo_granularity,
+            "fairness_type": card.fairness_type,
+            "signal_quantity": card.signal_quantity,
+            "signal_structure": card.signal_structure,
+            "signal_field": card.signal_field,
+            "metadata_assumed": card.metadata_assumed,
             "threshold": _num(card.threshold),
             "portability": card.portability,
             "requires": sorted(card.requires),
+            "liveness_is_judgeable": card.liveness_is_judgeable,
             "anomalies": card.anomalies(),
         },
         "signal": {
@@ -107,7 +127,11 @@ def to_dict(facts: RunFacts, header: RunHeader) -> dict[str, Any]:
             "repeats": facts.repeats,
             "spread_p95_ms": _num(facts.spread_p95_ms),
             "params_source": facts.params_source,
-            "metric_denominator": facts.metric_denominator,
+            "admitted_within_slo": facts.admitted_within_slo,
+            "goodput_denominator": GOODPUT_DENOMINATOR,
+            # Reporting item 7, field by field. Carried through the round trip so a
+            # renderer reading only report.json can still check the item.
+            "disclosure": facts.disclosure,
             "config_sha": facts.config_sha,
         },
         "axis_help": AXIS_HELP,
@@ -150,8 +174,14 @@ def from_dict(payload: dict[str, Any]) -> tuple[RunFacts, RunHeader]:
         name=p["name"],
         unit=p["unit"],
         setting=p["setting"],
-        objective=p["objective"],
-        signal=p.get("signal"),
+        concurrency_context=p.get("concurrency_context", "concurrent-batch"),
+        slo_awareness=p["slo_awareness"],
+        slo_granularity=p.get("slo_granularity"),
+        fairness_type=p.get("fairness_type"),
+        signal_quantity=p.get("signal_quantity"),
+        signal_structure=p.get("signal_structure", "scalar"),
+        signal_field=p.get("signal_field"),
+        metadata_assumed=p.get("metadata_assumed", "none"),
         threshold=p.get("threshold"),
         portability=p.get("portability", "A"),
         requires=frozenset(p.get("requires", ())),
@@ -171,7 +201,8 @@ def from_dict(payload: dict[str, Any]) -> tuple[RunFacts, RunHeader]:
         repeats=int(i.get("repeats", 0)),
         spread_p95_ms=i.get("spread_p95_ms"),
         params_source=i.get("params_source"),
-        metric_denominator=i.get("metric_denominator"),
+        admitted_within_slo=i.get("admitted_within_slo"),
+        disclosure=i.get("disclosure"),
         config_sha=i.get("config_sha"),
         commit=run.get("commit"),
     )

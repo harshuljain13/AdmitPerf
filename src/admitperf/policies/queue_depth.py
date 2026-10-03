@@ -21,8 +21,16 @@ class QueueDepth(AdmissionPolicy):
     """Reject once more than `max_waiting` requests are already queued."""
 
     name = "queue_depth"
+
+    unit = "request"
+    setting = "online"
+    slo_awareness = "latency"
+    signal_quantity = "queue_depth"
+    signal_structure = "scalar"
+    metadata_assumed = "none"
+    portability = "A"
+
     signal = "waiting_requests"
-    objective = "latency"
     threshold = 8.0
 
     def __init__(self, max_waiting: int = 8) -> None:
@@ -47,8 +55,16 @@ class QueueDepthDefer(AdmissionPolicy):
     """
 
     name = "queue_depth_defer"
+
+    unit = "request"
+    setting = "online"
+    slo_awareness = "latency"
+    signal_quantity = "queue_depth"
+    signal_structure = "scalar"
+    metadata_assumed = "none"
+    portability = "A"
+
     signal = "waiting_requests"
-    objective = "latency"
     threshold = 8.0
 
     def __init__(self, max_waiting: int = 8, retry_after_ms: int = 250) -> None:

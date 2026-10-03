@@ -341,6 +341,21 @@ def run_arm(
 # --------------------------------------------------------------------------
 
 
+def _hardware(cluster: dict[str, Any]) -> str:
+    """Cards and memory, from the cluster config's own host list."""
+    hosts = cluster.get("hosts") or []
+    if not isinstance(hosts, list) or not hosts:
+        return "unknown"
+    bits = []
+    for h in hosts:
+        g = (h or {}).get("gpu") or {}
+        bits.append(f"{g.get('count', '?')}x{g.get('kind', '?')}-{g.get('hbm_gb', '?')}GB")
+    topo = cluster.get("topology") or {}
+    pools = topo.get("pools") or {}
+    shape = " ".join(f"{k}x{(v or {}).get('replicas', 1)}" for k, v in pools.items())
+    return f"{', '.join(bits)} · {topo.get('mode', '?')} {shape}".strip()
+
+
 def write_arm(
     exp: Experiment,
     arm: ArmResult,
@@ -365,8 +380,27 @@ def write_arm(
         offered_rps=round(arm.offered_rps, 3),
         repeats=exp.repeats,
         params_source="cluster config",
-        metric_denominator="offered",
+        # admitted_within_slo is deliberately NOT passed: this driver records no
+        # per-request latency yet, so it cannot say which admitted requests met an
+        # SLO. Reporting item 6 therefore comes back unevidenced, which is correct —
+        # naming a denominator without a figure satisfies nothing.
         config_sha=exp.cluster_path.name,
+        # Reporting item 7, field by field from the config that produced the run. The
+        # survey asks for the identity of the baseline ACTUALLY run, by name, because
+        # a paper naming one and running another is undetectable from its results.
+        disclosure={
+            "model": exp.cluster.get("model", {}).get("id"),
+            "engine": engine,
+            "hardware": _hardware(exp.cluster),
+            "workload": (
+                f"{exp.load.get('kind')} n={exp.load.get('n')} "
+                f"rate={exp.load.get('rate')} seed={exp.load.get('seed')} "
+                f"prompt={exp.load.get('prompt_tokens')} "
+                f"out={exp.load.get('output_tokens')}"
+            ),
+            "offered_load": f"{arm.offered_rps:.3g} rps",
+            "baseline": exp.baseline or "none",
+        },
     )
     header = RunHeader(
         run_id=f"{exp.name}-{policy_name}-r{repeat}",

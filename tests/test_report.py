@@ -37,6 +37,7 @@ from admitperf.report import (
 
 class _Spy(AdmissionPolicy):
     name = "spy"
+    signal_quantity = "kv_pressure"
     signal = "kv_used_fraction"
     threshold = 0.75
 
@@ -46,6 +47,7 @@ class _Spy(AdmissionPolicy):
 
 class _TwoSignals(AdmissionPolicy):
     name = "two"
+    signal_quantity = "queue_depth"
     signal = "waiting_requests"
     requires = frozenset({"waiting_requests", "running_requests"})
 
@@ -277,10 +279,61 @@ def test_capacity_relative_load_needs_both_numbers() -> None:
     assert "50%" in item.detail
 
 
-def test_configuration_disclosure_names_what_is_missing() -> None:
-    item = next(i for i in evaluate(_facts(config_sha="abc123")) if i.number == 7)
+def test_configuration_disclosure_names_each_missing_field() -> None:
+    """A filename is not a disclosure. The survey asks for model, engine version,
+    hardware, workload subset, offered load, SLO tuple and the identity of the
+    baseline actually run — so the item is checked field by field."""
+    partial = _facts(disclosure={"model": "Qwen/Qwen2.5-7B-Instruct", "engine": "vLLM"})
+    item = next(i for i in evaluate(partial) if i.number == 7)
     assert item.status is ItemStatus.UNKNOWN
-    assert "commit" in item.detail
+    for field in ("hardware", "workload", "offered_load", "baseline"):
+        assert field in item.detail, field
+
+
+def test_configuration_disclosure_passes_when_every_field_is_there() -> None:
+    full = _facts(
+        disclosure={
+            "model": "Qwen/Qwen2.5-7B-Instruct",
+            "engine": "vLLM 0.11.0",
+            "hardware": "1xA100-40GB",
+            "workload": "poisson n=90 rate=12 seed=0",
+            "offered_load": "11.2 rps",
+            "baseline": "no_admission",
+        }
+    )
+    item = next(i for i in evaluate(full) if i.number == 7)
+    assert item.status is ItemStatus.OK
+
+
+def test_the_baseline_actually_run_is_named() -> None:
+    """The survey asks for it by name, because a paper naming one baseline and
+    running another is undetectable from its results."""
+    item = next(
+        i for i in evaluate(_facts(disclosure={"baseline": "no_admission"})) if i.number == 7
+    )
+    assert "baseline" not in item.detail.split("not disclosed: ")[1]
+
+
+def test_goodput_is_computed_over_offered_not_admitted() -> None:
+    """Definition 2: the denominator is offered, so rejections count as misses. Both
+    conventions circulate and give different numbers for the same run, with the gap
+    widening as the rejection rate rises."""
+    from admitperf.report.items import GOODPUT_DENOMINATOR, goodput
+
+    assert GOODPUT_DENOMINATOR == "offered"
+    # 100 offered, 40 rejected, 50 of the 60 admitted met their SLO.
+    assert goodput(offered=100, admitted_within_slo=50) == pytest.approx(0.50)
+    # Over admitted it would be 50/60 = 0.83, which is the number a paper using the
+    # other convention would report for the same run.
+    assert pytest.approx(0.833, abs=1e-3) == 50 / 60
+
+
+def test_goodput_is_unevidenced_rather_than_assumed() -> None:
+    """Naming a denominator without a figure satisfies nothing — which is what this
+    item used to do."""
+    item = next(i for i in evaluate(_facts()) if i.number == 6)
+    assert item.status is ItemStatus.UNKNOWN
+    assert "not computed" in item.detail
 
 
 # --------------------------------------------------------------------------
@@ -300,9 +353,11 @@ def test_card_defaults_cover_the_common_case() -> None:
     assert (card.unit, card.setting, card.portability) == ("request", "online", "A")
 
 
-def test_card_flags_a_missing_signal() -> None:
+def test_card_flags_a_missing_signal_quantity() -> None:
+    """Without it the policy cannot be placed on the survey's axis 4, and its
+    liveness — the one column the corpus leaves empty — cannot be measured."""
     notes = PolicyCard.of(_NoSignal()).anomalies()
-    assert any("no signal declared" in n for n in notes)
+    assert any("no signal_quantity declared" in n for n in notes)
 
 
 def test_card_flags_a_signal_absent_from_requires() -> None:
@@ -321,16 +376,127 @@ def test_card_flags_a_signal_absent_from_requires() -> None:
     assert any("not in requires" in n for n in notes)
 
 
-def test_card_flags_a_value_outside_the_taxonomy() -> None:
+def test_card_flags_a_value_outside_the_surveys_vocabulary() -> None:
+    """A card whose terms differ from the survey's cannot be placed in the table it
+    exists to fill."""
+
     class Odd(AdmissionPolicy):
         name = "odd"
+        signal_quantity = "kv_pressure"
         signal = "kv_used_fraction"
-        objective = "vibes"
+        slo_awareness = "vibes"
 
         def decide(self, req: Request, state: SystemState) -> Decision:
             return Decision.admit()
 
-    assert any("outside the taxonomy" in n for n in PolicyCard.of(Odd()).anomalies())
+    notes = PolicyCard.of(Odd()).anomalies()
+    assert any("outside the survey's vocabulary" in n for n in notes)
+
+
+def test_batch_and_token_are_not_admission_units() -> None:
+    """They were in this tool's vocabulary and are not in the survey's. Batch
+    formation is what a Class B policy controls, not what it admits."""
+    from admitperf.report.taxonomy import UNITS
+
+    assert frozenset({"request", "agent-session", "tenant"}) == UNITS
+
+
+def test_tenant_is_an_admission_unit() -> None:
+    """It was missing, which is the whole of VTC, FairBatching and Equinox."""
+    from admitperf.report.taxonomy import UNITS
+
+    assert "tenant" in UNITS
+
+
+def test_the_signal_vocabulary_is_the_surveys() -> None:
+    from admitperf.report.taxonomy import SIGNAL_QUANTITIES
+
+    assert (
+        frozenset(
+            {
+                "kv_pressure",
+                "queue_depth",
+                "deadline_slack",
+                "wait_estimate",
+                "predicted_length",
+                "batch_state",
+                "rate",
+                "analytic",
+            }
+        )
+        == SIGNAL_QUANTITIES
+    )
+
+
+def test_signal_quantity_is_separate_from_the_field_it_reads() -> None:
+    """The quantity is what makes two policies comparable across papers; the field is
+    this implementation's plumbing. A card printing `kv_used_fraction` cannot be
+    placed in the survey's table without a human translating it."""
+    card = PolicyCard.of(get_policy("kv_threshold"))
+    assert card.signal_quantity == "kv_pressure"
+    assert card.signal_field == "kv_used_fraction"
+
+
+def test_a_dual_gate_policy_gets_no_liveness_verdict() -> None:
+    """A single scalar range cannot describe a conjunction. A dual-gate policy can
+    hold its first signal above threshold throughout while the gate never closes, so
+    a confident verdict would assert something the check cannot see."""
+
+    class DualGate(AdmissionPolicy):
+        name = "dual"
+        signal_quantity = "kv_pressure"
+        signal_structure = "dual-gate"
+        signal = "kv_used_fraction"
+        threshold = 0.5
+
+        def decide(self, req: Request, state: SystemState) -> Decision:
+            return Decision.admit()
+
+    card = PolicyCard.of(DualGate())
+    assert card.liveness_is_judgeable is False
+    assert any("No verdict is claimed" in n for n in card.anomalies())
+
+
+def test_a_class_b_policy_says_it_cannot_sit_here() -> None:
+    class NeedsFork(AdmissionPolicy):
+        name = "fork"
+        signal_quantity = "batch_state"
+        signal = "running_requests"
+        threshold = 4.0
+        portability = "B"
+
+        def decide(self, req: Request, state: SystemState) -> Decision:
+            return Decision.admit()
+
+    assert any("Class B" in n for n in PolicyCard.of(NeedsFork()).anomalies())
+
+
+def test_a_policy_assuming_deadlines_flags_a_trace_without_them() -> None:
+    """The quietest way to produce a meaningless run: the policy admits everything
+    and looks well-behaved."""
+
+    class NeedsDeadline(AdmissionPolicy):
+        name = "needs-deadline"
+        signal_quantity = "deadline_slack"
+        signal = "kv_used_fraction"
+        threshold = 0.5
+        metadata_assumed = "deadlines"
+
+        def decide(self, req: Request, state: SystemState) -> Decision:
+            return Decision.admit()
+
+    card = PolicyCard.of(NeedsDeadline())
+    bare = Request(request_id="r", tenant_id="t", arrival_time=0.0, input_tokens=10)
+    assert card.missing_metadata(bare) is not None
+
+    with_deadline = Request(
+        request_id="r",
+        tenant_id="t",
+        arrival_time=0.0,
+        input_tokens=10,
+        deadline_ttft_ms=500,
+    )
+    assert card.missing_metadata(with_deadline) is None
 
 
 # --------------------------------------------------------------------------
@@ -359,15 +525,14 @@ def test_the_verdict_comes_before_any_outcome_number() -> None:
     assert page.index("SIGNAL LIVENESS") < page.index("SEVEN REPORTING ITEMS")
 
 
-def test_commit_reaches_item_seven_without_being_passed_twice() -> None:
+def test_commit_reaches_the_report_header() -> None:
     page = report_for(
         get_policy("kv_threshold"),
         [{"kv_used_fraction": 0.95, "kind": "reject"}],
         run_id="r1",
         commit="deadbeef1234",
-        config_sha="cfg000111222",
     )
-    assert "7 Configuration disclosure     ok" in page
+    assert "deadbeef1234" in page
 
 
 def test_decision_records_work_as_well_as_dicts() -> None:
@@ -472,19 +637,21 @@ def test_round_trip_preserves_the_reporting_items() -> None:
 def test_a_major_schema_mismatch_is_refused() -> None:
     """Reading a future report with today's code would produce numbers that look
     fine and mean something else."""
-    from admitperf.report import from_dict
+    from admitperf.report import SCHEMA_VERSION, from_dict
 
     payload = _payload()
-    payload["schema_version"] = "2.0"
+    major = int(SCHEMA_VERSION.split(".")[0])
+    payload["schema_version"] = f"{major + 1}.0"
     with pytest.raises(ValueError, match="not compatible"):
         from_dict(payload)
 
 
 def test_a_minor_schema_bump_still_reads() -> None:
-    from admitperf.report import from_dict
+    from admitperf.report import SCHEMA_VERSION, from_dict
 
     payload = _payload()
-    payload["schema_version"] = "1.7"
+    major = SCHEMA_VERSION.split(".")[0]
+    payload["schema_version"] = f"{major}.99"
     from_dict(payload)
 
 
@@ -534,7 +701,7 @@ def test_problems_is_empty_for_a_sound_run() -> None:
         deadline_ms=500,
         unloaded_ttft_ms=200,
         params_source="default",
-        metric_denominator="offered",
+        admitted_within_slo=1,
         config_sha="abc123def456",
         commit="deadbeef1234",
     )

@@ -623,7 +623,32 @@ def report(
 
     from admitperf.report import RunHeader, facts_from, problems, render_as, to_dict
 
-    rows = [json.loads(line) for line in Path(decisions).read_text().splitlines() if line.strip()]
+    text = Path(decisions).read_text()
+
+    # A report.json renders directly. It IS the artifact and every format is a pure
+    # function of it, so re-deriving one just to view it would be a second path to
+    # the same page — and two paths drift.
+    if text.lstrip().startswith("{"):
+        payload = json.loads(text)
+        if "schema_version" in payload:
+            from admitperf.report import from_dict
+
+            facts, header = from_dict(payload)
+            page = render_as(facts, header, fmt="md" if markdown else fmt)
+            if out:
+                Path(out).write_text(page + "\n")
+                click.echo(f"wrote {out}", err=True)
+            else:
+                click.echo(page)
+            if check:
+                found = problems(payload)
+                for line in found:
+                    click.echo(f"  ! {line}", err=True)
+                if found:
+                    raise SystemExit(1)
+            return
+
+    rows = [json.loads(line) for line in text.splitlines() if line.strip()]
     if not rows:
         raise click.ClickException(f"{decisions} has no decisions in it")
 

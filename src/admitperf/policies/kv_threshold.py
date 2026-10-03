@@ -15,9 +15,20 @@ class KVThreshold(AdmissionPolicy):
     """Reject when KV cache utilization is at or above `threshold`."""
 
     name = "kv_threshold"
+
+    # The survey's applicability columns.
+    unit = "request"
+    setting = "online"
+    slo_awareness = "deadline"
+    signal_quantity = "kv_pressure"
+    signal_structure = "scalar"
+    metadata_assumed = "none"
+    portability = "A"
+
+    # Implementation: which SystemState field carries the quantity, and the value
+    # at which this policy changes its mind.
     signal = "kv_used_fraction"
     threshold = 0.90
-    objective = "deadline"
 
     def __init__(self, threshold: float = 0.90) -> None:
         if not 0.0 < threshold <= 1.0:

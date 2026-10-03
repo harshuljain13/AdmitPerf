@@ -84,8 +84,9 @@ def render(facts: RunFacts, header: RunHeader) -> str:
         f"  name         {card.name}",
         f"  unit         {card.unit}",
         f"  setting      {card.setting}",
-        f"  objective    {card.objective}",
-        f"  signal       {card.signal or '(none declared)'}",
+        f"  slo-aware    {card.slo_awareness}",
+        f"  signal       {card.signal_quantity or '(none declared)'}  [{card.signal_structure}]",
+        f"  metadata     {card.metadata_assumed}",
         f"  portability  Class {card.portability}",
     ]
     right = ["SIGNAL"]
@@ -162,8 +163,10 @@ def render_markdown(facts: RunFacts, header: RunHeader) -> str:
     for axis, value in (
         ("Unit", card.unit),
         ("Setting", card.setting),
-        ("Objective", card.objective),
-        ("Signal", card.signal or "_none declared_"),
+        ("Slo_awareness", card.slo_awareness),
+        ("Signal_quantity", card.signal_quantity or "_none declared_"),
+        ("Signal_structure", card.signal_structure),
+        ("Metadata_assumed", card.metadata_assumed),
         ("Portability", f"Class {card.portability}"),
     ):
         out.append(f"| {axis} | `{value}` | {AXIS_HELP[axis.lower()]} |")

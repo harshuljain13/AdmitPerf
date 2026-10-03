@@ -159,12 +159,22 @@ with left:
     st.subheader(f"Policy — {pol['name']}")
     st.dataframe(
         {
-            "axis": ["unit", "setting", "objective", "signal", "portability"],
+            "axis": [
+                "unit",
+                "setting",
+                "slo-awareness",
+                "signal quantity",
+                "signal structure",
+                "metadata assumed",
+                "portability",
+            ],
             "value": [
                 pol["unit"],
                 pol["setting"],
-                pol["objective"],
-                pol.get("signal") or "none declared",
+                pol["slo_awareness"],
+                pol.get("signal_quantity") or "none declared",
+                pol.get("signal_structure", "scalar"),
+                pol.get("metadata_assumed", "none"),
                 f"Class {pol['portability']}",
             ],
         },

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from admitperf.report.liveness import SignalRange, Verdict
 from admitperf.report.taxonomy import PolicyCard
@@ -32,6 +33,29 @@ class Item:
     title: str
     status: ItemStatus
     detail: str
+
+
+#: The survey's Definition 2, Equation 1:
+#:
+#:     G = |{r in Admitted : SLO(r) = 1}| / |Offered|
+#:
+#: The denominator is OFFERED. Rejected requests count as misses. Reporting item 6
+#: exists because both conventions circulate and give different numbers for the same
+#: run, with the gap widening as the rejection rate rises — so the denominator is
+#: named in the report rather than left to a reader's assumption.
+GOODPUT_DENOMINATOR = "offered"
+
+
+def goodput(*, offered: int, admitted_within_slo: int) -> float | None:
+    """Goodput-under-admission, to the survey's definition.
+
+    Computed rather than asserted. This module previously marked reporting item 6
+    `ok` on the strength of a string the caller passed in, which is the failure the
+    survey documents reproduced inside the tool built to catch it.
+    """
+    if offered <= 0:
+        return None
+    return admitted_within_slo / offered
 
 
 @dataclass(frozen=True)
@@ -55,7 +79,17 @@ class RunFacts:
     repeats: int = 0
     spread_p95_ms: float | None = None
     params_source: str | None = None
-    metric_denominator: str | None = None
+
+    #: Reporting item 7 asks for model, engine version, hardware, workload subset,
+    #: offered load, SLO tuple and the baseline actually run. The cluster config
+    #: carries most of that, so the item is computed from it rather than satisfied
+    #: with a filename — which is what a hash was doing.
+    disclosure: dict[str, Any] | None = None
+
+    #: Admitted requests that met their SLO. Needed to COMPUTE goodput; without it
+    #: the report says goodput is unknown rather than quoting a denominator and
+    #: implying a number.
+    admitted_within_slo: int | None = None
     config_sha: str | None = None
     commit: str | None = None
 
@@ -112,15 +146,31 @@ def evaluate(facts: RunFacts) -> list[Item]:
             )
         )
 
-    # 3 — the reason this report exists.
-    verdict = facts.signal.verdict
-    status = {
-        Verdict.LIVE: ItemStatus.OK,
-        Verdict.MARGINAL: ItemStatus.FAIL,
-        Verdict.INERT: ItemStatus.FAIL,
-        Verdict.UNKNOWN: ItemStatus.UNKNOWN,
-    }[verdict]
-    items.append(Item(3, "Signal liveness", status, facts.signal.explain()))
+    # 3 — the reason this report exists: the one column the survey found uniformly
+    # empty across sixteen admission-primary papers.
+    if not facts.card.liveness_is_judgeable:
+        # A single scalar range cannot describe a conjunction, an LP's feasibility
+        # region or a formal bound. Reporting a verdict anyway would assert something
+        # the check cannot see.
+        items.append(
+            Item(
+                3,
+                "Signal liveness",
+                ItemStatus.UNKNOWN,
+                f"{facts.card.signal_structure} signal: the range of "
+                f"{facts.signal.name} is one component of the firing condition, and a "
+                "single-scalar check cannot judge whether the policy could have acted",
+            )
+        )
+    else:
+        verdict = facts.signal.verdict
+        status = {
+            Verdict.LIVE: ItemStatus.OK,
+            Verdict.MARGINAL: ItemStatus.FAIL,
+            Verdict.INERT: ItemStatus.FAIL,
+            Verdict.UNKNOWN: ItemStatus.UNKNOWN,
+        }[verdict]
+        items.append(Item(3, "Signal liveness", status, facts.signal.explain()))
 
     # 4 — one run has no error bar, and a gap inside noise is not a gap.
     if facts.repeats >= 2 and facts.spread_p95_ms is not None:
@@ -173,15 +223,29 @@ def evaluate(facts: RunFacts) -> list[Item]:
             )
         )
 
-    # 6 — admission rate over *offered* and over *admitted* are different
-    # numbers, and papers report both under the same name.
-    if facts.metric_denominator:
+    # 6 — the goodput denominator. Over *offered* and over *admitted* are
+    # different numbers and papers report both under the same name, so this item is
+    # satisfied by COMPUTING the figure, not by naming the convention.
+    g = (
+        goodput(offered=facts.decisions, admitted_within_slo=facts.admitted_within_slo)
+        if facts.admitted_within_slo is not None
+        else None
+    )
+    if g is not None:
+        admitted = facts.decisions - facts.rejects - facts.defers
         items.append(
             Item(
                 6,
                 "Metric definition",
                 ItemStatus.OK,
-                f"rates computed over {facts.metric_denominator}",
+                f"goodput-under-admission {g:.3f} = "
+                f"{facts.admitted_within_slo} within SLO / {facts.decisions} offered "
+                f"(Definition 2; denominator is {GOODPUT_DENOMINATOR}, so the "
+                f"{facts.rejects} rejection(s) count as misses). "
+                f"Over admitted instead it would be "
+                f"{facts.admitted_within_slo / admitted:.3f}"
+                if admitted
+                else "",
             )
         )
     else:
@@ -190,31 +254,36 @@ def evaluate(facts: RunFacts) -> list[Item]:
                 6,
                 "Metric definition",
                 ItemStatus.UNKNOWN,
-                "denominator for admission and shed rates not stated",
+                "goodput not computed: the run did not record how many admitted "
+                "requests met their SLO. Naming a denominator without a figure "
+                "satisfies nothing",
             )
         )
 
-    # 7 — a number traceable only to a version string that never changes is not
-    # traceable.
-    if facts.config_sha and facts.commit:
+    # 7 — the survey asks for model, engine version, hardware, workload subset,
+    # offered load, SLO tuple and the identity of the baseline ACTUALLY run. Checked
+    # field by field, because a filename is not a disclosure and a hash only proves
+    # that something existed.
+    wanted = ("model", "engine", "hardware", "workload", "offered_load", "baseline")
+    have = facts.disclosure or {}
+    absent = [w for w in wanted if not have.get(w)]
+    if not absent:
         items.append(
             Item(
                 7,
                 "Configuration disclosure",
                 ItemStatus.OK,
-                f"config {facts.config_sha[:12]} at commit {facts.commit[:12]}",
+                " · ".join(f"{w}={have[w]}" for w in wanted),
             )
         )
     else:
-        missing = ", ".join(
-            n for n, v in (("config hash", facts.config_sha), ("commit", facts.commit)) if not v
-        )
         items.append(
             Item(
                 7,
                 "Configuration disclosure",
                 ItemStatus.UNKNOWN,
-                f"missing {missing}; this run is not reproducible from the report alone",
+                f"not disclosed: {', '.join(absent)}. This run is not reproducible "
+                "from the report alone",
             )
         )
 

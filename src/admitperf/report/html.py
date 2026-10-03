@@ -123,8 +123,10 @@ def render_html(payload: dict[str, Any]) -> str:
         for k, v in (
             ("unit", pol["unit"]),
             ("setting", pol["setting"]),
-            ("objective", pol["objective"]),
-            ("signal", pol.get("signal") or "none declared"),
+            ("slo-awareness", pol["slo_awareness"]),
+            ("signal quantity", pol.get("signal_quantity") or "none declared"),
+            ("signal structure", pol.get("signal_structure", "scalar")),
+            ("metadata assumed", pol.get("metadata_assumed", "none")),
             ("portability", f"Class {pol['portability']}"),
         )
     )

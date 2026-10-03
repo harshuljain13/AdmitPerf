@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "run": {
     "id": "signal-liveness-no_admission-r1",
     "cluster": "single.yaml",
     "model": "Qwen/Qwen2.5-7B-Instruct",
-    "engine": "mock_vllm.py (capacity 400)",
+    "engine": "mock_vllm.py (capacity 8)",
     "commit": null
   },
   "liveness": {
@@ -16,13 +16,20 @@
     "name": "no_admission",
     "unit": "request",
     "setting": "online",
-    "objective": "deadline",
-    "signal": null,
+    "concurrency_context": "concurrent-batch",
+    "slo_awareness": "throughput",
+    "slo_granularity": null,
+    "fairness_type": null,
+    "signal_quantity": null,
+    "signal_structure": "scalar",
+    "signal_field": null,
+    "metadata_assumed": "none",
     "threshold": null,
     "portability": "A",
     "requires": [],
+    "liveness_is_judgeable": true,
     "anomalies": [
-      "no signal declared, so liveness cannot be measured and this run cannot show whether the policy had the opportunity to act"
+      "no signal_quantity declared, so this policy cannot be placed on the survey's axis 4 and its liveness cannot be measured"
     ]
   },
   "signal": {
@@ -77,39 +84,53 @@
     {
       "number": 6,
       "title": "Metric definition",
-      "status": "ok",
-      "detail": "rates computed over offered"
+      "status": "n/a",
+      "detail": "goodput not computed: the run did not record how many admitted requests met their SLO. Naming a denominator without a figure satisfies nothing"
     },
     {
       "number": 7,
       "title": "Configuration disclosure",
-      "status": "n/a",
-      "detail": "missing commit; this run is not reproducible from the report alone"
+      "status": "ok",
+      "detail": "model=Qwen/Qwen2.5-7B-Instruct \u00b7 engine=mock_vllm.py (capacity 8) \u00b7 hardware=1xA100-40GB, 1xA100-40GB, 1xA100-40GB, 1xA100-40GB \u00b7 aggregated enginex1 \u00b7 workload=poisson n=90 rate=12 seed=0 prompt=2048 out=120 \u00b7 offered_load=9.34 rps \u00b7 baseline=no_admission"
     }
   ],
   "inputs": {
-    "offered_rps": 11.151,
+    "offered_rps": 9.339,
     "capacity_rps": null,
     "deadline_ms": null,
     "unloaded_ttft_ms": null,
     "repeats": 3,
     "spread_p95_ms": null,
     "params_source": "cluster config",
-    "metric_denominator": "offered",
+    "admitted_within_slo": null,
+    "goodput_denominator": "offered",
+    "disclosure": {
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "engine": "mock_vllm.py (capacity 8)",
+      "hardware": "1xA100-40GB, 1xA100-40GB, 1xA100-40GB, 1xA100-40GB \u00b7 aggregated enginex1",
+      "workload": "poisson n=90 rate=12 seed=0 prompt=2048 out=120",
+      "offered_load": "9.34 rps",
+      "baseline": "no_admission"
+    },
     "config_sha": "single.yaml"
   },
   "axis_help": {
     "unit": "what the policy decides about",
     "setting": "whether it decides as requests arrive, or in advance",
-    "objective": "what it is trying to protect",
-    "signal": "the field of SystemState it reads",
-    "portability": "A = pure function of (request, state); B = needs engine changes"
+    "concurrency_context": "continuous-batching server, or a serial engine",
+    "slo_awareness": "what it is trying to protect",
+    "slo_granularity": "one SLO per job, per request, or per stage",
+    "fairness_type": "between task types, between tenants, or weighted classes",
+    "signal_quantity": "the quantity it compares against a threshold",
+    "signal_structure": "scalar, two signals ANDed, an LP, or a formal bound",
+    "metadata_assumed": "what a request must carry for the policy to act",
+    "portability": "A = decidable at ingress; B = needs control of batch formation"
   },
   "harness": {
     "scrapes_ok": 90,
     "scrapes_failed": 0,
-    "max_arrival_lag_ms": 13.94,
-    "wall_s": 8.07
+    "max_arrival_lag_ms": 7.18,
+    "wall_s": 9.64
   },
   "expect": {
     "signal": "kv_used_fraction",

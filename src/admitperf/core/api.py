@@ -120,25 +120,73 @@ class AdmissionPolicy(ABC):
 
     name: str
 
-    #: The `SystemState` field this policy reads. Setting it is what makes the
-    #: run reportable: without it the report can show that decisions were made
-    #: but not whether the signal behind them ever moved.
+    # ----------------------------------------------------------------------
+    # The survey's applicability columns. Six are declared here; the seventh,
+    # signal liveness, is measured. Vocabularies live in report/taxonomy.py and
+    # come from research/survey/docs/{taxonomy,applicability}.md.
+    # ----------------------------------------------------------------------
+
+    #: Axis 1. request | agent-session | tenant.
+    unit: str = "request"
+
+    #: Axis 2. online | offline | hybrid | theoretical.
+    setting: str = "online"
+
+    #: Axis 2 sub-branch. A continuous-batching server and a serial engine share
+    #: almost no admission mechanism.
+    concurrency_context: str = "concurrent-batch"
+
+    #: Axis 3. What the policy protects: deadline | throughput | fairness | cost |
+    #: stability | latency | reward. Named after the survey; this was once called
+    #: `objective`, which appears nowhere in the taxonomy.
+    slo_awareness: str = "deadline"
+
+    #: Axis 3 sub-branches. Only set them when they apply.
+    slo_granularity: str | None = None
+    fairness_type: str | None = None
+
+    #: Axis 4, the TAXONOMY term for what this policy watches: kv_pressure |
+    #: queue_depth | deadline_slack | wait_estimate | predicted_length |
+    #: batch_state | rate | analytic.
+    #:
+    #: Deliberately separate from `signal` below. The quantity is what makes two
+    #: policies comparable across papers; the field is this implementation's
+    #: plumbing. A card printing `kv_used_fraction` cannot be placed in the
+    #: survey's table without a human translating it.
+    signal_quantity: str | None = None
+
+    #: Axis 4 sub-branch, on the STRUCTURE rather than the content:
+    #:   scalar        one value against a threshold
+    #:   dual-gate     two signals ANDed, to tell healthy high utilisation from
+    #:                 congestion
+    #:   lp-composite  a linear program over several state variables
+    #:   formal-bound  a closed-form bound plus an admission test
+    #:
+    #: This decides what liveness can mean. A scalar has one range; a dual gate has
+    #: two ranges and a conjunction, and can hold its first signal above threshold
+    #: throughout while never firing.
+    signal_structure: str = "scalar"
+
+    #: What a request must carry for this policy to act at all: none | slo-class |
+    #: deadlines | per-stage-deadlines | session-id | priority.
+    #:
+    #: Declared so a trace can be checked. A deadline policy run against requests
+    #: with no deadlines admits everything and looks well-behaved, which is the
+    #: quietest way to produce a meaningless run.
+    metadata_assumed: str = "none"
+
+    #: The `SystemState` field this policy reads to get its signal's value. Setting
+    #: it is what makes the run reportable: without it the report can show that
+    #: decisions were made but not whether the quantity behind them ever moved.
     signal: str | None = None
 
     #: The value of `signal` at which this policy changes its mind. Liveness is
-    #: measured against it: a run where the signal never approached the
-    #: threshold is reported inert rather than as a null result.
+    #: measured against it.
     threshold: float | None = None
 
-    #: The survey's taxonomy. Defaults cover the common case, so a policy
-    #: overrides only what differs.
-    unit: str = "request"
-    setting: str = "online"
-    objective: str = "deadline"
-
-    #: Class A is a pure function of (request, state). Class B needs engine
-    #: changes and cannot sit behind this interface at all, so the default is
-    #: the only value that can currently be true.
+    #: Derived from the decision moment: ingress -> A, queue-build or model-fork ->
+    #: B. Class B needs control over batch formation and cannot sit behind this
+    #: interface at all, so the default is the only value that can currently be true.
     portability: str = "A"
 
     requires: frozenset[str] = frozenset()

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdmitPerf Report — signal-liveness-no_admission-r1</title>
+<style>
+:root { --ink:#111; --dim:#666; --line:#e9ecef; --mono: ui-monospace, "SF Mono", Menlo, monospace }
+* { box-sizing: border-box }
+body { margin:0; padding:2.5rem 1.5rem; background:#fafafa; color:var(--ink);
+       font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif }
+main { max-width: 56rem; margin:0 auto; background:#fff; padding:2.5rem;
+       border:1px solid var(--line); border-radius:10px }
+h1 { font-size:1.4rem; margin:0 0 .25rem; letter-spacing:-.01em }
+h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.09em; color:var(--dim);
+     margin:2.25rem 0 .75rem; font-weight:600 }
+.meta { font:12px/1.7 var(--mono); color:var(--dim); margin:0 0 1.75rem }
+.verdict { padding:1rem 1.15rem; border-radius:8px; border-left:5px solid }
+.verdict .v { font:700 1.15rem/1 var(--mono); letter-spacing:.02em }
+.verdict p { margin:.45rem 0 0; font-size:.92rem }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:2rem }
+@media (max-width:48rem){ .cols{ grid-template-columns:1fr } }
+table { width:100%; border-collapse:collapse; font-size:.9rem }
+td,th { padding:.42rem .55rem; border-bottom:1px solid var(--line); text-align:left; vertical-align:top }
+th { font-weight:600; color:var(--dim); font-size:.8rem }
+tbody tr:last-child td { border-bottom:0 }
+.k { color:var(--dim); white-space:nowrap }
+.n { font-family:var(--mono); font-variant-numeric:tabular-nums }
+.st { font:700 .72rem var(--mono); padding:.1rem .4rem; border-radius:4px; color:#fff; white-space:nowrap }
+.note { background:#fff9db; border-left:4px solid #f08c00; padding:.7rem .9rem;
+        margin:.5rem 0 0; font-size:.87rem; border-radius:0 6px 6px 0 }
+footer { margin-top:2.5rem; padding-top:1rem; border-top:1px solid var(--line);
+         font:11px var(--mono); color:var(--dim) }
+@media print { body{background:#fff;padding:0} main{border:0;padding:0} }
+</style></head>
+<body><main>
+<h1>AdmitPerf Report</h1>
+<p class="meta">signal-liveness-no_admission-r1 · single.yaml · Qwen/Qwen2.5-7B-Instruct · mock_vllm.py (capacity 8)</p>
+
+<div class="verdict" style="border-color:#495057;background:#f1f3f5">
+  <div class="v" style="color:#495057">SIGNAL LIVENESS: UNKNOWN</div>
+  <p>no values of &#x27;signal&#x27; were recorded, so whether the policy could have fired is unknown</p>
+</div>
+
+<h2>Signal over the run</h2>
+<p class="k">no signal recorded</p>
+
+<div class="cols">
+  <div><h2>Policy — no_admission</h2><table><tbody><tr><td class="k">unit</td><td class="n">request</td></tr><tr><td class="k">setting</td><td class="n">online</td></tr><tr><td class="k">slo-awareness</td><td class="n">throughput</td></tr><tr><td class="k">signal quantity</td><td class="n">none declared</td></tr><tr><td class="k">signal structure</td><td class="n">scalar</td></tr><tr><td class="k">metadata assumed</td><td class="n">none</td></tr><tr><td class="k">portability</td><td class="n">Class A</td></tr></tbody></table></div>
+  <div><h2>Signal — signal</h2><table><tbody><tr><td class="k">threshold</td><td class="n">—</td></tr><tr><td class="k">min</td><td class="n">—</td></tr><tr><td class="k">p50</td><td class="n">—</td></tr><tr><td class="k">p95</td><td class="n">—</td></tr><tr><td class="k">p99</td><td class="n">—</td></tr><tr><td class="k">max</td><td class="n">—</td></tr><tr><td class="k">crossed</td><td class="n">0 of 0 decisions</td></tr><tr><td class="k">missing</td><td class="n" style="color:#c92a2a">90 decisions had no value</td></tr></tbody></table></div>
+</div>
+
+<h2>Decisions</h2>
+<table><tbody>
+<tr><td class="k">total</td><td class="n">90</td></tr>
+<tr><td class="k">rejected</td><td class="n">0</td></tr>
+<tr><td class="k">deferred</td><td class="n">0</td></tr>
+</tbody></table>
+
+<h2>Seven reporting items</h2>
+<table><thead><tr><th></th><th>Item</th><th></th><th>Detail</th></tr></thead>
+<tbody><tr><td class="n">1</td><td>Capacity-relative load</td><td><span class="st" style="background:#868e96">n/a</span></td><td>offered load or measured ceiling not recorded; absolute rps is not comparable across deployments</td></tr><tr><td class="n">2</td><td>Calibrated deadlines</td><td><span class="st" style="background:#868e96">n/a</span></td><td>no unloaded baseline recorded, so the deadline cannot be expressed as a multiple of idle latency</td></tr><tr><td class="n">3</td><td>Signal liveness</td><td><span class="st" style="background:#868e96">n/a</span></td><td>no values of &#x27;signal&#x27; were recorded, so whether the policy could have fired is unknown</td></tr><tr><td class="n">4</td><td>Repeats and spread</td><td><span class="st" style="background:#868e96">n/a</span></td><td>3 repeats but no spread computed</td></tr><tr><td class="n">5</td><td>Parameter provenance</td><td><span class="st" style="background:#2b8a3e">ok</span></td><td>threshold=None (cluster config)</td></tr><tr><td class="n">6</td><td>Metric definition</td><td><span class="st" style="background:#868e96">n/a</span></td><td>goodput not computed: the run did not record how many admitted requests met their SLO. Naming a denominator without a figure satisfies nothing</td></tr><tr><td class="n">7</td><td>Configuration disclosure</td><td><span class="st" style="background:#2b8a3e">ok</span></td><td>model=Qwen/Qwen2.5-7B-Instruct · engine=mock_vllm.py (capacity 8) · hardware=1xA100-40GB, 1xA100-40GB, 1xA100-40GB, 1xA100-40GB · aggregated enginex1 · workload=poisson n=90 rate=12 seed=0 prompt=2048 out=120 · offered_load=9.34 rps · baseline=no_admission</td></tr></tbody></table>
+
+<h2>Why this run should not be cited</h2><p class="note">liveness is UNKNOWN: no values of &#x27;signal&#x27; were recorded, so whether the policy could have fired is unknown</p><p class="note">no signal_quantity declared, so this policy cannot be placed on the survey&#x27;s axis 4 and its liveness cannot be measured</p><p class="note">90 of 90 decisions recorded no signal value, so the range is computed from a partial run</p>
+
+<footer>AdmitPerf · report schema 2.0</footer>
+</main></body></html>
