@@ -419,3 +419,174 @@ def test_markdown_carries_the_same_verdict() -> None:
     )
     assert md.startswith("# AdmitPerf Report")
     assert "## Signal liveness: INERT" in md
+
+
+# --------------------------------------------------------------------------
+# report.json is the artifact; every other format renders from it
+# --------------------------------------------------------------------------
+
+
+def _payload(values=(0.004,), **kw):
+    from admitperf.report import RunHeader, to_dict
+
+    facts = facts_from(
+        get_policy("kv_threshold", threshold=0.90),
+        [{"kv_used_fraction": v, "kind": "admit"} for v in values],
+        **kw,
+    )
+    return to_dict(facts, RunHeader(run_id="r1", cluster="1x A100-40"))
+
+
+def test_json_is_valid_json_even_when_nothing_was_recorded() -> None:
+    """A run with no signal produces NaN internally, and `json.dumps` writes bare
+    NaN, which is invalid JSON that jq and every strict parser reject. So the file
+    nothing could read would be exactly the one describing a broken run."""
+    import json
+
+    text = json.dumps(_payload(values=[]))
+    assert "NaN" not in text
+    assert json.loads(text)["signal"]["min"] is None
+
+
+def test_round_trip_preserves_the_verdict() -> None:
+    """from_dict has to rebuild enough that a renderer never needs the original."""
+    from admitperf.report import from_dict, render
+
+    payload = _payload(values=[0.004])
+    facts, header = from_dict(payload)
+    assert facts.signal.verdict is Verdict.INERT
+    assert header.run_id == "r1"
+    assert "INERT" in render(facts, header)
+
+
+def test_round_trip_preserves_the_reporting_items() -> None:
+    from admitperf.report import from_dict
+
+    payload = _payload(values=[0.004], repeats=3, spread_p95_ms=145)
+    facts, _ = from_dict(payload)
+    after = {i.number: i.status for i in evaluate(facts)}
+    before = {i["number"]: i["status"] for i in payload["reporting_items"]}
+    assert {k: str(v) for k, v in after.items()} == before
+
+
+def test_a_major_schema_mismatch_is_refused() -> None:
+    """Reading a future report with today's code would produce numbers that look
+    fine and mean something else."""
+    from admitperf.report import from_dict
+
+    payload = _payload()
+    payload["schema_version"] = "2.0"
+    with pytest.raises(ValueError, match="not compatible"):
+        from_dict(payload)
+
+
+def test_a_minor_schema_bump_still_reads() -> None:
+    from admitperf.report import from_dict
+
+    payload = _payload()
+    payload["schema_version"] = "1.7"
+    from_dict(payload)
+
+
+def test_every_format_reports_the_same_verdict() -> None:
+    """The reason the data is the artifact. Four renderers, one source of truth, so
+    none of them can disagree about whether the run proved anything."""
+    from admitperf.report import RunHeader, render_as
+
+    facts = facts_from(
+        get_policy("kv_threshold", threshold=0.90),
+        [{"kv_used_fraction": 0.004, "kind": "admit"}],
+    )
+    header = RunHeader(run_id="r1")
+    for fmt in ("json", "text", "md", "html"):
+        assert "INERT" in render_as(facts, header, fmt=fmt), fmt
+
+
+def test_an_unknown_format_is_refused_by_name() -> None:
+    from admitperf.report import RunHeader, render_as
+
+    facts = facts_from(get_policy("kv_threshold"), [{"kv_used_fraction": 0.1}])
+    with pytest.raises(ValueError, match="unknown format"):
+        render_as(facts, RunHeader(run_id="r1"), fmt="pdf")
+
+
+# --------------------------------------------------------------------------
+# problems() — what a CI step gates on
+# --------------------------------------------------------------------------
+
+
+def test_problems_names_an_inert_run() -> None:
+    from admitperf.report import problems
+
+    found = problems(_payload(values=[0.004]))
+    assert any("INERT" in p for p in found)
+
+
+def test_problems_is_empty_for_a_sound_run() -> None:
+    from admitperf.report import problems
+
+    payload = _payload(
+        values=[0.95],
+        repeats=3,
+        spread_p95_ms=10,
+        offered_rps=15.0,
+        capacity_rps=30.0,
+        deadline_ms=500,
+        unloaded_ttft_ms=200,
+        params_source="default",
+        metric_denominator="offered",
+        config_sha="abc123def456",
+        commit="deadbeef1234",
+    )
+    assert problems(payload) == []
+
+
+def test_problems_flags_a_partial_run() -> None:
+    """More than 5% of decisions missing a value means the range is computed from
+    a fraction of the run, which is not the same as the run."""
+    from admitperf.report import RunHeader, problems, to_dict
+
+    facts = facts_from(
+        get_policy("kv_threshold"),
+        [{"kv_used_fraction": 0.95}] + [{"other": 1}] * 9,
+    )
+    found = problems(to_dict(facts, RunHeader(run_id="r1")))
+    assert any("no signal value" in p for p in found)
+
+
+# --------------------------------------------------------------------------
+# HTML must survive being emailed
+# --------------------------------------------------------------------------
+
+
+def test_html_is_self_contained() -> None:
+    """No stylesheet, no CDN, no image files. A report that needs the network is a
+    report that breaks when attached to an issue or opened in two years."""
+    from admitperf.report import render_html
+
+    html = render_html(_payload())
+    assert "<link" not in html
+    assert "http://" not in html and "https://" not in html
+    assert "<style>" in html and "<svg" in html
+
+
+def test_html_escapes_what_it_interpolates() -> None:
+    from admitperf.report import render_html
+
+    payload = _payload()
+    payload["run"]["model"] = "<script>alert(1)</script>"
+    html = render_html(payload)
+    assert "<script>alert" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_html_colours_an_inert_run_as_a_failure() -> None:
+    from admitperf.report import render_html
+
+    assert "#c92a2a" in render_html(_payload(values=[0.004]))
+
+
+def test_html_handles_a_run_with_no_signal() -> None:
+    from admitperf.report import render_html
+
+    assert "no signal recorded" in render_html(_payload(values=[]))

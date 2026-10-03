@@ -93,6 +93,12 @@ st.navigation(
                 icon=":material/bar_chart:",
                 url_path="results",
             ),
+            st.Page(
+                HERE / "views" / "report.py",
+                title="Report",
+                icon=":material/fact_check:",
+                url_path="report",
+            ),
         ],
         "Reference": [
             st.Page(

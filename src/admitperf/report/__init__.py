@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from admitperf.report.html import render_html
 from admitperf.report.items import Item, ItemStatus, RunFacts, evaluate
 from admitperf.report.liveness import (
     MARGINAL_BAND,
@@ -30,6 +31,7 @@ from admitperf.report.liveness import (
     summarise,
 )
 from admitperf.report.render import RunHeader, render, render_markdown
+from admitperf.report.schema import SCHEMA_VERSION, from_dict, problems, to_dict
 from admitperf.report.taxonomy import AXIS_HELP, VOCABULARY, PolicyCard
 
 if TYPE_CHECKING:
@@ -85,10 +87,17 @@ def report_for(
     model: str | None = None,
     engine: str | None = None,
     commit: str | None = None,
+    fmt: str = "text",
     markdown: bool = False,
     **extra: Any,
 ) -> str:
-    """One call, from a policy and its decisions to the finished page."""
+    """One call, from a policy and its decisions to a finished report.
+
+    `fmt` is one of json, text, md or html. **json is the artifact** and the other
+    three are pure functions of it — keep the json, regenerate the rest. Rendering
+    a page and discarding the data means the numbers cannot be compared across runs
+    or asserted on in CI.
+    """
     # commit identifies the run in the header AND evidences reporting item 7.
     # Passing it twice at the call site is the kind of duplication that gets one
     # of them wrong, so it is threaded here.
@@ -96,11 +105,35 @@ def report_for(
         extra.setdefault("commit", commit)
     facts = facts_from(policy, decisions, **extra)
     header = RunHeader(run_id=run_id, cluster=cluster, model=model, engine=engine, commit=commit)
-    return (render_markdown if markdown else render)(facts, header)
+    if markdown:  # kept so the original call style still works
+        fmt = "md"
+    return render_as(facts, header, fmt=fmt)
+
+
+def render_as(facts: RunFacts, header: RunHeader, *, fmt: str = "text") -> str:
+    """Render in one of the supported formats.
+
+    Every branch goes through `to_dict` first, so no renderer can compute a verdict
+    of its own. Two consumers deriving the same value independently is exactly how
+    a dashboard and a test come to disagree.
+    """
+    payload = to_dict(facts, header)
+    if fmt == "json":
+        import json
+
+        return json.dumps(payload, indent=2, sort_keys=False)
+    if fmt == "html":
+        return render_html(payload)
+    if fmt in ("md", "markdown"):
+        return render_markdown(facts, header)
+    if fmt == "text":
+        return render(facts, header)
+    raise ValueError(f"unknown format {fmt!r}; expected json, text, md or html")
 
 
 __all__ = [
     "AXIS_HELP",
+    "SCHEMA_VERSION",
     "MARGINAL_BAND",
     "VOCABULARY",
     "Item",
@@ -112,9 +145,14 @@ __all__ = [
     "Verdict",
     "evaluate",
     "facts_from",
+    "from_dict",
+    "problems",
     "render",
+    "render_as",
+    "render_html",
     "render_markdown",
     "report_for",
     "sparkline",
+    "to_dict",
     "summarise",
 ]

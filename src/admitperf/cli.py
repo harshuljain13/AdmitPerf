@@ -705,14 +705,29 @@ def bench_report(path: str, out: str | None) -> None:
 @click.option("--offered-rps", type=float)
 @click.option("--capacity-rps", type=float, help="measured ceiling, for item 1")
 @click.option("--repeats", type=int, default=1, show_default=True)
-@click.option("--markdown", is_flag=True, help="Markdown instead of plain text")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "text", "md", "html"]),
+    default="text",
+    show_default=True,
+    help="json is the artifact; the rest render from it",
+)
+@click.option("--markdown", is_flag=True, help="deprecated alias for --format md")
+@click.option(
+    "--check",
+    is_flag=True,
+    help="exit non-zero if the run cannot support a claim about the policy",
+)
 @click.option("-o", "--out", type=click.Path(dir_okay=False), help="write to a file")
 def report(
     decisions: str,
     policy_name: str,
     threshold: float | None,
     run_id: str | None,
+    fmt: str,
     markdown: bool,
+    check: bool,
     out: str | None,
     **facts: object,
 ) -> None:
@@ -727,7 +742,7 @@ def report(
     """
     import json
 
-    from admitperf.report import report_for
+    from admitperf.report import RunHeader, facts_from, problems, render_as, to_dict
 
     rows = [json.loads(line) for line in Path(decisions).read_text().splitlines() if line.strip()]
     if not rows:
@@ -741,18 +756,37 @@ def report(
     except KeyError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    page = report_for(
-        policy,
-        rows,
+    if markdown:
+        fmt = "md"
+
+    # The header identifies the run; RunFacts carries what the reporting items are
+    # evidenced by. `commit` belongs to BOTH — it names the run and it evidences
+    # item 7 — so it is the one key deliberately passed to each.
+    header_only = ("cluster", "model", "engine")
+    supplied = {k: v for k, v in facts.items() if v is not None}
+    head = {k: supplied.pop(k) for k in header_only if k in supplied}
+    header = RunHeader(
         run_id=run_id or Path(decisions).stem,
-        markdown=markdown,
-        **{k: v for k, v in facts.items() if v is not None},
+        commit=supplied.get("commit"),  # type: ignore[arg-type]
+        **head,  # type: ignore[arg-type]
     )
+    run = facts_from(policy, rows, **supplied)
+    page = render_as(run, header, fmt=fmt)
+
     if out:
         Path(out).write_text(page + "\n")
         click.echo(f"wrote {out}", err=True)
     else:
         click.echo(page)
+
+    if check:
+        # Exit code, not prose, so a CI step can gate on it. An empty list does
+        # not mean the policy worked — only that the run could show whether it did.
+        found = problems(to_dict(run, header))
+        for line in found:
+            click.echo(f"  ! {line}", err=True)
+        if found:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":
