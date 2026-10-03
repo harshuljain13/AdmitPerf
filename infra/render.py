@@ -94,9 +94,16 @@ class Host:
     gpu_kind: str
     gpu_count: int
     hbm_gb: float
-    #: Name of the .env variable holding this host's address. The NAME is not a
-    #: secret so it belongs in the config; the address is, so it does not.
+    #: Name of the .env variable holding this host's PUBLIC address, used for SSH
+    #: and rsync. The NAME is not a secret so it belongs in the config; the
+    #: address is, so it does not.
     address_env: str | None = None
+
+    #: Name of the variable holding its PRIVATE address. Lambda firewalls the
+    #: public interface down to port 22, so worker URLs and the KV store must use
+    #: the private network — 10.19.x.x here. Falls back to the public address when
+    #: unset, which is correct for a single host reached through a tunnel.
+    private_env: str | None = None
 
     @property
     def env_suffix(self) -> str:
@@ -117,6 +124,20 @@ class Host:
         if specific:
             return specific
         return env.get("LAMBDA", "").strip() if sole else ""
+
+    def data_address(self, env: Mapping[str, str], *, sole: bool = False) -> str:
+        """The address OTHER MACHINES use to reach this one.
+
+        Separate from `address` because they are genuinely different networks. The
+        public interface accepts only SSH, so a worker URL built from it connects
+        to nothing — and the failure is a timeout during a run rather than an error
+        at configuration time.
+        """
+        if self.private_env:
+            got = env.get(self.private_env, "").strip()
+            if got:
+                return got
+        return self.address(env, sole=sole)
 
     def key(self, env: Mapping[str, str]) -> str:
         return (
@@ -189,11 +210,71 @@ def load_dotenv(root: Path | None = None) -> dict[str, str]:
     return out
 
 
-def load(path: Path) -> dict[str, Any]:
+def load(path: Path, profile: str | None = None) -> dict[str, Any]:
+    """Read a config and apply its active profile.
+
+    Resolving here means every other function sees a plain config with one
+    topology. The alternative — resolving at each call site — is a rule that has
+    to be remembered, and the one place that forgets it renders the wrong fleet.
+    """
     raw = yaml.safe_load(path.read_text())
     if not isinstance(raw, dict):
         raise ConfigError(f"{path} is not a mapping")
-    return raw
+    return resolve(raw, profile)
+
+
+def profiles_in(cfg: dict[str, Any]) -> dict[str, Any]:
+    return dict(cfg.get("profiles") or {})
+
+
+def resolve(cfg: dict[str, Any], profile: str | None = None) -> dict[str, Any]:
+    """Apply a named profile, returning a config with no profiles left in it.
+
+    A profile names which hosts to use and what topology to run on them. Everything
+    else — model, engine, overflow, admission — is shared, declared once, and
+    identical across profiles. That is the whole point: when two runs differ only
+    by profile, "same cluster, only the topology changed" is true by construction
+    rather than by discipline.
+
+    Called before anything else reads the config, so the rest of the renderer never
+    sees a profile and cannot forget to apply one.
+    """
+    profiles = profiles_in(cfg)
+    if not profiles:
+        return cfg
+
+    name = profile or str(cfg.get("profile", "") or "")
+    if not name:
+        raise ConfigError(
+            f"this config has profiles ({', '.join(profiles)}) but none is active. "
+            "Set `profile:` in the config or pass --profile."
+        )
+    if name not in profiles:
+        raise ConfigError(
+            f"unknown profile {name!r}. Available: {', '.join(profiles)}"
+        )
+
+    out = {k: v for k, v in cfg.items() if k not in ("profiles", "profile")}
+    chosen = profiles[name] or {}
+    out["active_profile"] = name
+
+    # A profile picks from the hosts declared once at the top, rather than
+    # redeclaring them. Four addresses in .env then serve every profile.
+    use = chosen.get("use_hosts")
+    if use:
+        declared = {h["name"]: h for h in (cfg.get("hosts") or [])}
+        missing = [n for n in use if n not in declared]
+        if missing:
+            raise ConfigError(
+                f"profile {name!r} uses hosts {missing}, which are not declared. "
+                f"Known: {', '.join(declared) or 'none'}"
+            )
+        out["hosts"] = [declared[n] for n in use]
+
+    for key, value in chosen.items():
+        if key != "use_hosts":
+            out[key] = value
+    return out
 
 
 def hosts_from(
@@ -232,6 +313,7 @@ def hosts_from(
         out[name] = Host(
             name=name,
             address_env=(str(h["address_env"]) if h.get("address_env") else None),
+            private_env=(str(h["private_env"]) if h.get("private_env") else None),
             gpu_kind=str(gpu.get("kind", "unknown")),
             gpu_count=int(gpu.get("count", 0)),
             hbm_gb=float(gpu.get("hbm_gb", 0)),
@@ -740,7 +822,9 @@ def gateway_env(
     for name, host in hosts.items():
         if not any(w.host.name == name for w in workers):
             continue
-        a = host.address(env, sole=sole)
+        # The PRIVATE address: these URLs are used by the gateway and by workers
+        # reaching each other, and the public interface accepts only SSH.
+        a = host.data_address(env, sole=sole)
         if not a:
             if strict:
                 hint = f" (or LAMBDA, since {name!r} is the only host)" if sole else ""
@@ -798,7 +882,10 @@ def plan(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> str:
     validate(cfg, env)
     hosts, workers = hosts_from(cfg, env), workers_from(cfg, env)
     topo, util = cfg["topology"], float(cfg["engine"]["gpu_memory_utilization"])
-    lines = [
+    lines = []
+    if cfg.get("active_profile"):
+        lines.append(f"profile={cfg['active_profile']}")
+    lines += [
         f"mode={topo['mode']} split={topo.get('split', 'phase')} "
         f"transport={topo.get('kv_transport') or '-'} "
         f"prefix_cache={'on' if cfg['engine'].get('enable_prefix_caching') else 'OFF'}",
@@ -846,10 +933,31 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host", help="only this host's manifests")
     p.add_argument("--env", action="store_true", help="print the gateway environment")
     p.add_argument("--plan", action="store_true", help="print what lands where")
+    p.add_argument("--profile", help="which variant to render; overrides the config")
+    p.add_argument(
+        "--profiles", action="store_true", help="list the variants in this config"
+    )
     a = p.parse_args(argv)
 
     try:
-        cfg = load(a.config)
+        if a.profiles:
+            raw = yaml.safe_load(a.config.read_text())
+            active = str(raw.get("profile", "") or "")
+            for name, body in (raw.get("profiles") or {}).items():
+                topo = (body or {}).get("topology") or {}
+                pools = topo.get("pools") or {}
+                shape = " ".join(
+                    f"{k}x{(v or {}).get('replicas', 1)}" for k, v in pools.items()
+                )
+                hosts = len((body or {}).get("use_hosts") or [])
+                mark = "*" if name == active else " "
+                print(
+                    f" {mark} {name:<10} {hosts} host(s)  "
+                    f"{topo.get('mode', '?'):<14} {shape}"
+                )
+            print("\n * = active. Override with --profile.")
+            return 0
+        cfg = load(a.config, a.profile)
         if a.plan:
             print(plan(cfg))
             return 0

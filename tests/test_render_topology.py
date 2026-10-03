@@ -23,6 +23,7 @@ from infra.render import (
     hosts_from,
     plan,
     render,
+    resolve,
     validate,
     weights_gb,
     workers_from,
@@ -34,7 +35,19 @@ SHIPPED = REPO / "infra" / "config" / "cluster.yaml"
 
 @pytest.fixture
 def cfg() -> dict[str, Any]:
-    """The real config, deep-copied so a mutation cannot leak between tests."""
+    """The real config with the `disagg` profile applied.
+
+    Resolved rather than raw, because every function below expects one topology.
+    `disagg` because it exercises the most machinery — two pools, a transport and
+    an endpoint — so a refusal test has something to refuse. Tests about the other
+    profiles resolve them by name.
+    """
+    return resolve(copy.deepcopy(yaml.safe_load(SHIPPED.read_text())), "disagg")
+
+
+@pytest.fixture
+def raw() -> dict[str, Any]:
+    """The config as written, profiles and all."""
     return copy.deepcopy(yaml.safe_load(SHIPPED.read_text()))
 
 
@@ -828,3 +841,126 @@ def test_aggregated_emits_no_transport_and_no_endpoint(cfg: dict[str, Any]) -> N
     env = gateway_env(cfg, ENV)
     assert "KV_BACKEND" not in env
     assert "MOONCAKE_URL" not in env
+
+
+# --------------------------------------------------------------------------
+# Profiles: one variant per run, everything else shared
+# --------------------------------------------------------------------------
+
+PRIVATE = {f"LAMBDA_PRIVATE_{i}": f"10.19.80.{i}" for i in range(1, 9)}
+FULL = ENV | PRIVATE
+
+
+def test_the_three_profiles_exist(raw: dict[str, Any]) -> None:
+    assert set(raw["profiles"]) == {"single", "pair", "disagg"}
+
+
+def test_the_active_profile_is_the_simplest_one(raw: dict[str, Any]) -> None:
+    """Start where the fewest things can be wrong, then add."""
+    assert raw["profile"] == "single"
+
+
+@pytest.mark.parametrize(
+    ("profile", "hosts", "workers", "mode"),
+    [
+        ("single", 1, 1, "aggregated"),
+        ("pair", 2, 2, "aggregated"),
+        ("disagg", 4, 4, "disaggregated"),
+    ],
+)
+def test_each_profile_renders_the_fleet_it_describes(
+    raw: dict[str, Any], profile: str, hosts: int, workers: int, mode: str
+) -> None:
+    cfg = resolve(raw, profile)
+    validate(cfg, FULL)
+    assert len(hosts_from(cfg, FULL)) == hosts
+    assert len(workers_from(cfg, FULL)) == workers
+    assert cfg["topology"]["mode"] == mode
+
+
+def test_profiles_share_everything_except_hosts_and_topology(
+    raw: dict[str, Any],
+) -> None:
+    """The property that makes two runs comparable. If a profile could change the
+    model or the engine flags, "only the topology changed" would be a claim rather
+    than a fact."""
+    shared = [resolve(raw, p) for p in ("single", "pair", "disagg")]
+    for key in ("model", "engine", "overflow", "admission", "placement"):
+        assert all(c[key] == shared[0][key] for c in shared), key
+
+
+def test_a_profile_may_only_pick_from_the_declared_hosts(raw: dict[str, Any]) -> None:
+    raw["profiles"]["single"]["use_hosts"] = ["gpu-9"]
+    with pytest.raises(ConfigError, match="not declared"):
+        resolve(raw, "single")
+
+
+def test_an_unknown_profile_is_refused_by_name(raw: dict[str, Any]) -> None:
+    with pytest.raises(ConfigError, match="unknown profile"):
+        resolve(raw, "enormous")
+
+
+def test_a_config_with_profiles_and_no_active_one_is_refused(
+    raw: dict[str, Any],
+) -> None:
+    """Rendering a default when none was chosen would deploy a fleet nobody asked
+    for."""
+    raw.pop("profile")
+    with pytest.raises(ConfigError, match="none is active"):
+        resolve(raw, None)
+
+
+def test_resolve_leaves_no_profiles_behind(raw: dict[str, Any]) -> None:
+    """So nothing downstream can forget to apply one."""
+    cfg = resolve(raw, "pair")
+    assert "profiles" not in cfg
+    assert cfg["active_profile"] == "pair"
+
+
+def test_the_plan_names_the_profile(raw: dict[str, Any]) -> None:
+    """A rendered run has to say which variant it was, or two bundles are
+    indistinguishable."""
+    assert "profile=pair" in plan(resolve(raw, "pair"), FULL)
+
+
+def test_a_config_without_profiles_still_works(cfg: dict[str, Any]) -> None:
+    """Profiles are optional. A plain config is unchanged by resolve()."""
+    assert resolve(cfg, None) is cfg
+
+
+# --------------------------------------------------------------------------
+# Public for SSH, private for the data plane — different networks
+# --------------------------------------------------------------------------
+
+
+def test_worker_urls_use_the_private_address(cfg: dict[str, Any]) -> None:
+    """Lambda firewalls the public interface down to port 22, so a URL built from
+    it connects to nothing — and fails as a timeout mid-run rather than an error at
+    configuration time."""
+    env = gateway_env(cfg, FULL)
+    assert "10.19.80." in env["PREFILL_URLS"]
+    assert "150.136." not in env["PREFILL_URLS"]
+
+
+def test_ssh_still_uses_the_public_address(cfg: dict[str, Any]) -> None:
+    """The two are not interchangeable in either direction: the private network is
+    unreachable from a laptop."""
+    host = hosts_from(cfg, FULL)["gpu-1"]
+    assert host.address(FULL) == "ubuntu@10.0.0.1"  # LAMBDA_HOST_1 in the test env
+    assert host.data_address(FULL) == "10.19.80.1"
+
+
+def test_a_host_without_a_private_address_falls_back_to_public(
+    cfg: dict[str, Any],
+) -> None:
+    """Correct for a single box reached through a tunnel, which is how the lab ran."""
+    fleet(cfg, 1)  # no private_env
+    host = hosts_from(cfg, FULL)["gpu-1"]
+    assert host.data_address(FULL) == host.address(FULL)
+
+
+def test_the_kv_endpoint_is_a_private_address(raw: dict[str, Any]) -> None:
+    """Mooncake lives on one box; the other three reach it over the private
+    network or not at all."""
+    endpoint = raw["profiles"]["disagg"]["topology"]["kv_endpoint"]
+    assert "10.19." in endpoint, endpoint

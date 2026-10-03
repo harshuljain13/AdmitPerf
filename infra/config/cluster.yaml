@@ -19,35 +19,45 @@
 #  HOSTS — the machines
 # ---------------------------------------------------------------------------
 #  name           identifier used in manifests, ports and `--host`
-#  address_env    .env variable holding `user@ip`. The NAME is not a secret so
-#                 it belongs here; the address is, so it does not
+#  address_env    .env variable holding the PUBLIC `user@ip`, for SSH and rsync
+#  private_env    .env variable holding the PRIVATE address, for worker URLs and
+#                 the KV store. These are DIFFERENT NETWORKS: Lambda firewalls
+#                 the public interface down to port 22, so a URL built from it
+#                 connects to nothing, and the failure is a timeout mid-run
+#                 rather than an error at configuration time. Measured on this
+#                 fleet: private 10.19.x.x works at 1.55 ms; public 50051 is
+#                 refused. Falls back to the public address when unset
+#
+#  The variable NAMES are not secrets so they belong here; the addresses are, so
+#  they do not
 #  gpu.kind       card model. Decides what quantizations are possible:
 #                 fp8 needs sm89+, so A100 (sm80) cannot run it
 #  gpu.count      whole GPUs on this host. A tensor-parallel group cannot
 #                 exceed it, because TP all-reduces every layer
 #  gpu.hbm_gb     memory per card, before gpu_memory_utilization
 #
-#  Each host declares its own shape, because a fleet need not be uniform.
-#
-#  THIS FLEET: four SEPARATE 1x A100 instances, not one 4-GPU box. One card per
-#  host forces TP=1 and puts the KV hop on the network. For 7B that still pays
-#  off above ~3.8 Gbps.
+#  Each host declares its own shape, because a fleet need not be uniform. All of
+#  them are declared here once; a PROFILE below picks which to use.
 # ---------------------------------------------------------------------------
 hosts:
   - name: gpu-1
     address_env: LAMBDA_HOST_1
+    private_env: LAMBDA_PRIVATE_1
     gpu: {kind: A100, count: 1, hbm_gb: 40}
 
   - name: gpu-2
     address_env: LAMBDA_HOST_2
+    private_env: LAMBDA_PRIVATE_2
     gpu: {kind: A100, count: 1, hbm_gb: 40}
 
   - name: gpu-3
     address_env: LAMBDA_HOST_3
+    private_env: LAMBDA_PRIVATE_3
     gpu: {kind: A100, count: 1, hbm_gb: 40}
 
   - name: gpu-4
     address_env: LAMBDA_HOST_4
+    private_env: LAMBDA_PRIVATE_4
     gpu: {kind: A100, count: 1, hbm_gb: 40}
 
 
@@ -114,59 +124,77 @@ engine:
 
 
 # ---------------------------------------------------------------------------
-#  TOPOLOGY — how the fleet is shaped
+#  PROFILES — one variant per run, sharing everything else
 # ---------------------------------------------------------------------------
-#  mode           aggregated     one pool; each engine does prefill and decode
-#                 disaggregated  prefill pool feeds decode pool over the hop
+#  Model, engine, overflow and admission are declared ONCE, above and below, and
+#  are identical across profiles. A profile changes only which hosts are used and
+#  what topology runs on them.
 #
-#  split          phase       prefill pool / decode pool. The normal meaning
-#                 capability  OVERLOADED: the gateway then reads PREFILL_URLS
-#                             as a TEXT pool and DECODE_URLS as a VISION pool,
-#                             with no hop at all
+#  That is what makes "same cluster, only the topology changed" true by
+#  construction rather than by discipline.
 #
-#  kv_transport   mooncake is the only backend that moves bytes. nccl and nixl
-#                 are no-op stubs, so zero hops on a dashboard does not prove
-#                 the hop did not happen. Required by disaggregated, refused
-#                 by aggregated where it would be read by nothing
-#  kv_endpoint    where that transport lives. Required for mooncake, which is
-#                 an HTTP service; meaningless for nccl and nixl, which are a
-#                 collective and an RDMA path and have no address. Emitted as
-#                 MOONCAKE_URL, so it cannot be left unset by omission — unset
-#                 made every hop a silent no-op
+#      python -m infra.render infra/config/cluster.yaml --profiles
+#      python -m infra.render infra/config/cluster.yaml --profile pair --plan
 #
-#  pools          names are the gateway's contract, not labels:
-#                   aggregated    -> engine
-#                   disaggregated -> prefill, decode
-#    replicas               independent servers in this pool
-#    tensor_parallel_size   GPUs one server shards across. Cannot span hosts
-#    pipeline_parallel_size usually 1
-#    host                   pin to a named host. Omit and the renderer places
-#                           it, first-fit, and prints the assignment
+#  use_hosts   which of the hosts above to use
+#  topology    mode           aggregated | disaggregated
+#              split          phase | capability (disaggregated only)
+#              kv_transport   mooncake. Required by disaggregated, refused by
+#                             aggregated where it would be read by nothing
+#              kv_endpoint    where that transport lives. Emitted as
+#                             MOONCAKE_URL so it cannot be unset by omission,
+#                             which made every hop a silent no-op
+#              pools          names are the gateway's contract, not labels:
+#                               aggregated    -> engine
+#                               disaggregated -> prefill, decode
+#                replicas               independent servers
+#                tensor_parallel_size   GPUs one server shards across. Cannot
+#                                       span hosts, since TP all-reduces per layer
+#                host                   pin to a host; omit and the renderer
+#                                       places it and prints the assignment
 # ---------------------------------------------------------------------------
-topology:
-  mode: disaggregated
-  split: phase
-  kv_transport: mooncake
-  kv_endpoint: http://127.0.0.1:50051
+profile: single
 
-  # Two replicas per pool so placement is a real decision — with one each the
-  # gateway picks a destination with no alternatives, which is routing rather
-  # than a decision and leaves nothing to measure.
-  pools:
-    prefill:
-      replicas: 2
-      tensor_parallel_size: 1
-      pipeline_parallel_size: 1
-      # host: gpu-1
+profiles:
 
-    decode:
-      replicas: 2
-      tensor_parallel_size: 1
-      pipeline_parallel_size: 1
+  # ---- 1 GPU. Prove the pipeline end to end before adding anything. --------
+  # One worker, so placement has a single destination and is not yet a decision.
+  # Admission IS real: ~12 concurrent at 32k, and KV binds before max_num_seqs.
+  single:
+    use_hosts: [gpu-1]
+    topology:
+      mode: aggregated
+      pools:
+        engine: {replicas: 1, tensor_parallel_size: 1}
 
-  # Aggregated instead? Replace both pools with one:
-  #   pools:
-  #     engine: {replicas: 2, tensor_parallel_size: 2}
+  # ---- 2 GPUs. Placement becomes a decision. ------------------------------
+  # Two interchangeable workers, so least_loaded, round_robin and
+  # prefix_affinity can differ from each other and be compared.
+  pair:
+    use_hosts: [gpu-1, gpu-2]
+    topology:
+      mode: aggregated
+      pools:
+        engine: {replicas: 2, tensor_parallel_size: 1}
+
+  # ---- 4 GPUs, disaggregated. The comparison, with a caveat. --------------
+  # Costs half the concurrency, because the prefill pool hands its KV away and
+  # frees it, so only decode gates how many sequences are live.
+  #
+  # READ #33 BEFORE CITING ANY HOP NUMBER. The vendored transport POSTs a
+  # metadata dict, not KV, so hop counts are instrumentation rather than
+  # evidence that bytes moved. Measured on this fabric, a REAL single-stream hop
+  # would cost ~4.7 s against ~2.0 s to recompute the same KV — it would lose.
+  disagg:
+    use_hosts: [gpu-1, gpu-2, gpu-3, gpu-4]
+    topology:
+      mode: disaggregated
+      split: phase
+      kv_transport: mooncake
+      kv_endpoint: http://10.19.81.206:50051
+      pools:
+        prefill: {replicas: 2, tensor_parallel_size: 1}
+        decode: {replicas: 2, tensor_parallel_size: 1}
 
 
 # ---------------------------------------------------------------------------
