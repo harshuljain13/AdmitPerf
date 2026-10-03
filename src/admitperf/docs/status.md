@@ -1,94 +1,66 @@
 # Status
 
-*Updated: 2026-09-14*
+What exists, what does not, and what has actually been measured. Updated by hand;
+if it disagrees with the code, the code is right and this is stale.
 
-## What exists today
+## Measured results: none
 
-| Component | Status | Location |
-|---|---|---|
-| **Adapter API v0** — `Request`, `SystemState`, `Decision`, `AdmissionPolicy` | ✅ Frozen 2026-09-11 | `core/api.py` |
-| Configuration — one definition of every setting, YAML + flag overrides | ✅ Working | `core/config.py` |
-| Policy registry + third-party discovery via entry points | ✅ Working | `core/registry.py` |
-| State cache with staleness accounting | ✅ Working | `core/state.py` |
-| Runner — background scrape + arrival loop, staleness ceiling | ✅ Working | `core/runner.py` |
-| **vLLM adapter** — `/metrics` scrape, streaming submit, client-side timing | ✅ **Verified on real hardware** | `engines/vllm.py` |
-| **Modal provisioning** — deploy, session, teardown | ✅ **Verified on real hardware** | `infra/` |
-| Poisson workload, three SLO classes | ✅ Working | `bench/workloads/poisson.py` |
-| Experiment driver — every policy × repeats | ✅ Working | `bench/experiment.py` |
-| Results bundle + provenance tags + unavailable metrics | ✅ Working | `bench/results.py` |
-| Cross-run comparison with spread | ✅ Working | `bench/compare.py` |
-| CLI — `infra up/status/smoke/down`, `bench run/compare/report` | ✅ Working | `cli.py` |
-| Policies — `NoAdmission`, `KVThreshold`, `QueueDepth`, `QueueDepthDefer` | ✅ Working | `policies/` |
-| Mock vLLM for GPU-free testing | ✅ Working | `scripts/mock_vllm.py` |
-| Tests | ✅ 122 passing | `tests/` |
-| SGLang adapter | ⛔ None | — |
-| Lambda provider | ⛔ None — use `--engine-url` against a box you started | — |
-| Chronos-inspired port + reproduction report | ✅ Working | `policies/chronos/` · [`reports/chronos-reproduction.md`](../reports/chronos-reproduction.md) |
-| Other reference policy ports (QLM-inspired, …) | ⛔ None | — |
-| Tenant-fairness and agent-session workloads | ⛔ None | — |
-| HTML report — verdict, caveats, figures, provenance, one file | ✅ Working | `bench/report.py` |
-| Dashboard — configure, run the pipeline, read results | ✅ Working | `dashboard/` |
-| Runtime middleware (ASGI/Envoy) | ⛔ None | — |
+There are no results in this repository.
 
-## Verified end to end
+Earlier runs were deleted rather than kept, and the reasoning is worth stating
+because it is the same standard this project asks of published work. Those bundles
+were produced by a harness that had not been validated, on a provider that has
+since been removed, with a policy implementation that has since been deleted, and
+through code paths that turned out to resolve directories that never existed.
 
-A real deployment ran on 2026-09-14: Qwen2.5-0.5B on an A10G, three policies,
-two repeats each. Results and caveats in [`results.md`](results.md).
+A number is evidence only if the thing that produced it can be run again. None of
+those could be, so keeping them would have meant keeping claims whose provenance
+nobody could check — which is precisely the failure the survey behind this project
+documents. Deleting them costs nothing real: a measurement that cannot be
+reproduced was never a measurement.
 
-That run found four defects no amount of faking would have surfaced:
+The first result will come from `experiments/signal-liveness`, and it will say
+either that the signal moved or that it did not. Both are reportable.
 
-1. **The container served the default model.** `infra/modal_app.py` is imported
-   twice — locally by `modal deploy`, then again inside the container — and the
-   config only existed for the first. Decorator arguments were correct;
-   everything read inside the serve function fell back to defaults.
-2. **The engine died at the first sampled token.** vLLM selects FlashInfer for
-   top-k/top-p sampling, which JIT-compiles the kernel on first use and needs
-   `nvcc`, absent from the slim image.
-3. **Nothing ever queued inside vLLM.** A Modal container serves one input at a
-   time unless told otherwise, so load queued at the proxy and the engine saw
-   strictly sequential traffic. `num_requests_running` sat at 1 and
-   `num_requests_waiting` at 0 while latency climbed — the admission signal was
-   flat for a reason that had nothing to do with admission.
-4. **Teardown silently failed.** `modal app stop` prompts for confirmation and
-   aborts without a terminal, leaving the deployment running and billing.
+## Built and tested
 
-All four are fixed. The third is the one worth remembering: the benchmark can
-be wired correctly end to end and still measure the platform instead of the
-engine.
+| | Where | Tests |
+| --- | --- | --- |
+| Policy contract, with the taxonomy declared on the policy | `core/api.py` | yes |
+| Policy registry, including third-party plugins | `core/registry.py` | yes |
+| Three policies: `no_admission`, `kv_threshold`, `queue_depth` | `policies/` | yes |
+| Cluster config to manifests and gateway environment | `infra/render.py` | yes |
+| Refusals: bad quantization for the card, weights that leave no KV, under one sequence, slicing, oversubscribed host, TP across hosts, 429 overflow | `infra/render.py` | yes |
+| The AdmitPerf Report: liveness verdict, policy card, seven reporting items | `report/` | yes |
+| `report.json` as the artifact; text, markdown, HTML and the dashboard render from it | `report/schema.py` | yes |
+| Experiment driver: load, decisions, report, against a fake engine | `bench/drive.py` | partly |
+| Dashboard | `reports/dashboard/` | yes |
 
-## The honest gaps
+## Not built
 
-- **One model, one GPU, one workload.** Nothing here generalises yet.
-- **No reference policy ports.** `QueueDepth` is a threshold, not a port of a
-  published algorithm. The roster in [`policies.md`](policies.md) is unbuilt, so
-  there is no head-to-head against prior work — which is the actual goal.
-- **The report is only as good as the runs behind it.** `bench report` writes
-  a standalone `report.html` with figures and provenance, and it states its
-  own caveats — but a gap inside the run-to-run spread is still a gap inside
-  the spread, however well it is rendered.
-- **Two repeats is thin.** Enough to see that the baseline's spread is large,
-  not enough to defend a small difference between policies.
+| | Tracked as |
+| --- | --- |
+| Cluster brought up from a config, over SSH | [#15](https://github.com/harshuljain13/AdmitPerf/issues/15) |
+| The vendored gateway reading a policy from the registry | [#10](https://github.com/harshuljain13/AdmitPerf/issues/10) |
+| A run that fails when its signal never reached the threshold | [#12](https://github.com/harshuljain13/AdmitPerf/issues/12) |
+| Load generators from the lab | [#27](https://github.com/harshuljain13/AdmitPerf/issues/27) |
+| The research agent wired to the gateway | [#16](https://github.com/harshuljain13/AdmitPerf/issues/16) |
 
-## Metric availability
+## Known limits
 
-Two metrics named in [`metrics.md`](metrics.md) cannot be produced, and appear
-in every bundle's `unavailable` block with the reason rather than estimated:
+**The KV hop is instrumented, not real.** `router/kvbus.py` POSTs a metadata dict,
+not KV tensors, so hop counts show that the request path split across two pools and
+nothing more. No transfer latency can be claimed from this stack.
+[#33](https://github.com/harshuljain13/AdmitPerf/issues/33).
 
-- **preemption loss in KV bytes** — no engine exposes it;
-  `vllm:num_preemptions_total` is a count, not a volume.
-- **GPU utilization** — needs DCGM alongside the engine; not collected.
+**The experiment driver is new and lightly tested.** It was written small and
+explicit on purpose, so that it can be read in full rather than trusted, but it has
+not been validated check by check. Until it has, a number from it is provisional.
 
-Runs also record `signal_was_healthy`. A run where most scrapes failed produces
-numbers that look ordinary and describe nothing, so it is flagged rather than
-left for a reader to notice.
+**The attention shape in the cluster config is declared, not read from the model.**
+`kv_bytes_per_token`, and therefore every concurrency estimate, depends on it. It
+needs checking against the model's `config.json` on first bring-up; wrong by 2x
+moves every figure by 2x.
 
-## What was removed, and why
-
-An earlier iteration carried a simulated engine, an injectable clock, and a
-defer queue — roughly a third of the codebase — deleted in `7a95fb7`. A
-simulated engine cannot answer whether one policy beats another on a real
-serving stack. The clock existed only to make that simulation deterministic,
-and the defer queue only because `DEFER` is in the frozen API; against a live
-engine, deferring is a sleep and a second question.
-
-They remain in git history if a deterministic CI substrate is ever wanted.
+**Nothing has run on a GPU.** Every manifest `infra/render.py` produces is
+unapplied, and the readiness probe in particular is unexercised.

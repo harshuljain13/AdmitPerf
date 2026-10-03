@@ -69,7 +69,7 @@ request was refused but why.
 Measured on an A10G against an uncontrolled baseline, it cuts TTFT p95 from
 4750ms to 515ms but admits only 5.3% of offered load. Full study, including why
 that is far more conservative than the paper reports:
-[`../reports/chronos-reproduction.md`](../reports/chronos-reproduction.md).
+[`../reports/chronos-reproduction.md`](status.md).
 
 **It is named "inspired" deliberately.** The algorithm is the paper's, but two
 substitutions prevent a fidelity claim: the kernel parameters are fitted from
@@ -80,7 +80,7 @@ batch sizes. Utilization is therefore estimated rather than known, and Theorem
 
 ## Choosing a signal
 
-Measured on real hardware (see [`results.md`](results.md)): on Qwen2.5-0.5B
+Measured on real hardware (see [`results.md`](status.md)): on Qwen2.5-0.5B
 capped at four concurrent sequences, `kv_cache_usage_perc` never exceeded 0.005
 while the queue reached 24 deep. The KV cache dwarfed what four short sequences
 could fill, so the binding constraint was the concurrency cap.

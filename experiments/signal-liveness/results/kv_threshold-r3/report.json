@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0",
+  "run": {
+    "id": "signal-liveness-kv_threshold-r3",
+    "cluster": "single.yaml",
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "engine": "mock_vllm.py (capacity 400)",
+    "commit": null
+  },
+  "liveness": {
+    "verdict": "INERT",
+    "explanation": "kv_used_fraction peaked at 0.03 against a threshold of 0.9, 97% short; it never approached the threshold, so the policy could not have fired",
+    "headroom_fraction": 0.9666666666666667
+  },
+  "policy": {
+    "name": "kv_threshold",
+    "unit": "request",
+    "setting": "online",
+    "objective": "deadline",
+    "signal": "kv_used_fraction",
+    "threshold": 0.9,
+    "portability": "A",
+    "requires": [
+      "kv_used_fraction"
+    ],
+    "anomalies": []
+  },
+  "signal": {
+    "name": "kv_used_fraction",
+    "threshold": 0.9,
+    "samples": 90,
+    "missing": 0,
+    "min": 0.0,
+    "p50": 0.018,
+    "p95": 0.028,
+    "p99": 0.03,
+    "max": 0.03,
+    "crossings": 0,
+    "sparkline": "                                                "
+  },
+  "decisions": {
+    "total": 90,
+    "rejected": 0,
+    "deferred": 0
+  },
+  "reporting_items": [
+    {
+      "number": 1,
+      "title": "Capacity-relative load",
+      "status": "n/a",
+      "detail": "offered load or measured ceiling not recorded; absolute rps is not comparable across deployments"
+    },
+    {
+      "number": 2,
+      "title": "Calibrated deadlines",
+      "status": "n/a",
+      "detail": "no unloaded baseline recorded, so the deadline cannot be expressed as a multiple of idle latency"
+    },
+    {
+      "number": 3,
+      "title": "Signal liveness",
+      "status": "FAIL",
+      "detail": "kv_used_fraction peaked at 0.03 against a threshold of 0.9, 97% short; it never approached the threshold, so the policy could not have fired"
+    },
+    {
+      "number": 4,
+      "title": "Repeats and spread",
+      "status": "n/a",
+      "detail": "3 repeats but no spread computed"
+    },
+    {
+      "number": 5,
+      "title": "Parameter provenance",
+      "status": "ok",
+      "detail": "threshold=0.9 (cluster config)"
+    },
+    {
+      "number": 6,
+      "title": "Metric definition",
+      "status": "ok",
+      "detail": "rates computed over offered"
+    },
+    {
+      "number": 7,
+      "title": "Configuration disclosure",
+      "status": "n/a",
+      "detail": "missing commit; this run is not reproducible from the report alone"
+    }
+  ],
+  "inputs": {
+    "offered_rps": 9.11,
+    "capacity_rps": null,
+    "deadline_ms": null,
+    "unloaded_ttft_ms": null,
+    "repeats": 3,
+    "spread_p95_ms": null,
+    "params_source": "cluster config",
+    "metric_denominator": "offered",
+    "config_sha": "single.yaml"
+  },
+  "axis_help": {
+    "unit": "what the policy decides about",
+    "setting": "whether it decides as requests arrive, or in advance",
+    "objective": "what it is trying to protect",
+    "signal": "the field of SystemState it reads",
+    "portability": "A = pure function of (request, state); B = needs engine changes"
+  },
+  "harness": {
+    "scrapes_ok": 90,
+    "scrapes_failed": 0,
+    "max_arrival_lag_ms": 5.11,
+    "wall_s": 9.88
+  },
+  "expect": {
+    "signal": "kv_used_fraction",
+    "reaches_threshold": true,
+    "limiter": "kv"
+  }
+}

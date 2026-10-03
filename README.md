@@ -17,7 +17,7 @@ defend is also a thing you can deploy.
 > comparison is not currently possible. [`docs/motivation.md`](src/admitperf/docs/motivation.md)
 
 **Status**: working MVP, verified on real hardware.
-[Results](src/admitperf/docs/results.md) · [honest gaps](src/admitperf/docs/status.md)
+[Results](src/admitperf/docs/status.md) · [honest gaps](src/admitperf/docs/status.md)
 
 ## Start here
 
@@ -88,7 +88,7 @@ much as the median: unmanaged queueing is unpredictable, not merely slow.
 exceeded 0.005 while the queue reached 24 deep — on a 0.5B model a KV-pressure
 policy reads a flat line and silently becomes admit-everything. Which signal
 carries the pressure depends on the regime, which is why policies declare what
-they need. Full numbers: [`docs/results.md`](src/admitperf/docs/results.md).
+they need. Full numbers: [`docs/results.md`](src/admitperf/docs/status.md).
 
 ## Writing a policy
 
@@ -161,7 +161,7 @@ scripts/         mock_vllm.py, a mock engine for testing without a GPU
 |---|---|
 | Understand why AdmitPerf exists | [`docs/motivation.md`](src/admitperf/docs/motivation.md) |
 | See what exists and what does not | [`docs/status.md`](src/admitperf/docs/status.md) |
-| See the first real-hardware results | [`docs/results.md`](src/admitperf/docs/results.md) |
+| See the first real-hardware results | [`docs/results.md`](src/admitperf/docs/status.md) |
 | Read the data-flow + reproducibility contract | [`docs/design.md`](src/admitperf/docs/design.md) |
 | Read the metric definitions, and what is not measurable | [`docs/metrics.md`](src/admitperf/docs/metrics.md) |
 | See which policies fit behind this API, and the candidate list | [`docs/scope.md`](src/admitperf/docs/scope.md) · [`docs/policies.md`](src/admitperf/docs/policies.md) |

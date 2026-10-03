@@ -20,6 +20,7 @@ Every setting lives in the config file; flags override it for one-offs.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -651,6 +652,129 @@ def report(
             click.echo(f"  ! {line}", err=True)
         if found:
             raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# run — one experiment, end to end
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("experiment", type=click.Path(exists=True))
+@click.option(
+    "--mock",
+    is_flag=True,
+    help="start a fake engine locally instead of using a real one. No GPU.",
+)
+@click.option(
+    "--capacity",
+    type=int,
+    default=8,
+    show_default=True,
+    help="concurrent sequences the mock pretends to hold before it saturates",
+)
+@click.option("--engine-url", help="a real engine, if you brought one up yourself")
+@click.option("--repeats", type=int, help="override the config")
+def run(
+    experiment: str,
+    mock: bool,
+    capacity: int,
+    engine_url: str | None,
+    repeats: int | None,
+) -> None:
+    """Drive one experiment's load and write a report per arm.
+
+    \b
+      admitperf run experiments/signal-liveness --mock
+      admitperf run experiments/signal-liveness --engine-url http://127.0.0.1:8080
+
+    The experiment says what load to send. The cluster config it points at says
+    what is deployed and which admission policy is active. Each arm writes
+    decisions.jsonl and report.json into the experiment's own results/.
+    """
+    import subprocess
+    import sys as _sys
+    import time as _time
+
+    from admitperf.bench.drive import (
+        ExperimentError,
+        load_experiment,
+        run_arm,
+        scrape,
+        write_arm,
+    )
+    from admitperf.reports.paths import repo_root
+
+    try:
+        exp = load_experiment(experiment)
+    except ExperimentError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if not mock and not engine_url:
+        raise SystemExit(
+            "no engine. Pass --mock for a fake one, or --engine-url for a real one.\n"
+            "Nothing is provisioned for you: a cluster bring-up is an SSH sequence "
+            "against rented machines, and this command will not pretend otherwise."
+        )
+
+    proc = None
+    engine_label = engine_url or ""
+    if mock:
+        mock_py = repo_root() / "tests" / "mock_vllm.py"
+        engine_url = "http://127.0.0.1:8099"
+        engine_label = f"mock_vllm.py (capacity {capacity})"
+        proc = subprocess.Popen(
+            [_sys.executable, str(mock_py), "--port", "8099", "--capacity", str(capacity)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for _ in range(50):
+            if scrape(engine_url, timeout=0.5).ok:
+                break
+            _time.sleep(0.2)
+        else:
+            proc.terminate()
+            raise SystemExit("the mock engine never became ready")
+
+    n_repeats = repeats if repeats is not None else exp.repeats
+    arms = [exp.policy_name]
+    if exp.baseline and exp.baseline != exp.policy_name:
+        # The baseline runs against the SAME engine, so the only difference is
+        # whether the policy was consulted. Without it, "admitted 82%" has nothing
+        # to be 82% of.
+        arms.append(exp.baseline)
+
+    out_root = exp.path.parent / "results"
+    click.echo(f"{exp.name}: {exp.cluster_path.name}, engine {engine_label}")
+    click.echo(f"  arms {arms}  x{n_repeats} repeat(s)")
+
+    try:
+        for repeat in range(1, n_repeats + 1):
+            for policy_name in arms:
+                arm = run_arm(exp, policy_name=policy_name, engine_url=engine_url, seed=repeat)
+                out = write_arm(
+                    exp,
+                    arm,
+                    policy_name=policy_name,
+                    repeat=repeat,
+                    engine=engine_label,
+                    out_root=out_root,
+                )
+                payload = json.loads((out / "report.json").read_text())
+                verdict = payload["liveness"]["verdict"]
+                d = payload["decisions"]
+                click.echo(
+                    f"  {policy_name:<14} r{repeat}  {verdict:<8} "
+                    f"{d['rejected']}/{d['total']} rejected  "
+                    f"signal max {payload['signal']['max']}  -> {out.name}/"
+                )
+    finally:
+        if proc is not None:
+            proc.terminate()
+            proc.wait(timeout=10)
+
+    click.echo(f"\nreports in {out_root}/")
+    click.echo("  admitperf report-view        # or: streamlit run the dashboard")
 
 
 if __name__ == "__main__":

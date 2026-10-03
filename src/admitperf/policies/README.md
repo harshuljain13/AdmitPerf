@@ -73,7 +73,7 @@ larger than a handful of short sequences can fill. We measured it never
 exceeding **0.005** while the queue was 24 deep — the policy read a flat line
 near zero and silently behaved as "accept everything", scoring identically to
 the baseline while appearing to work. Check that your signal actually moves
-before trusting a result. See [`../../../docs/results.md`](../docs/results.md).
+before trusting a result. See [`../../../docs/results.md`](../docs/status.md).
 
 ---
 
@@ -104,7 +104,7 @@ speeds calculated on paper. Ours are measured from a live server, and one of
 them — the fixed per-step overhead — we could not measure at all. It runs their
 algorithm; it does not reproduce their guarantee. Full write-up, including a
 run where it was beaten by `queue_depth`:
-[`../../../reports/chronos-reproduction.md`](../reports/chronos-reproduction.md).
+[`../../../reports/chronos-reproduction.md`](../docs/status.md).
 
 Internally it is three separable pieces, because the first two are reusable by
 any policy that predicts rather than thresholds:

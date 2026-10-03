@@ -5,7 +5,8 @@
 #  run where pressure never passed 0.40, reports the same numbers as no policy at
 #  all — and a reader cannot tell the two apart.
 #
-#      admitperf run experiments/signal-liveness
+#      admitperf run experiments/signal-liveness --mock              # no GPU
+#      admitperf run experiments/signal-liveness --mock --capacity 400  # inert
 #
 #  WHAT IS DEPLOYED is not described here. It is in the cluster config below,
 #  which already declares the model, the engine flags, the topology AND the
@@ -49,11 +50,17 @@ cluster: infra/config/single.yaml
 # ---------------------------------------------------------------------------
 load:
   kind: poisson
-  n: 120
-  rate: 15
+  n: 90
+  rate: 12
   seed: 0
   prompt_tokens: 2048
-  output_tokens: 256
+
+  # Long enough that requests OVERLAP, which is the whole point. Concurrency is
+  # rate x duration, so short requests cannot fill a cache at any arrival rate.
+  # Against the mock a request lives 0.05 + output_tokens x 0.01 seconds, so 120
+  # tokens is ~1.25 s and 12 arrivals/s gives ~15 concurrent — past a capacity-8
+  # engine. At 24 tokens it would be ~3 concurrent and the run comes back INERT.
+  output_tokens: 120
 
 # ---------------------------------------------------------------------------
 #  BASELINE — what the policy is measured against

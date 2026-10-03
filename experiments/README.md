@@ -1,57 +1,50 @@
-# experiments/
+# experiments
 
-**One folder per experiment, holding everything about it.**
+An experiment says **what load to send**. It does not describe infrastructure — the
+cluster config it points at does that, including which admission policy is active.
 
 ```
-experiments/which-policy-when/
-├── experiment.yaml     what to run on, what traffic, which policies, how many repeats
-├── results/            every run this experiment has produced
-│   ├── <policy>-r<n>/    manifest.json + summary.json  (committed)
-│   │                     decisions.jsonl + outcomes.jsonl  (local only, large)
-│   ├── compare.txt       the table
-│   ├── report.html       the readable artifact
-│   └── figures/          PNGs for a paper
-└── README.md           (optional) what this experiment found
+experiments/signal-liveness/
+  experiment.yaml      cluster: infra/config/single.yaml
+                       load: {kind, n, rate, seed, prompt_tokens, output_tokens}
+                       baseline: no_admission
+                       repeats: 3
+                       expect: {reaches_threshold: true}
+  results/             one directory per arm per repeat, written by `admitperf run`
 ```
-
-Pass the **folder**, not the file — results then land inside it by default, and
-an experiment stops being scattered across two trees:
 
 ```bash
-admitperf bench run -c experiments/which-policy-when
+admitperf run experiments/signal-liveness --mock              # fake engine, no GPU
+admitperf run experiments/signal-liveness --mock --capacity 400   # never saturates
+admitperf run experiments/signal-liveness --engine-url http://127.0.0.1:8080
 ```
 
-A run refuses to write into a results directory that already holds runs. We
-lost a result to a silent overwrite once; a bundle is the only record of what a
-number meant. Move the old results aside, or pass `--force` if you truly want
-them replaced.
+Each arm writes `decisions.jsonl` and `report.json`. The report is the artifact;
+every renderer and the dashboard read it and compute nothing.
 
-What is committed: the manifest, the summary, the comparison table, the report
-and the figures — everything a paper cites. What is not: the per-request logs,
-which are large and regenerable.
+## Writing one
 
-**Named for what they produce.** A file called `Experiment1` tells you nothing
-six weeks later, and neither does the results directory it writes — which takes
-its name from the config. The name should be the answer you are going to quote.
+Four things, and the third is the one people get wrong.
 
-| Config | What it produces |
-|---|---|
-| `which-policy-when.yaml` | **The decision table**: every policy under four loads, read with `bench decide` as situation -> policy. Start here if the question is "which algorithm". |
-| `half-capacity-headroom.yaml` | Evidence for what happens *below* capacity — where no policy beats admitting everything, and refusing is pure loss. |
-| `shedding-vs-tail-latency.yaml` | Does refusing traffic cut the tail, and what does it cost? The shape that produced the first real-hardware results. |
-| `chronos-vs-no-admission.yaml` | The Chronos reproduction table. See `reports/chronos-reproduction.md`, including the addendum on cost-model sensitivity. |
-| `same-policies-across-gpus.yaml` | One comparison table per deployment, never pooled. Run with `bench sweep`. |
-| `tensor-parallel-4x.yaml` | The same questions on a four-GPU tensor-parallel deployment. |
+**Point at a cluster config.** To test a different policy, point at a cluster
+config that declares it. To test a different topology, point at `pair.yaml` or
+`disagg.yaml`. The experiment file does not change.
 
-```bash
-admitperf infra up   -c experiments/shedding-vs-tail-latency
-admitperf bench run  -c experiments/shedding-vs-tail-latency
-admitperf bench compare results/
-admitperf infra down
-```
+**Fix the seed.** Every arm then faces the same trace. Without it, a difference
+between policies may be a difference between traces.
 
-A config with a `matrix:` section is run with `bench sweep` instead, which
-provisions each entry in turn and tears it down afterwards.
+**Make requests long enough to overlap.** Concurrency is `rate x duration`, so
+short requests cannot fill a cache at any arrival rate. This is the most common
+reason a run comes back INERT, and the fix is the load rather than the policy.
 
-Results land in `results/` (gitignored) — one directory per run, each recording
-the resolved config that produced it.
+**Declare what you expect, before running.** `expect:` is recorded in the report so
+the prediction cannot be edited to match the result.
+
+## There are no past results here
+
+Earlier experiments were deleted rather than archived. They ran on a provider that
+has been removed, through a harness that was never validated, with a policy
+implementation that has been deleted. A number is evidence only if the thing that
+produced it can be run again, and none of those could be.
+
+See [`../src/admitperf/docs/status.md`](../src/admitperf/docs/status.md).

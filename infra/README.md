@@ -1,28 +1,25 @@
-# Cluster documentation
+# infra — the serving cluster
 
-| Page | Read it for |
-|---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | The overview and component map |
-| [DATAFLOW.md](DATAFLOW.md) | One request through the code, file by file |
-| [gateway.md](gateway.md) | Entry, guardrails, admission |
-| [router.md](router.md) | Placement, scoring, shedding |
-| [kvbus.md](kvbus.md) | Prefix bookkeeping and the KV hop |
-| [observability.md](observability.md) | Metrics, profiling, dashboards |
-| [kernels.md](kernels.md) | Attention math, KV eviction, warmup, transports |
-| [infrastructure.md](infrastructure.md) | Access, startup, HAMi, KEDA |
-| [COMMANDS.md](COMMANDS.md) | Debugging commands |
+Vendored from a course lab and rebuilt so the whole deployment comes from one
+config. Excluded from this repository's lint, so that future diffs against upstream
+stay readable.
 
-The lab steps themselves are in the [module README](RUNBOOK.md).
+```
+config/      base.yaml + single.yaml, pair.yaml, disagg.yaml
+render.py    config -> Kubernetes manifests + the gateway's environment
+gateway/     guardrails, admission, placement, metrics
+router/      pools, placement scoring, the KV bus
+setup/       bring-up scripts, run over SSH
+k8s-config/  static manifests: gateway, mooncake, observability, Open WebUI
+observability/  ten Grafana dashboards, generated
+docs/        how it all works -> docs/README.md
+```
 
-**New here?** [DATAFLOW.md](DATAFLOW.md) answers "where does a request go" better
-than the architecture overview does.
+```bash
+admitperf infra render infra/config/single.yaml --plan   # what would deploy
+admitperf infra render infra/config/pair.yaml --env      # the gateway's env
+```
 
-## Provenance
-
-This cluster was vendored from a course lab — two vLLM workers with a KV hop, HAMi GPU
-slicing, KEDA, and ten Grafana dashboards. It is kept as a working deployment to measure
-admission policies against, and is excluded from this repository's lint so that future
-diffs against upstream stay readable.
-
-The dashboards carry our own names because they are generated from
-`infra/observability/dashboards.py` and have diverged from the originals.
+**Documentation is in [`docs/`](docs/README.md).** Start with
+[`docs/topology.md`](docs/topology.md) for why the config says what it says, and
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) for bringing a cluster up by hand.
