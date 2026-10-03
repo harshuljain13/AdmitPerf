@@ -1,75 +1,186 @@
-# The one place the cluster is described. Manifests are generated from this.
-#   python -m infra.render config/cluster.yaml
+# The cluster, in one file.
 #
-# Nothing below is repeated in a manifest by hand. If a value appears twice,
-# that is a bug — "same cluster, only the policy changed" stops being true.
-
-name: default
-
-gpu:
-  kind: H100
-  count: 4
-  hbm_gb: 80
-
-# Two workers, each one model sharded across two GPUs.
-#   TP is an engine flag. "workers" is a deployment fact (two servers), not
-#   vLLM's --data-parallel-size, which means something else.
-topology:
-  workers: 2
-  tensor_parallel_size: 2
-  pipeline_parallel_size: 1
-
-# One model on every worker keeps them interchangeable, so placement is a load
-# decision and admission has a real choice to make.
+# Everything about what gets served and where it lands is here. Nothing about
+# model, topology or engine flags is typed anywhere else — `python -m infra.render`
+# turns this into Kubernetes manifests and the environment the gateway reads.
 #
-# VL-72B takes text AND images, so there is no need for a separate vision
-# worker. That is the whole reason to pick it: multi-modal without splitting
-# the fleet by capability, which would leave a vision request with exactly one
-# destination and no placement decision to make.
+# Two rules this file exists to enforce:
 #
-# For multi-modal, give a worker its own model and capability. Workers then stop
-# being interchangeable and placement becomes capability routing — fine for a
-# demo, but it weakens any policy comparison. Keep them uniform while measuring.
+#   1. A value appears once. The lab's manifests hardcoded model, TP and
+#      max-model-len twice, once per worker, so "same cluster, only the policy
+#      changed" could not be claimed honestly.
+#   2. An impossible topology is refused before anything is rented. Finding out
+#      that the weights do not fit, ten minutes into a download, is expensive.
+
+
+# ===========================================================================
+# hosts — the machines
+# ===========================================================================
+# Each host is an INDEPENDENT single-node k3s cluster. There is no multi-node
+# k8s here, and that is deliberate: the gateway already federates by URL list
+# (PREFILL_URLS / DECODE_URLS), so a second host is a second set of URLs rather
+# than a second control plane to debug.
+#
+# Consequence worth knowing: a tensor-parallel group CANNOT span hosts. TP does
+# an all-reduce per layer and expects NVLink; over Ethernet it is unusably slow.
+# The renderer refuses it rather than letting you discover it as "the cluster is
+# mysteriously slow".
+hosts:
+  - name: gpu-a
+    ssh: ubuntu@YOUR_LAMBDA_IP           # overridden by LAMBDA in .env
+    ssh_key: ~/.ssh/YOUR_LAMBDA_KEY      # overridden by LAMBDA_SSH_KEY
+    gpu:
+      kind: H100
+      count: 4
+      hbm_gb: 80
+
+  # A second box. Uncomment and the renderer spreads pools across both, emitting
+  # one manifest set per host and one URL list that spans them.
+  # - name: gpu-b
+  #   ssh: ubuntu@YOUR_SECOND_IP
+  #   ssh_key: ~/.ssh/YOUR_LAMBDA_KEY
+  #   gpu: {kind: H100, count: 4, hbm_gb: 80}
+
+
+# ===========================================================================
+# model
+# ===========================================================================
 model:
-  id: Qwen/Qwen2.5-VL-72B-Instruct
-  quantization: fp8        # 72B in bf16 is ~145 GB; at TP=2 that is 72.5 GB a
-                           # card against ~72 GB usable. The weights alone do
-                           # not fit. fp8 halves it. null = bf16.
-  served_name: lab
-  capability: text+vision
+  id: Qwen/Qwen2.5-72B-Instruct
+  # 72B in bf16 is ~145 GB. At TP=2 that is 72.5 GB a card against ~72 GB
+  # usable at util 0.90 — it does not fit, and the failure is an OOM after the
+  # weights download. fp8 halves it to ~36 GB a card and leaves real room for
+  # KV, which is the whole point.
+  quantization: fp8
+  dtype: auto
 
-# Per-worker overrides. Empty means every worker runs `model` above.
-workers_override: []
-# - index: 1
-#   model: {id: Qwen/Qwen2.5-VL-7B-Instruct, capability: vision}
+  # NO GPU SLICING. The lab sliced one card with HAMi (gpumem 16384,
+  # gpucores 55/35) because it ran a 3B on a single GPU. At 72B a slice cannot
+  # hold the weights, so the renderer emits whole-GPU requests and refuses any
+  # slice field. HAMi's scheduler may still be installed; it is simply not used.
+  slicing: false
 
+
+# ===========================================================================
+# engine — vLLM flags, once
+# ===========================================================================
 engine:
-  max_model_len: 32768          # deep research grows long; this is what binds KV
+  max_model_len: 32768
   gpu_memory_utilization: 0.90
+
+  # The admission ceiling. Leave it at or above what KV can actually hold, or
+  # the scheduler refuses before the cache does and you measure the wrong wall.
   max_num_seqs: 64
-  enable_prefix_caching: true   # shared system+tool prefix is the point
-  scheduling_policy: priority
-  distributed_executor_backend: mp   # single node. ray is for multi-node only
+
+  # ON for agentic traffic: a research agent resends the same system prompt and
+  # tool schemas every turn, and without this every turn re-prefills them.
+  #
+  # It is also an experiment axis, which is why it is a flag and not a constant.
+  # Turning it OFF makes prefill cost real and the KV wall arrive sooner, so a
+  # policy reading KV pressure fires earlier. Comparing the two is a legitimate
+  # run; comparing a policy ACROSS the two is not — the cache state is different,
+  # so the policy is not what changed.
+  enable_prefix_caching: true
+
+  distributed_executor_backend: mp
+  tool_call_parser: hermes
   enable_auto_tool_choice: true
-  tool_call_parser: hermes      # Qwen2.5. Verify on one GPU before renting four
 
-hop:
-  backend: mooncake             # nccl and nixl in this tree are no-op stubs
 
+# ===========================================================================
+# topology — the thing this file exists for
+# ===========================================================================
+# mode: aggregated | disaggregated
+#
+#   aggregated      One pool. Every engine does prefill and decode for its own
+#                   requests. `replicas` servers, each sharded over `tp` GPUs.
+#                   The gateway sees one URL list and routes by load.
+#
+#   disaggregated   Two pools. Prefill engines produce KV, decode engines
+#                   consume it over `kv_transport`. This is the lab's default
+#                   and the only mode where the KV hop exists at all.
+#
+# split: phase | capability   — only meaningful when disaggregated
+#
+#   phase        prefill pool / decode pool. The normal meaning.
+#   capability   OVERLOADED, and worth knowing before you set it: the gateway
+#                reuses PREFILL_URLS as the TEXT pool and DECODE_URLS as the
+#                VISION pool (router/pools.py:298). There is no KV hop. The
+#                pools then run DIFFERENT models and stop being
+#                interchangeable, so placement becomes a capability lookup —
+#                a vision request has exactly one destination — and the
+#                admission comparison loses its point. Fine for a demo.
+topology:
+  mode: disaggregated
+  split: phase
+
+  # Required when disaggregated, refused when aggregated — where it would be
+  # read, ignored, and look configured.
+  #
+  # mooncake is the only backend that moves bytes. nccl and nixl are four-line
+  # no-op stubs: hops vanish from Mooncake's /hops while requests still succeed,
+  # so zero hops does not prove the hop did not happen.
+  kv_transport: mooncake
+
+  # Pools. Names are fixed by the gateway's env contract:
+  #   aggregated    -> engine
+  #   disaggregated -> prefill, decode
+  #
+  # replicas x tensor_parallel_size x pipeline_parallel_size GPUs are taken from
+  # `host`, and the sum across pools on a host must fit that host's count.
+  pools:
+    prefill:
+      replicas: 1
+      tensor_parallel_size: 2
+      pipeline_parallel_size: 1
+      host: gpu-a
+
+    decode:
+      replicas: 1
+      tensor_parallel_size: 2
+      pipeline_parallel_size: 1
+      host: gpu-a
+
+  # Aggregated instead? Comment the two pools above and use:
+  # pools:
+  #   engine:
+  #     replicas: 2
+  #     tensor_parallel_size: 2
+  #     host: gpu-a
+
+
+# ===========================================================================
+# placement — how the gateway picks among replicas in a pool
+# ===========================================================================
+placement:
+  strategy: least_loaded        # least_loaded | round_robin | prefix_affinity
+
+
+# ===========================================================================
+# overflow — paid capacity for when we refuse
+# ===========================================================================
 overflow:
   provider: superlinked
   base_url: https://api.superlinked.com/v1
-  model: Qwen/Qwen3.5-4B        # 4B answering for a 72B. A relief valve, not
-                                # an equal service — see the note below.
+  model: Qwen/Qwen3.5-4B        # a 4B answering for a 72B: relief valve, not
+                                # an equal service. Do not pool the responses.
   max_requests: 20              # LIFETIME counter per gateway process, not a
-                                # rate limit. Once spent, overflow is off until
+                                # rate. Once spent, overflow is off until
                                 # restart and requests fall back to the local
-                                # 503. Bounds the bill; see issue on the
-                                # measurement hazard that creates.
-  max_tokens: 64                # output cap on the overflow path only
+                                # refusal — which reads as "overflow did not
+                                # help" when it means "overflow went away".
+  max_tokens: 64
   on: [503, 529]                # never 429 — a quota refusal stays local
 
+
+# ===========================================================================
+# admission — the point of the whole repository
+# ===========================================================================
 admission:
   policy: kv_threshold          # resolved from admitperf's registry
   params:
     threshold: 0.90
+
+  # A run whose signal never approached its threshold is reported inert rather
+  # than as a null result. See the saturation definition in #12.
+  require_saturation: true
