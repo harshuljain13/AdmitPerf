@@ -57,6 +57,14 @@ class ChronosInspiredWCRT(AdmissionPolicy):
     """Admit only if a formal feasibility test says the deadline can be met."""
 
     name = "chronos_inspired"
+    objective = "deadline"
+
+    #: Computed, not read off SystemState: the policy refuses when the
+    #: worst-case response time no longer fits inside the deadline. `requires`
+    #: therefore stays explicit, naming the telemetry the computation consumes
+    #: rather than the margin it produces.
+    signal = "wcrt_utilization"
+    threshold = 1.0
     requires = frozenset({"running_requests", "waiting_requests"})
 
     def __init__(
@@ -109,6 +117,18 @@ class ChronosInspiredWCRT(AdmissionPolicy):
         }
         #: Last test, for inspection and debugging.
         self.last_test = None
+
+    def read_signal(self, state: SystemState) -> float | None:
+        """Utilization from the most recent feasibility test.
+
+        The margin only exists once a test has run, so this reports the value the
+        last decision was actually made on. Before the first test it is None,
+        which the report counts as missing rather than as zero — zero would read
+        as a completely idle system, the most flattering possible wrong answer.
+        """
+        test = getattr(self, "last_test", None)
+        util = getattr(test, "utilization", None)
+        return float(util) if isinstance(util, (int, float)) else None
 
     def decide(self, req: Request, state: SystemState) -> Decision:
         self.arrivals.record(req.arrival_time)

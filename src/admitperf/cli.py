@@ -28,7 +28,7 @@ import click
 from admitperf.bench.workloads.poisson import Baseline
 from admitperf.core import __version__
 from admitperf.core.config import ConfigError, ExperimentConfig
-from admitperf.core.registry import available
+from admitperf.core.registry import available, get_policy
 
 
 def _load(config: str | None, **overrides: object) -> ExperimentConfig:
@@ -128,13 +128,26 @@ def main() -> None:
 
 
 @main.command()
-def policies() -> None:
+@click.option("--verbose", "-v", is_flag=True, help="show the full policy card")
+def policies(verbose: bool) -> None:
     """List every policy, including ones from installed plugins."""
     registry = available()
     width = max((len(n) for n in registry), default=10)
     for name, cls in sorted(registry.items()):
-        requires = ", ".join(sorted(getattr(cls, "requires", frozenset()))) or "-"
-        click.echo(f"{name:<{width}}  requires: {requires}  ({cls.__module__})")
+        signal = cls.signal or "-"
+        thr = "-" if cls.threshold is None else f"{float(cls.threshold):g}"
+        # A policy with no signal cannot have its liveness reported, which is the
+        # one thing this tool exists to report. Say so here rather than at the end
+        # of a run that has already cost GPU time.
+        flag = "" if cls.signal else "   (no signal: liveness cannot be reported)"
+        click.echo(f"{name:<{width}}  signal: {signal:<22} threshold: {thr:<6}{flag}")
+        if verbose:
+            requires = ", ".join(sorted(getattr(cls, "requires", frozenset()))) or "-"
+            click.echo(
+                f"{'':<{width}}  {cls.unit}/{cls.setting}/{cls.objective}"
+                f"  Class {cls.portability}  requires: {requires}"
+            )
+            click.echo(f"{'':<{width}}  {cls.__module__}")
 
 
 # ---------------------------------------------------------------------------
@@ -672,6 +685,74 @@ def bench_report(path: str, out: str | None) -> None:
     figures = written.parent / "figures"
     if figures.exists():
         click.echo(f"figures: {figures}/")
+
+
+# ---------------------------------------------------------------------------
+# report — the artifact
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("decisions", type=click.Path(exists=True, dir_okay=False))
+@click.option("--policy", "policy_name", required=True, help="policy the run used")
+@click.option("--threshold", type=float, help="override the policy's default")
+@click.option("--run-id", help="defaults to the decision log's filename")
+@click.option("--cluster", help="e.g. '4x H100-80 - 2 prefill + 2 decode'")
+@click.option("--model")
+@click.option("--engine")
+@click.option("--commit", help="also evidences reporting item 7")
+@click.option("--config-sha", help="also evidences reporting item 7")
+@click.option("--offered-rps", type=float)
+@click.option("--capacity-rps", type=float, help="measured ceiling, for item 1")
+@click.option("--repeats", type=int, default=1, show_default=True)
+@click.option("--markdown", is_flag=True, help="Markdown instead of plain text")
+@click.option("-o", "--out", type=click.Path(dir_okay=False), help="write to a file")
+def report(
+    decisions: str,
+    policy_name: str,
+    threshold: float | None,
+    run_id: str | None,
+    markdown: bool,
+    out: str | None,
+    **facts: object,
+) -> None:
+    """Render the AdmitPerf Report from a decision log.
+
+    DECISIONS is JSON Lines, one object per admission decision. The signal value
+    is read by the policy's own signal name, falling back to `signal_value`, so a
+    gateway can log one column whatever policy is loaded.
+
+    Anything not supplied is reported as unevidenced rather than assumed. A sparse
+    log still produces an honest page; it just has more `n/a` on it.
+    """
+    import json
+
+    from admitperf.report import report_for
+
+    rows = [json.loads(line) for line in Path(decisions).read_text().splitlines() if line.strip()]
+    if not rows:
+        raise click.ClickException(f"{decisions} has no decisions in it")
+
+    kwargs: dict[str, object] = {}
+    if threshold is not None:
+        kwargs["threshold"] = threshold
+    try:
+        policy = get_policy(policy_name, **kwargs)
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    page = report_for(
+        policy,
+        rows,
+        run_id=run_id or Path(decisions).stem,
+        markdown=markdown,
+        **{k: v for k, v in facts.items() if v is not None},
+    )
+    if out:
+        Path(out).write_text(page + "\n")
+        click.echo(f"wrote {out}", err=True)
+    else:
+        click.echo(page)
 
 
 if __name__ == "__main__":

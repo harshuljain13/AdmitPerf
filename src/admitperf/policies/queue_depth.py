@@ -21,9 +21,12 @@ class QueueDepth(AdmissionPolicy):
     """Reject once more than `max_waiting` requests are already queued."""
 
     name = "queue_depth"
-    requires = frozenset({"waiting_requests"})
+    signal = "waiting_requests"
+    objective = "latency"
+    threshold = 8.0
 
     def __init__(self, max_waiting: int = 8) -> None:
+        self.threshold = float(max_waiting)
         if max_waiting < 0:
             raise ValueError(f"max_waiting must be >= 0, got {max_waiting}")
         self.max_waiting = max_waiting
@@ -44,9 +47,12 @@ class QueueDepthDefer(AdmissionPolicy):
     """
 
     name = "queue_depth_defer"
-    requires = frozenset({"waiting_requests"})
+    signal = "waiting_requests"
+    objective = "latency"
+    threshold = 8.0
 
     def __init__(self, max_waiting: int = 8, retry_after_ms: int = 250) -> None:
+        self.threshold = float(max_waiting)
         self.max_waiting = max_waiting
         self.retry_after_ms = retry_after_ms
 
