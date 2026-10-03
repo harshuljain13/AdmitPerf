@@ -497,3 +497,33 @@ def test_plan_says_whether_kv_or_the_scheduler_binds(cfg: dict[str, Any]) -> Non
 
     cfg["engine"]["max_num_seqs"] = 1
     assert "SCHEDULER binds" in plan(cfg, ENV)
+
+
+def test_a_config_that_holds_fewer_than_one_sequence_is_refused(
+    cfg: dict[str, Any],
+) -> None:
+    """The gap a comparison table exposed in the fit check itself.
+
+    32B int8 on a single 40 GB card leaves 4 GB of KV. That is 11% of usable, so
+    it cleared the 5% floor — and it holds 0.12 sequences at 32k. The engine
+    starts and then refuses every request, which is the failure the fit check
+    existed to prevent and did not.
+    """
+    cfg["hosts"][0]["gpu"]["count"] = 2
+    cfg["topology"]["pools"] = {
+        "prefill": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
+        "decode": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
+    }
+    with pytest.raises(ConfigError, match="Fewer than one"):
+        validate(cfg)
+
+
+def test_the_same_shape_passes_once_it_can_hold_a_sequence(cfg: dict[str, Any]) -> None:
+    """int4 on the same two cards leaves 20 GB and holds ~2 sequences."""
+    cfg["hosts"][0]["gpu"]["count"] = 2
+    cfg["model"]["quantization"] = "awq"
+    cfg["topology"]["pools"] = {
+        "prefill": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
+        "decode": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
+    }
+    validate(cfg)

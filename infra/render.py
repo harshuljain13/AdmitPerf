@@ -431,6 +431,21 @@ def validate(cfg: dict[str, Any]) -> None:
                     "starts and then rejects every request."
                 )
 
+            # Headroom as a FRACTION is not the test; headroom measured in
+            # sequences is. A config can clear the 5% floor and still be unable
+            # to hold one request at max_model_len — 32B int8 on a 40 GB card
+            # leaves 4 GB, which is 11% of usable and zero sequences. That loads
+            # the model and then rejects everything.
+            kv_total = headroom * w.gpus
+            seqs = concurrency_estimate(cfg, kv_total)
+            if seqs is not None and seqs < 1:
+                raise ConfigError(
+                    f"{w.name}: {kv_total:.1f} GB of KV across {w.gpus} card(s) holds "
+                    f"{seqs:.2f} sequences at max_model_len={cfg['engine']['max_model_len']}. "
+                    "Fewer than one. The engine would start and then refuse every "
+                    "request. Raise TP, quantize further, or lower max_model_len."
+                )
+
             # Enough to load and serve, not enough to be worth measuring: one
             # sequence at max_model_len needs several GB of KV per card, so a
             # thin margin means admission bites on capacity we chose, not on
