@@ -112,6 +112,35 @@ def test_plan_names_the_host_the_mode_and_the_fit(cfg: dict[str, Any]) -> None:
 ENV = {"LAMBDA_HOST_GPU_A": "ubuntu@10.0.0.1", "LAMBDA_HOST_GPU_B": "ubuntu@10.0.0.2"}
 
 
+def pin(
+    cfg: dict[str, Any],
+    *,
+    kind: str = "H100",
+    cards: int = 4,
+    hbm: float = 80,
+    model: str | None = None,
+    quant: str | None = "__keep__",
+    tp: int = 1,
+    replicas: int = 2,
+) -> dict[str, Any]:
+    """State the whole scenario explicitly.
+
+    Four tests broke when the shipped topology changed, because they asserted
+    numbers they had inherited rather than numbers they had declared. A test that
+    moves with the config is measuring today's deployment, not the code.
+    """
+    cfg["hosts"][0]["gpu"].update(kind=kind, count=cards, hbm_gb=hbm)
+    if model:
+        cfg["model"]["id"] = model
+    if quant != "__keep__":
+        cfg["model"]["quantization"] = quant
+    cfg["topology"]["pools"] = {
+        pool: {"replicas": replicas, "tensor_parallel_size": tp, "host": "gpu-a"}
+        for pool in ("prefill", "decode")
+    }
+    return cfg
+
+
 def test_disaggregated_env_separates_the_pools(cfg: dict[str, Any]) -> None:
     env = gateway_env(cfg, ENV)
     assert env["LAB_TOPOLOGY"] == "disaggregated"
@@ -209,27 +238,38 @@ def test_weights_that_do_not_fit_are_refused_before_the_download(
     shipped config. A test that moves when the config moves is asserting
     something about today's deployment, not about the check.
     """
-    cfg["hosts"][0]["gpu"].update(kind="H100", count=4, hbm_gb=80)
-    cfg["model"]["id"] = "Qwen/Qwen2.5-72B-Instruct"
-    cfg["model"]["quantization"] = None
+    pin(cfg, model="Qwen/Qwen2.5-72B-Instruct", quant=None, tp=2, replicas=1)
     with pytest.raises(ConfigError, match="does not fit"):
         validate(cfg)
 
 
 def test_fp8_does_fit_the_same_topology(cfg: dict[str, Any]) -> None:
     """The counterpart: the check is not simply refusing everything at 72B."""
-    cfg["hosts"][0]["gpu"].update(kind="H100", count=4, hbm_gb=80)
-    cfg["model"]["id"] = "Qwen/Qwen2.5-72B-Instruct"
-    cfg["model"]["quantization"] = "fp8"
+    pin(cfg, model="Qwen/Qwen2.5-72B-Instruct", quant="fp8", tp=2, replicas=1)
     validate(cfg)
 
 
-def test_a_32b_fits_two_a100_40s_with_room_for_kv(cfg: dict[str, Any]) -> None:
-    """The shipped shape. int8 at TP=2 is ~16 GB a card of ~36 GB usable, so KV
-    gets ~20 GB a card — scarce enough that admission bites, which is the point."""
+def test_the_shipped_shape_gives_a_hop_and_a_placement_decision(
+    cfg: dict[str, Any],
+) -> None:
+    """Both, which is the only reason the shipped topology is shaped this way.
+
+    Disaggregated gives the KV hop; two replicas per pool give placement
+    somewhere to choose. At TP=2 there would be one replica per pool and
+    placement would have a single destination, which is not a decision.
+    """
     validate(cfg)
-    assert cfg["hosts"][0]["gpu"]["kind"] == "A100"
-    assert cfg["model"]["quantization"] != "fp8"
+    assert cfg["topology"]["mode"] == "disaggregated"
+    assert cfg["topology"]["kv_transport"]
+    for pool in ("prefill", "decode"):
+        assert cfg["topology"]["pools"][pool]["replicas"] > 1
+
+
+def test_32b_fp8_fits_one_h100_with_room_to_serve(cfg: dict[str, Any]) -> None:
+    """~32 GB of weights against ~72 GB usable leaves ~40 GB of KV, about five
+    sequences at 32k — scarce enough that admission bites, which is the point."""
+    pin(cfg, quant="fp8")
+    validate(cfg)
 
 
 def test_overflow_on_429_is_refused(cfg: dict[str, Any]) -> None:
@@ -276,10 +316,19 @@ def test_pools_split_across_hosts(cfg: dict[str, Any]) -> None:
 
 def test_ports_restart_per_host_so_they_do_not_collide(cfg: dict[str, Any]) -> None:
     """Ports are per-machine. Numbering them globally would leave gaps and, worse,
-    imply a shared port space that does not exist."""
+    imply a shared port space that does not exist.
+
+    Collected per host as a list: keying by host name alone let later replicas
+    overwrite earlier ones, so the assertion passed for the wrong reason while
+    there was one replica per pool.
+    """
     cfg = _two_hosts(cfg)
-    ports = {w.host.name: w.host_port for w in workers_from(cfg)}
-    assert ports == {"gpu-a": 8000, "gpu-b": 8000}
+    ports: dict[str, list[int]] = {}
+    for w in workers_from(cfg):
+        ports.setdefault(w.host.name, []).append(w.host_port)
+    for host, got in ports.items():
+        assert got == list(range(8000, 8000 + len(got))), host
+    assert min(ports["gpu-a"]) == min(ports["gpu-b"]) == 8000
 
 
 def test_render_can_target_one_host(cfg: dict[str, Any]) -> None:
@@ -509,21 +558,12 @@ def test_a_config_that_holds_fewer_than_one_sequence_is_refused(
     starts and then refuses every request, which is the failure the fit check
     existed to prevent and did not.
     """
-    cfg["hosts"][0]["gpu"]["count"] = 2
-    cfg["topology"]["pools"] = {
-        "prefill": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
-        "decode": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
-    }
+    pin(cfg, kind="A100", cards=2, hbm=40, quant="int8", tp=1, replicas=1)
     with pytest.raises(ConfigError, match="Fewer than one"):
         validate(cfg)
 
 
 def test_the_same_shape_passes_once_it_can_hold_a_sequence(cfg: dict[str, Any]) -> None:
     """int4 on the same two cards leaves 20 GB and holds ~2 sequences."""
-    cfg["hosts"][0]["gpu"]["count"] = 2
-    cfg["model"]["quantization"] = "awq"
-    cfg["topology"]["pools"] = {
-        "prefill": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
-        "decode": {"replicas": 1, "tensor_parallel_size": 1, "host": "gpu-a"},
-    }
+    pin(cfg, kind="A100", cards=2, hbm=40, quant="awq", tp=1, replicas=1)
     validate(cfg)

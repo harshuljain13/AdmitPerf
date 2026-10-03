@@ -6,9 +6,9 @@
 hosts:
   - name: gpu-a            # address: LAMBDA_HOST_GPU_A in .env (or LAMBDA)
     gpu:
-      kind: A100
+      kind: H100
       count: 4
-      hbm_gb: 40
+      hbm_gb: 80
 
   # - name: gpu-b
   #   gpu: {kind: H100, count: 4, hbm_gb: 80}
@@ -16,7 +16,8 @@ hosts:
 
 model:
   id: Qwen/Qwen2.5-32B-Instruct
-  quantization: int8       # NOT fp8 — A100 is sm80 and cannot execute it
+  quantization: fp8        # vLLM quantizes from the bf16 checkpoint at load;
+                           # H100 runs it natively. Refused on A100 (sm80).
   dtype: auto
   slicing: false           # whole GPUs; a slice cannot hold these weights
 
@@ -45,16 +46,19 @@ topology:
   split: phase             # phase | capability
   kv_transport: mooncake   # required by disaggregated, refused by aggregated
 
+  # Two replicas per pool so placement is a real decision, TP=1 so four workers
+  # fit on four cards. At TP=2 there would be one replica per pool and placement
+  # would have a single destination.
   pools:
     prefill:
-      replicas: 1
-      tensor_parallel_size: 2
+      replicas: 2
+      tensor_parallel_size: 1
       pipeline_parallel_size: 1
       host: gpu-a
 
     decode:
-      replicas: 1
-      tensor_parallel_size: 2
+      replicas: 2
+      tensor_parallel_size: 1
       pipeline_parallel_size: 1
       host: gpu-a
 
