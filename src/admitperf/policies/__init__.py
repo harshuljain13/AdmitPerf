@@ -19,24 +19,22 @@ from admitperf.core.api import (
     SystemState,
 )
 from admitperf.core.registry import available, get_policy, register
-from admitperf.policies.chronos import ChronosInspiredWCRT
 from admitperf.policies.kv_threshold import KVThreshold
 from admitperf.policies.no_admission import NoAdmission
 from admitperf.policies.queue_depth import QueueDepth, QueueDepthDefer
 
-for _policy in (NoAdmission, KVThreshold, QueueDepth, QueueDepthDefer, ChronosInspiredWCRT):
+for _policy in (NoAdmission, KVThreshold, QueueDepth, QueueDepthDefer):
     register(_policy.name, _policy)
 
 #: Built-ins. Prefer ``admitperf.core.registry.available()``, which also
 #: includes anything installed as a plugin.
 POLICIES: dict[str, type[AdmissionPolicy]] = {
-    p.name: p for p in (NoAdmission, KVThreshold, QueueDepth, QueueDepthDefer, ChronosInspiredWCRT)
+    p.name: p for p in (NoAdmission, KVThreshold, QueueDepth, QueueDepthDefer)
 }
 
 __all__ = [
     "POLICIES",
     "AdmissionPolicy",
-    "ChronosInspiredWCRT",
     "Decision",
     "DecisionKind",
     "KVThreshold",
