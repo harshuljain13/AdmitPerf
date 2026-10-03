@@ -789,3 +789,42 @@ def test_the_plan_shows_which_host_each_worker_landed_on(cfg: dict[str, Any]) ->
         if "vllm-" in line:
             assert line.startswith("    ")
     assert "gpu-1" in out and "gpu-2" in out
+
+
+# --------------------------------------------------------------------------
+# The transport's endpoint: KV_BACKEND selects, each backend configures itself
+# --------------------------------------------------------------------------
+
+
+def test_the_endpoint_is_emitted_so_it_cannot_be_unset(cfg: dict[str, Any]) -> None:
+    """MOONCAKE_URL unset makes _store_put return without posting and log nothing,
+    so every hop becomes a no-op and zero hops reads as a measurement."""
+    assert gateway_env(cfg, ENV)["MOONCAKE_URL"] == cfg["topology"]["kv_endpoint"]
+
+
+def test_mooncake_without_an_endpoint_is_refused(cfg: dict[str, Any]) -> None:
+    cfg["topology"].pop("kv_endpoint")
+    with pytest.raises(ConfigError, match="silent no-op"):
+        validate(cfg, ENV)
+
+
+def test_an_endpoint_on_a_backend_that_has_no_address_is_refused(
+    cfg: dict[str, Any],
+) -> None:
+    """nccl is a collective and nixl is an RDMA path. Neither has a URL, so one
+    set against them would be read by nothing while looking configured — which is
+    why this is not a generic KV_BACKEND_URL."""
+    cfg["topology"]["kv_transport"] = "nccl"
+    with pytest.raises(ConfigError, match="not URL-addressed"):
+        validate(cfg, ENV)
+
+
+def test_aggregated_emits_no_transport_and_no_endpoint(cfg: dict[str, Any]) -> None:
+    fleet(cfg, 2, count=2)
+    cfg["topology"] = {
+        "mode": "aggregated",
+        "pools": {"engine": {"replicas": 2, "tensor_parallel_size": 2}},
+    }
+    env = gateway_env(cfg, ENV)
+    assert "KV_BACKEND" not in env
+    assert "MOONCAKE_URL" not in env

@@ -128,6 +128,11 @@ engine:
 #                 are no-op stubs, so zero hops on a dashboard does not prove
 #                 the hop did not happen. Required by disaggregated, refused
 #                 by aggregated where it would be read by nothing
+#  kv_endpoint    where that transport lives. Required for mooncake, which is
+#                 an HTTP service; meaningless for nccl and nixl, which are a
+#                 collective and an RDMA path and have no address. Emitted as
+#                 MOONCAKE_URL, so it cannot be left unset by omission — unset
+#                 made every hop a silent no-op
 #
 #  pools          names are the gateway's contract, not labels:
 #                   aggregated    -> engine
@@ -142,6 +147,7 @@ topology:
   mode: disaggregated
   split: phase
   kv_transport: mooncake
+  kv_endpoint: http://127.0.0.1:50051
 
   # Two replicas per pool so placement is a real decision — with one each the
   # gateway picks a destination with no alternatives, which is routing rather

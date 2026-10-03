@@ -419,6 +419,19 @@ def validate(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> None:
             f"topology.kv_transport is set to {transport!r} but mode is aggregated, "
             "where there is no hop. It would be ignored, which is worse than absent."
         )
+    if str(transport) == "mooncake" and not topo.get("kv_endpoint"):
+        raise ConfigError(
+            "kv_transport is mooncake but topology.kv_endpoint is unset. The hop "
+            "would then be a silent no-op: _store_put returns without posting and "
+            "logs nothing, so zero hops on the dashboard would look like a "
+            "measurement rather than a missing setting."
+        )
+    if transport and str(transport) not in ("mooncake",) and topo.get("kv_endpoint"):
+        raise ConfigError(
+            f"topology.kv_endpoint is set but kv_transport is {transport!r}, which "
+            "is not URL-addressed — nccl is a collective and nixl is an RDMA path. "
+            "It would be read by nothing while looking configured."
+        )
     if transport and str(transport) != "mooncake":
         print(
             f"note: kv_transport={transport} is a no-op stub that returns immediately. "
@@ -759,6 +772,11 @@ def gateway_env(
         out["DECODE_URLS"] = urls("decode")
         if topo.get("kv_transport"):
             out["KV_BACKEND"] = str(topo["kv_transport"])
+            # Mooncake is an HTTP service and reads MOONCAKE_URL. Emitting it from
+            # the config is what stops it being unset: _store_put returns silently
+            # when it is, so every hop becomes a no-op with nothing logged.
+            if str(topo["kv_transport"]) == "mooncake" and topo.get("kv_endpoint"):
+                out["MOONCAKE_URL"] = str(topo["kv_endpoint"])
 
     ov = cfg.get("overflow") or {}
     if ov.get("base_url"):
