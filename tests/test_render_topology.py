@@ -10,7 +10,7 @@ actually be deployed.
 
 from __future__ import annotations
 
-import copy
+import pathlib
 from pathlib import Path
 from typing import Any
 
@@ -21,34 +21,29 @@ from infra.render import (
     ConfigError,
     gateway_env,
     hosts_from,
+    load,
     plan,
     render,
-    resolve,
     validate,
     weights_gb,
     workers_from,
 )
 
 REPO = Path(__file__).resolve().parents[1]
-SHIPPED = REPO / "infra" / "config" / "cluster.yaml"
+CONFIG = REPO / "infra" / "config"
+BASE = CONFIG / "base.yaml"
+VARIANTS = ("single", "pair", "disagg")
 
 
 @pytest.fixture
 def cfg() -> dict[str, Any]:
-    """The real config with the `disagg` profile applied.
+    """disagg.yaml, loaded through `extends`.
 
-    Resolved rather than raw, because every function below expects one topology.
-    `disagg` because it exercises the most machinery — two pools, a transport and
-    an endpoint — so a refusal test has something to refuse. Tests about the other
-    profiles resolve them by name.
+    The most machinery of the three — two pools, a transport and an endpoint — so a
+    refusal test has something to refuse. Tests about the other variants load them
+    by name.
     """
-    return resolve(copy.deepcopy(yaml.safe_load(SHIPPED.read_text())), "disagg")
-
-
-@pytest.fixture
-def raw() -> dict[str, Any]:
-    """The config as written, profiles and all."""
-    return copy.deepcopy(yaml.safe_load(SHIPPED.read_text()))
+    return load(CONFIG / "disagg.yaml")
 
 
 # --------------------------------------------------------------------------
@@ -134,10 +129,14 @@ def test_plan_names_the_host_the_mode_and_the_fit(cfg: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------
 
 
-ENV = {f"LAMBDA_HOST_{i}": f"ubuntu@10.0.0.{i}" for i in range(1, 9)} | {
-    "LAMBDA_HOST_GPU_A": "ubuntu@10.0.0.1",
-    "LAMBDA_HOST_GPU_B": "ubuntu@10.0.0.2",
-}
+#: One environment for every test: a public address and a private one per host,
+#: because the renderer needs both and a test that supplies only one is testing a
+#: configuration nobody would deploy.
+ENV = (
+    {f"LAMBDA_HOST_{i}": f"ubuntu@10.0.0.{i}" for i in range(1, 9)}
+    | {f"LAMBDA_PRIVATE_{i}": f"10.19.80.{i}" for i in range(1, 9)}
+    | {"LAMBDA_HOST_GPU_A": "ubuntu@10.0.0.1", "LAMBDA_HOST_GPU_B": "ubuntu@10.0.0.2"}
+)
 
 
 def fleet(
@@ -547,7 +546,7 @@ def test_the_overflow_api_key_is_never_emitted(cfg: dict[str, Any]) -> None:
     assert "OVERFLOW_API_KEY" not in render(cfg, env=ENV)
 
 
-def test_the_config_file_assigns_no_secret() -> None:
+def test_no_config_file_assigns_a_secret() -> None:
     """Checks for an assigned value, not for the words.
 
     The config mentions OVERFLOW_API_KEY in a comment explaining that it is NOT
@@ -569,8 +568,9 @@ def test_the_config_file_assigns_no_secret() -> None:
                 found += walk(v, f"{path}[{i}]")
         return found
 
-    assigned = walk(yaml.safe_load(SHIPPED.read_text()))
-    assert not assigned, f"secrets assigned in a committed config: {assigned}"
+    for name in ("base", *VARIANTS):
+        found = walk(yaml.safe_load((CONFIG / f"{name}.yaml").read_text()))
+        assert not found, f"secrets assigned in {name}.yaml: {found}"
 
 
 # --------------------------------------------------------------------------
@@ -844,88 +844,93 @@ def test_aggregated_emits_no_transport_and_no_endpoint(cfg: dict[str, Any]) -> N
 
 
 # --------------------------------------------------------------------------
-# Profiles: one variant per run, everything else shared
+# extends: three runnable configs, one shared base
 # --------------------------------------------------------------------------
 
-PRIVATE = {f"LAMBDA_PRIVATE_{i}": f"10.19.80.{i}" for i in range(1, 9)}
-FULL = ENV | PRIVATE
-
-
-def test_the_three_profiles_exist(raw: dict[str, Any]) -> None:
-    assert set(raw["profiles"]) == {"single", "pair", "disagg"}
-
-
-def test_the_active_profile_is_the_simplest_one(raw: dict[str, Any]) -> None:
-    """Start where the fewest things can be wrong, then add."""
-    assert raw["profile"] == "single"
+#: Kept as an alias so the extends tests read clearly.
+FULL = ENV
 
 
 @pytest.mark.parametrize(
-    ("profile", "hosts", "workers", "mode"),
-    [
-        ("single", 1, 1, "aggregated"),
-        ("pair", 2, 2, "aggregated"),
-        ("disagg", 4, 4, "disaggregated"),
-    ],
+    ("name", "workers", "mode"),
+    [("single", 1, "aggregated"), ("pair", 2, "aggregated"), ("disagg", 4, "disaggregated")],
 )
-def test_each_profile_renders_the_fleet_it_describes(
-    raw: dict[str, Any], profile: str, hosts: int, workers: int, mode: str
-) -> None:
-    cfg = resolve(raw, profile)
+def test_each_config_renders_the_fleet_it_describes(name: str, workers: int, mode: str) -> None:
+    cfg = load(CONFIG / f"{name}.yaml")
     validate(cfg, FULL)
-    assert len(hosts_from(cfg, FULL)) == hosts
     assert len(workers_from(cfg, FULL)) == workers
     assert cfg["topology"]["mode"] == mode
+    assert cfg["config_name"] == name
 
 
-def test_profiles_share_everything_except_hosts_and_topology(
-    raw: dict[str, Any],
-) -> None:
-    """The property that makes two runs comparable. If a profile could change the
+def test_the_variants_share_everything_except_topology() -> None:
+    """The property that makes two runs comparable. If a variant could change the
     model or the engine flags, "only the topology changed" would be a claim rather
     than a fact."""
-    shared = [resolve(raw, p) for p in ("single", "pair", "disagg")]
-    for key in ("model", "engine", "overflow", "admission", "placement"):
-        assert all(c[key] == shared[0][key] for c in shared), key
+    loaded = [load(CONFIG / f"{n}.yaml") for n in VARIANTS]
+    for key in ("hosts", "model", "engine", "overflow", "admission", "placement"):
+        assert all(c[key] == loaded[0][key] for c in loaded), key
 
 
-def test_a_profile_may_only_pick_from_the_declared_hosts(raw: dict[str, Any]) -> None:
-    raw["profiles"]["single"]["use_hosts"] = ["gpu-9"]
-    with pytest.raises(ConfigError, match="not declared"):
-        resolve(raw, "single")
+def test_the_base_declares_no_topology() -> None:
+    """It is the one thing each variant changes, so inheriting a default would let a
+    variant silently run the wrong shape."""
+    assert "topology" not in yaml.safe_load(BASE.read_text())
 
 
-def test_an_unknown_profile_is_refused_by_name(raw: dict[str, Any]) -> None:
-    with pytest.raises(ConfigError, match="unknown profile"):
-        resolve(raw, "enormous")
+def test_base_is_not_renderable_on_its_own() -> None:
+    with pytest.raises(KeyError):
+        validate(load(BASE), FULL)
 
 
-def test_a_config_with_profiles_and_no_active_one_is_refused(
-    raw: dict[str, Any],
+def test_a_variant_may_override_one_shared_value_without_losing_the_rest(
+    tmp_path: pathlib.Path,
 ) -> None:
-    """Rendering a default when none was chosen would deploy a fleet nobody asked
-    for."""
-    raw.pop("profile")
-    with pytest.raises(ConfigError, match="none is active"):
-        resolve(raw, None)
+    """Deep merge, so a short-context variant does not have to restate the engine."""
+    (tmp_path / "base.yaml").write_text(BASE.read_text())
+    (tmp_path / "v.yaml").write_text(
+        "extends: base.yaml\n"
+        "engine: {max_model_len: 8192}\n"
+        "topology: {mode: aggregated, pools: {engine: {replicas: 1, tensor_parallel_size: 1}}}\n"
+    )
+    cfg = load(tmp_path / "v.yaml")
+    assert cfg["engine"]["max_model_len"] == 8192
+    assert cfg["engine"]["gpu_memory_utilization"] == 0.90  # inherited
 
 
-def test_resolve_leaves_no_profiles_behind(raw: dict[str, Any]) -> None:
-    """So nothing downstream can forget to apply one."""
-    cfg = resolve(raw, "pair")
-    assert "profiles" not in cfg
-    assert cfg["active_profile"] == "pair"
+def test_pools_replace_rather_than_merge(tmp_path: pathlib.Path) -> None:
+    """Inheriting half a pool set is not a topology. An aggregated variant extending
+    a disaggregated parent must not end up with prefill, decode AND engine."""
+    (tmp_path / "base.yaml").write_text(
+        BASE.read_text() + "\ntopology:\n  mode: disaggregated\n  split: phase\n"
+        "  kv_transport: mooncake\n  kv_endpoint: http://10.19.0.1:50051\n"
+        "  pools:\n    prefill: {replicas: 1, tensor_parallel_size: 1}\n"
+        "    decode: {replicas: 1, tensor_parallel_size: 1}\n"
+    )
+    (tmp_path / "v.yaml").write_text(
+        "extends: base.yaml\n"
+        "topology: {mode: aggregated, pools: {engine: {replicas: 1, tensor_parallel_size: 1}}}\n"
+    )
+    assert set(load(tmp_path / "v.yaml")["topology"]["pools"]) == {"engine"}
 
 
-def test_the_plan_names_the_profile(raw: dict[str, Any]) -> None:
-    """A rendered run has to say which variant it was, or two bundles are
+def test_a_missing_parent_is_named(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "v.yaml").write_text("extends: nope.yaml\n")
+    with pytest.raises(ConfigError, match="does not exist"):
+        load(tmp_path / "v.yaml")
+
+
+def test_a_cycle_is_refused(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "a.yaml").write_text("extends: b.yaml\n")
+    (tmp_path / "b.yaml").write_text("extends: a.yaml\n")
+    with pytest.raises(ConfigError, match="cycle"):
+        load(tmp_path / "a.yaml")
+
+
+def test_the_plan_names_the_config() -> None:
+    """A rendered run must say which variant produced it, or two bundles are
     indistinguishable."""
-    assert "profile=pair" in plan(resolve(raw, "pair"), FULL)
-
-
-def test_a_config_without_profiles_still_works(cfg: dict[str, Any]) -> None:
-    """Profiles are optional. A plain config is unchanged by resolve()."""
-    assert resolve(cfg, None) is cfg
+    assert "config=pair" in plan(load(CONFIG / "pair.yaml"), FULL)
 
 
 # --------------------------------------------------------------------------
@@ -959,8 +964,8 @@ def test_a_host_without_a_private_address_falls_back_to_public(
     assert host.data_address(FULL) == host.address(FULL)
 
 
-def test_the_kv_endpoint_is_a_private_address(raw: dict[str, Any]) -> None:
+def test_the_kv_endpoint_is_a_private_address() -> None:
     """Mooncake lives on one box; the other three reach it over the private
     network or not at all."""
-    endpoint = raw["profiles"]["disagg"]["topology"]["kv_endpoint"]
+    endpoint = load(CONFIG / "disagg.yaml")["topology"]["kv_endpoint"]
     assert "10.19." in endpoint, endpoint

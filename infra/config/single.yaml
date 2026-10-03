@@ -1,0 +1,25 @@
+# ===========================================================================
+#  single — 1 GPU, aggregated
+# ===========================================================================
+#  Start here. The fewest things that can be wrong.
+#
+#      python -m infra.render infra/config/single.yaml --plan
+#
+#  What this proves        the bring-up works, the gateway reaches a worker,
+#                         decisions are logged, a report is produced
+#  What it cannot show     placement. One worker means one destination, which
+#                         is routing rather than a decision
+#  Admission IS real       ~12 concurrent sequences at 32k, and KV binds before
+#                         max_num_seqs, so a KV policy can fire
+# ===========================================================================
+extends: base.yaml
+
+topology:
+  mode: aggregated
+  # Each engine does prefill and decode for its own requests, so no KV hop
+  # exists and kv_transport must not be set.
+  pools:
+    engine:
+      replicas: 1
+      tensor_parallel_size: 1
+      host: gpu-1

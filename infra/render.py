@@ -1,13 +1,18 @@
-"""Turn infra/config/cluster.yaml into manifests and the gateway's environment.
+"""Turn a cluster config into manifests and the gateway's environment.
 
 One config in; per-host Kubernetes manifests out, plus the URL lists the gateway
-reads. Model, topology and engine flags appear exactly once. Hand-edited
-manifests make "same cluster, only the policy changed" a claim nobody can check.
+reads. Model, topology and engine flags appear exactly once. Hand-edited manifests
+make "same cluster, only the policy changed" a claim nobody can check.
 
-    python -m infra.render infra/config/cluster.yaml                 # manifests
-    python -m infra.render infra/config/cluster.yaml --host gpu-a
-    python -m infra.render infra/config/cluster.yaml --env           # gateway env
-    python -m infra.render infra/config/cluster.yaml --plan          # what lands where
+Three runnable configs, each extending base.yaml, so the shared settings are
+declared once and only the topology differs:
+
+    python -m infra.render infra/config/single.yaml --plan   # 1 GPU, aggregated
+    python -m infra.render infra/config/pair.yaml --plan     # 2 GPUs, aggregated
+    python -m infra.render infra/config/disagg.yaml --plan   # 4 GPUs, disagg 2+2
+
+    python -m infra.render infra/config/pair.yaml --env      # gateway env
+    python -m infra.render infra/config/pair.yaml --host gpu-1
 
 Static manifests (gateway, mooncake, open-webui, observability) are not
 generated — they do not vary with the model.
@@ -137,6 +142,13 @@ class Host:
             got = env.get(self.private_env, "").strip()
             if got:
                 return got
+            if not sole:
+                # Falling back to the public address here is how a run dies in the
+                # middle rather than at render time: the public interface accepts
+                # only SSH, so the URL resolves, connects to nothing, and times out.
+                # Only a single host behind a tunnel can legitimately use its public
+                # address as a data address.
+                return ""
         return self.address(env, sole=sole)
 
     def key(self, env: Mapping[str, str]) -> str:
@@ -210,71 +222,67 @@ def load_dotenv(root: Path | None = None) -> dict[str, str]:
     return out
 
 
-def load(path: Path, profile: str | None = None) -> dict[str, Any]:
-    """Read a config and apply its active profile.
+#: Keys whose child value REPLACES the parent's rather than merging into it. A
+#: variant declaring `engine.max_model_len` should inherit the other engine flags,
+#: but one declaring pools must not inherit the parent's — half a pool set is not a
+#: topology.
+REPLACE_WHOLE = frozenset({"pools", "on"})
 
-    Resolving here means every other function sees a plain config with one
-    topology. The alternative — resolving at each call site — is a rule that has
-    to be remembered, and the one place that forgets it renders the wrong fleet.
+
+def _merge(base: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge child over base. Lists replace; REPLACE_WHOLE keys replace."""
+    out = dict(base)
+    for key, value in child.items():
+        if (
+            key not in REPLACE_WHOLE
+            and isinstance(value, dict)
+            and isinstance(out.get(key), dict)
+        ):
+            out[key] = _merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def load(path: Path, _seen: tuple[Path, ...] = ()) -> dict[str, Any]:
+    """Read a config, following `extends` so shared values are declared once.
+
+        # pair.yaml
+        extends: base.yaml
+        topology: {...}
+
+    base.yaml holds hosts, model, engine, placement, overflow and admission, and
+    deliberately declares NO topology — that is the thing each variant changes. So
+    when two runs differ only by which file was rendered, "same cluster, only the
+    topology changed" is true by construction rather than by discipline.
+
+    Paths are relative to the file doing the extending, so a config directory can
+    be copied or moved whole.
     """
+    path = path.resolve()
+    if path in _seen:
+        chain = " -> ".join(q.name for q in (*_seen, path))
+        raise ConfigError(f"extends forms a cycle: {chain}")
+
     raw = yaml.safe_load(path.read_text())
     if not isinstance(raw, dict):
         raise ConfigError(f"{path} is not a mapping")
-    return resolve(raw, profile)
 
+    parent_ref = raw.pop("extends", None)
+    if not parent_ref:
+        raw.setdefault("config_name", path.stem)
+        return raw
 
-def profiles_in(cfg: dict[str, Any]) -> dict[str, Any]:
-    return dict(cfg.get("profiles") or {})
-
-
-def resolve(cfg: dict[str, Any], profile: str | None = None) -> dict[str, Any]:
-    """Apply a named profile, returning a config with no profiles left in it.
-
-    A profile names which hosts to use and what topology to run on them. Everything
-    else — model, engine, overflow, admission — is shared, declared once, and
-    identical across profiles. That is the whole point: when two runs differ only
-    by profile, "same cluster, only the topology changed" is true by construction
-    rather than by discipline.
-
-    Called before anything else reads the config, so the rest of the renderer never
-    sees a profile and cannot forget to apply one.
-    """
-    profiles = profiles_in(cfg)
-    if not profiles:
-        return cfg
-
-    name = profile or str(cfg.get("profile", "") or "")
-    if not name:
+    parent_path = (path.parent / str(parent_ref)).resolve()
+    if not parent_path.exists():
         raise ConfigError(
-            f"this config has profiles ({', '.join(profiles)}) but none is active. "
-            "Set `profile:` in the config or pass --profile."
+            f"{path.name} extends {parent_ref!r}, which does not exist "
+            f"(looked in {path.parent})"
         )
-    if name not in profiles:
-        raise ConfigError(
-            f"unknown profile {name!r}. Available: {', '.join(profiles)}"
-        )
-
-    out = {k: v for k, v in cfg.items() if k not in ("profiles", "profile")}
-    chosen = profiles[name] or {}
-    out["active_profile"] = name
-
-    # A profile picks from the hosts declared once at the top, rather than
-    # redeclaring them. Four addresses in .env then serve every profile.
-    use = chosen.get("use_hosts")
-    if use:
-        declared = {h["name"]: h for h in (cfg.get("hosts") or [])}
-        missing = [n for n in use if n not in declared]
-        if missing:
-            raise ConfigError(
-                f"profile {name!r} uses hosts {missing}, which are not declared. "
-                f"Known: {', '.join(declared) or 'none'}"
-            )
-        out["hosts"] = [declared[n] for n in use]
-
-    for key, value in chosen.items():
-        if key != "use_hosts":
-            out[key] = value
-    return out
+    merged = _merge(load(parent_path, (*_seen, path)), raw)
+    # Recorded so a plan, and later a run bundle, says which variant produced it.
+    merged["config_name"] = path.stem
+    return merged
 
 
 def hosts_from(
@@ -786,7 +794,7 @@ def render(
         docs.append(service(w))
     header = (
         "# GENERATED by infra/render.py — do not edit.\n"
-        "# Change infra/config/cluster.yaml and re-render.\n"
+        f"# Change infra/config/{cfg.get('config_name', '')}.yaml and re-render.\n"
         f"# host: {host or 'all'}\n"
     )
     return header + yaml.dump_all(docs, Dumper=_NoAliases, sort_keys=False)
@@ -816,7 +824,12 @@ def gateway_env(
     mode, split = str(topo["mode"]), str(topo.get("split", "phase"))
     workers = workers_from(cfg, env)
     hosts = hosts_from(cfg, env)
-    sole = len(hosts) == 1
+    # Counted over hosts that actually run something, not over hosts declared.
+    # base.yaml declares the whole fleet and single.yaml uses one of them, so a
+    # count of declarations would make the single case look multi-host and reject
+    # the LAMBDA shorthand it is entitled to.
+    in_use = {w.host.name for w in workers}
+    sole = len(in_use) == 1
 
     addr: dict[str, str] = {}
     for name, host in hosts.items():
@@ -827,6 +840,14 @@ def gateway_env(
         a = host.data_address(env, sole=sole)
         if not a:
             if strict:
+                if host.private_env and not sole:
+                    raise ConfigError(
+                        f"host {name!r} has no PRIVATE address. Set "
+                        f"{host.private_env} in .env. Its public address will not "
+                        "do: that interface accepts only SSH, so a worker URL "
+                        "built from it connects to nothing and fails as a timeout "
+                        "mid-run rather than an error here."
+                    )
                 hint = f" (or LAMBDA, since {name!r} is the only host)" if sole else ""
                 raise ConfigError(
                     f"host {name!r} has no address. Set {host.env_var()} in .env{hint}. "
@@ -883,8 +904,8 @@ def plan(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> str:
     hosts, workers = hosts_from(cfg, env), workers_from(cfg, env)
     topo, util = cfg["topology"], float(cfg["engine"]["gpu_memory_utilization"])
     lines = []
-    if cfg.get("active_profile"):
-        lines.append(f"profile={cfg['active_profile']}")
+    if cfg.get("config_name"):
+        lines.append(f"config={cfg['config_name']}")
     lines += [
         f"mode={topo['mode']} split={topo.get('split', 'phase')} "
         f"transport={topo.get('kv_transport') or '-'} "
@@ -933,31 +954,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host", help="only this host's manifests")
     p.add_argument("--env", action="store_true", help="print the gateway environment")
     p.add_argument("--plan", action="store_true", help="print what lands where")
-    p.add_argument("--profile", help="which variant to render; overrides the config")
-    p.add_argument(
-        "--profiles", action="store_true", help="list the variants in this config"
-    )
     a = p.parse_args(argv)
 
     try:
-        if a.profiles:
-            raw = yaml.safe_load(a.config.read_text())
-            active = str(raw.get("profile", "") or "")
-            for name, body in (raw.get("profiles") or {}).items():
-                topo = (body or {}).get("topology") or {}
-                pools = topo.get("pools") or {}
-                shape = " ".join(
-                    f"{k}x{(v or {}).get('replicas', 1)}" for k, v in pools.items()
-                )
-                hosts = len((body or {}).get("use_hosts") or [])
-                mark = "*" if name == active else " "
-                print(
-                    f" {mark} {name:<10} {hosts} host(s)  "
-                    f"{topo.get('mode', '?'):<14} {shape}"
-                )
-            print("\n * = active. Override with --profile.")
-            return 0
-        cfg = load(a.config, a.profile)
+        cfg = load(a.config)
         if a.plan:
             print(plan(cfg))
             return 0

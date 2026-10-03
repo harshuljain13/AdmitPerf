@@ -1,13 +1,22 @@
 # ===========================================================================
-#  AdmitPerf — cluster configuration
+#  AdmitPerf — shared cluster settings
 # ===========================================================================
-#  Everything about what gets served and where it lands is in this file.
+#  NOT RENDERED DIRECTLY. The runnable configs extend this one:
+#
+#      single.yaml    1 GPU,  aggregated      prove the pipeline
+#      pair.yaml      2 GPUs, aggregated      placement becomes a decision
+#      disagg.yaml    4 GPUs, disaggregated   the comparison
+#
+#  Everything here is shared by all three and declared exactly ONCE. This file
+#  deliberately has no `topology:` — that is the thing each variant changes, so
+#  when two runs differ only by which file was rendered, "same cluster, only the
+#  topology changed" is true by construction rather than by discipline.
 #  `python -m infra.render` turns it into Kubernetes manifests and the
 #  environment the gateway reads, so no value is typed in two places.
 #
-#  Commands        python -m infra.render infra/config/cluster.yaml --plan
-#                  python -m infra.render infra/config/cluster.yaml --env
-#                  python -m infra.render infra/config/cluster.yaml --host gpu-1
+#  Commands        python -m infra.render infra/config/pair.yaml --plan
+#                  python -m infra.render infra/config/pair.yaml --env
+#                  python -m infra.render infra/config/pair.yaml --host gpu-1
 #
 #  Rationale       infra/docs/topology.md
 #  Secrets         none here. This file is committed; .env holds addresses
@@ -121,80 +130,6 @@ engine:
   scheduling_policy: priority
   tool_call_parser: hermes
   enable_auto_tool_choice: true
-
-
-# ---------------------------------------------------------------------------
-#  PROFILES — one variant per run, sharing everything else
-# ---------------------------------------------------------------------------
-#  Model, engine, overflow and admission are declared ONCE, above and below, and
-#  are identical across profiles. A profile changes only which hosts are used and
-#  what topology runs on them.
-#
-#  That is what makes "same cluster, only the topology changed" true by
-#  construction rather than by discipline.
-#
-#      python -m infra.render infra/config/cluster.yaml --profiles
-#      python -m infra.render infra/config/cluster.yaml --profile pair --plan
-#
-#  use_hosts   which of the hosts above to use
-#  topology    mode           aggregated | disaggregated
-#              split          phase | capability (disaggregated only)
-#              kv_transport   mooncake. Required by disaggregated, refused by
-#                             aggregated where it would be read by nothing
-#              kv_endpoint    where that transport lives. Emitted as
-#                             MOONCAKE_URL so it cannot be unset by omission,
-#                             which made every hop a silent no-op
-#              pools          names are the gateway's contract, not labels:
-#                               aggregated    -> engine
-#                               disaggregated -> prefill, decode
-#                replicas               independent servers
-#                tensor_parallel_size   GPUs one server shards across. Cannot
-#                                       span hosts, since TP all-reduces per layer
-#                host                   pin to a host; omit and the renderer
-#                                       places it and prints the assignment
-# ---------------------------------------------------------------------------
-profile: single
-
-profiles:
-
-  # ---- 1 GPU. Prove the pipeline end to end before adding anything. --------
-  # One worker, so placement has a single destination and is not yet a decision.
-  # Admission IS real: ~12 concurrent at 32k, and KV binds before max_num_seqs.
-  single:
-    use_hosts: [gpu-1]
-    topology:
-      mode: aggregated
-      pools:
-        engine: {replicas: 1, tensor_parallel_size: 1}
-
-  # ---- 2 GPUs. Placement becomes a decision. ------------------------------
-  # Two interchangeable workers, so least_loaded, round_robin and
-  # prefix_affinity can differ from each other and be compared.
-  pair:
-    use_hosts: [gpu-1, gpu-2]
-    topology:
-      mode: aggregated
-      pools:
-        engine: {replicas: 2, tensor_parallel_size: 1}
-
-  # ---- 4 GPUs, disaggregated. The comparison, with a caveat. --------------
-  # Costs half the concurrency, because the prefill pool hands its KV away and
-  # frees it, so only decode gates how many sequences are live.
-  #
-  # READ #33 BEFORE CITING ANY HOP NUMBER. The vendored transport POSTs a
-  # metadata dict, not KV, so hop counts are instrumentation rather than
-  # evidence that bytes moved. Measured on this fabric, a REAL single-stream hop
-  # would cost ~4.7 s against ~2.0 s to recompute the same KV — it would lose.
-  disagg:
-    use_hosts: [gpu-1, gpu-2, gpu-3, gpu-4]
-    topology:
-      mode: disaggregated
-      split: phase
-      kv_transport: mooncake
-      kv_endpoint: http://10.19.81.206:50051
-      pools:
-        prefill: {replicas: 2, tensor_parallel_size: 1}
-        decode: {replicas: 2, tensor_parallel_size: 1}
 
 
 # ---------------------------------------------------------------------------

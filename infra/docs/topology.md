@@ -4,10 +4,68 @@ The config is deliberately terse. This is the reasoning behind it, and the list 
 things the renderer refuses.
 
 ```
-python -m infra.render infra/config/cluster.yaml --plan    # what lands where
-python -m infra.render infra/config/cluster.yaml --env     # the gateway's env
-python -m infra.render infra/config/cluster.yaml --host gpu-a -o /tmp/a.yaml
+python -m infra.render infra/config/single.yaml --plan   # 1 GPU,  aggregated
+python -m infra.render infra/config/pair.yaml   --plan   # 2 GPUs, aggregated
+python -m infra.render infra/config/disagg.yaml --plan   # 4 GPUs, disagg 2+2
+
+python -m infra.render infra/config/pair.yaml --env      # the gateway's env
+python -m infra.render infra/config/pair.yaml --host gpu-1 -o /tmp/gpu-1.yaml
 ```
+
+## Three configs, one base
+
+`base.yaml` holds hosts, model, engine, placement, overflow and admission, and
+deliberately declares **no topology**. Each runnable config extends it and supplies
+only the topology:
+
+| Config | Fleet | What it is for |
+| --- | --- | --- |
+| `single.yaml` | 1 GPU, aggregated, 1 worker | Prove the pipeline. Admission is already real at ~12 concurrent; placement is not yet a decision |
+| `pair.yaml` | 2 GPUs, aggregated, 2 workers | Placement becomes a decision. Per-worker scarcity is unchanged |
+| `disagg.yaml` | 4 GPUs, disaggregated 2+2 | The comparison. Costs half the concurrency, and see the hop caveat below |
+
+A test asserts the three differ **only** in topology. Without it, "same cluster,
+only the topology changed" would be a claim rather than a fact.
+
+`extends` deep-merges, so a variant overriding one engine flag inherits the rest.
+`pools` replaces wholesale, because inheriting half a pool set is not a topology.
+
+## Two networks, and why both are in the config
+
+Each host declares `address_env` and `private_env`.
+
+| | Interface | Used for |
+| --- | --- | --- |
+| `address_env` | public | SSH, rsync, bring-up — from your laptop |
+| `private_env` | private | worker URLs and the KV store — box to box |
+
+**They are not interchangeable in either direction.** Measured on a Lambda A100
+fleet: the private network answered on port 50051 in **1.55 ms**, and the same port
+on the public address was **refused** — the provider firewalls it down to SSH. The
+private network is in turn unreachable from a laptop.
+
+A URL built from a public address therefore resolves, connects to nothing, and
+fails as a **timeout mid-run** rather than an error at render time. So a missing
+private address is refused when more than one host is in use. A single host may
+fall back to its public address, which is correct for the tunnelled setup the lab
+used.
+
+## The KV hop is instrumented, not real
+
+`router/kvbus.py` POSTs a metadata dict — `{src, dst, req_id, tokens, backend,
+prefix}` — roughly 200 bytes. **No KV tensors move.** `tokens` is a count for the
+dashboards.
+
+So hop counts show that the request path split across two pools. They are not
+evidence that bytes were transferred, and no hop latency can be claimed from this
+stack. Tracked as issue #33.
+
+Measured on the same fleet, as analysis rather than measurement: 4.3 Gbps across
+four streams, 1.6 Gbps on one — which is what a single `urllib` POST gets. A
+16k-token 7B sequence is 0.88 GiB of KV against roughly 2.0 s to recompute it on an
+A100, so a real single-stream hop would cost ~4.7 s and **lose by 2.4x**. The ratio
+is context-independent, since payload and prefill cost both scale linearly with
+tokens.
 
 Part of the [cluster docs](README.md). Overview: [ARCHITECTURE.md](ARCHITECTURE.md)
 
