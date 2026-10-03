@@ -58,8 +58,15 @@ hop:
 
 overflow:
   provider: superlinked
-  model: null                   # name it. "another API" is a documented fail
-  max_requests: 50              # the limiter, also required
+  base_url: https://api.superlinked.com/v1
+  model: Qwen/Qwen3.5-4B        # 4B answering for a 72B. A relief valve, not
+                                # an equal service — see the note below.
+  max_requests: 20              # LIFETIME counter per gateway process, not a
+                                # rate limit. Once spent, overflow is off until
+                                # restart and requests fall back to the local
+                                # 503. Bounds the bill; see issue on the
+                                # measurement hazard that creates.
+  max_tokens: 64                # output cap on the overflow path only
   on: [503, 529]                # never 429 — a quota refusal stays local
 
 admission:
