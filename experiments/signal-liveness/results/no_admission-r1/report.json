@@ -91,11 +91,11 @@
       "number": 7,
       "title": "Configuration disclosure",
       "status": "ok",
-      "detail": "model=Qwen/Qwen2.5-7B-Instruct \u00b7 engine=mock_vllm.py (capacity 8) \u00b7 hardware=1xA100-40GB, 1xA100-40GB, 1xA100-40GB, 1xA100-40GB \u00b7 aggregated enginex1 \u00b7 workload=poisson n=90 rate=12 seed=0 prompt=2048 out=120 \u00b7 offered_load=9.34 rps \u00b7 baseline=no_admission"
+      "detail": "model=Qwen/Qwen2.5-7B-Instruct \u00b7 engine=mock_vllm.py (capacity 8) \u00b7 hardware=1xA100-40GB, 1xA100-40GB, 1xA100-40GB, 1xA100-40GB \u00b7 aggregated enginex1 \u00b7 workload=poisson n=90 rate=12 seed=0 prompt=2048 out=120 \u00b7 offered_load=9.23 rps \u00b7 baseline=no_admission"
     }
   ],
   "inputs": {
-    "offered_rps": 9.339,
+    "offered_rps": 9.234,
     "capacity_rps": null,
     "deadline_ms": null,
     "unloaded_ttft_ms": null,
@@ -109,7 +109,7 @@
       "engine": "mock_vllm.py (capacity 8)",
       "hardware": "1xA100-40GB, 1xA100-40GB, 1xA100-40GB, 1xA100-40GB \u00b7 aggregated enginex1",
       "workload": "poisson n=90 rate=12 seed=0 prompt=2048 out=120",
-      "offered_load": "9.34 rps",
+      "offered_load": "9.23 rps",
       "baseline": "no_admission"
     },
     "config_sha": "single.yaml"
@@ -129,12 +129,120 @@
   "harness": {
     "scrapes_ok": 90,
     "scrapes_failed": 0,
-    "max_arrival_lag_ms": 7.18,
-    "wall_s": 9.64
+    "max_arrival_lag_ms": 5.12,
+    "wall_s": 9.75
   },
   "expect": {
     "signal": "kv_used_fraction",
     "reaches_threshold": true,
     "limiter": "kv"
+  },
+  "configs": {
+    "experiment": {
+      "path": "experiments/signal-liveness/experiment.yaml",
+      "yaml": "# ===========================================================================\n#  signal-liveness \u2014 does the signal ever move?\n# ===========================================================================\n#  The question the survey says nobody answers. A policy that refuses above 0.90,\n#  run where pressure never passed 0.40, reports the same numbers as no policy at\n#  all \u2014 and a reader cannot tell the two apart.\n#\n#      admitperf run experiments/signal-liveness --mock              # no GPU\n#      admitperf run experiments/signal-liveness --mock --capacity 400  # inert\n#\n#  WHAT IS DEPLOYED is not described here. It is in the cluster config below,\n#  which already declares the model, the engine flags, the topology AND the\n#  admission policy. This file says only what load to send and how many times.\n#\n#  That split is deliberate. The old schema carried its own `infra:` block, so\n#  the model was declared in two places and \"same cluster, only the load changed\"\n#  was unverifiable.\n# ===========================================================================\nname: signal-liveness\n\n# ---------------------------------------------------------------------------\n#  CLUSTER \u2014 what we are sending load at\n# ---------------------------------------------------------------------------\n#  Everything about the deployment comes from here, including which admission\n#  policy is active and at what threshold:\n#\n#      admission:\n#        policy: kv_threshold        <- resolved from src/admitperf/policies/\n#        params: {threshold: 0.90}\n#\n#  To test a different policy, point at a cluster config that declares it. To\n#  test the same policy under a different topology, point at pair.yaml or\n#  disagg.yaml. The experiment does not change either way.\n# ---------------------------------------------------------------------------\ncluster: infra/config/single.yaml\n\n# ---------------------------------------------------------------------------\n#  LOAD \u2014 what we send\n# ---------------------------------------------------------------------------\n#  kind      poisson | fixed. Poisson because real arrivals are bursty, and a\n#            fixed rate understates queueing\n#  n         total requests\n#  rate      arrivals per second, OFFERED. Whether the cluster serves them is\n#            the thing being measured\n#  seed      fixed, so two runs face the same trace. Without it, a difference\n#            between policies may be a difference between traces\n#  tokens    prompt and output length. These decide how long a request lives,\n#            and therefore concurrency: concurrency = rate x duration. Short\n#            requests cannot fill a cache no matter the arrival rate\n# ---------------------------------------------------------------------------\nload:\n  kind: poisson\n  n: 90\n  rate: 12\n  seed: 0\n  prompt_tokens: 2048\n\n  # Long enough that requests OVERLAP, which is the whole point. Concurrency is\n  # rate x duration, so short requests cannot fill a cache at any arrival rate.\n  # Against the mock a request lives 0.05 + output_tokens x 0.01 seconds, so 120\n  # tokens is ~1.25 s and 12 arrivals/s gives ~15 concurrent \u2014 past a capacity-8\n  # engine. At 24 tokens it would be ~3 concurrent and the run comes back INERT.\n  output_tokens: 120\n\n# ---------------------------------------------------------------------------\n#  BASELINE \u2014 what the policy is measured against\n# ---------------------------------------------------------------------------\n#  The same load with admission disabled. Without it, \"the policy admitted 82%\"\n#  has nothing to be 82% of, and any latency figure is uninterpretable.\n#\n#  Run as a separate arm against the SAME cluster, so the only difference is\n#  whether the policy was consulted.\n# ---------------------------------------------------------------------------\nbaseline: no_admission\n\n# ---------------------------------------------------------------------------\n#  REPEATS \u2014 the error bar\n# ---------------------------------------------------------------------------\n#  One run has none, so a gap between two policies may be noise. Three is the\n#  minimum that gives a spread; reporting item 4 fails below it.\n# ---------------------------------------------------------------------------\nrepeats: 3\n\n# ---------------------------------------------------------------------------\n#  EXPECTED \u2014 written before the run, checked after\n# ---------------------------------------------------------------------------\n#  Recorded here so the prediction cannot be edited to match the result. The\n#  report compares against it.\n#\n#  On single.yaml: 7B bf16 on one A100-40 leaves ~22 GB of KV, so ~12 concurrent\n#  at 32k. A 2048-token request at 256 output tokens lives long enough that 15\n#  arrivals/s should push past 12 concurrent and fill the cache.\n#\n#  If the signal stays flat, the run is INERT and the fix is the LOAD, not the\n#  policy: longer requests or a higher rate. That diagnosis is the whole point of\n#  reporting liveness.\n# ---------------------------------------------------------------------------\nexpect:\n  signal: kv_used_fraction\n  reaches_threshold: true\n  limiter: kv\n"
+    },
+    "cluster": {
+      "path": "/Users/harshuljain/work/projects/experiments_and_courses/llm-inference/admitperf/infra/config/single.yaml",
+      "yaml": "# ===========================================================================\n#  single \u2014 1 GPU, aggregated\n# ===========================================================================\n#  Start here. The fewest things that can be wrong.\n#\n#      python -m infra.render infra/config/single.yaml --plan\n#\n#  What this proves        the bring-up works, the gateway reaches a worker,\n#                         decisions are logged, a report is produced\n#  What it cannot show     placement. One worker means one destination, which\n#                         is routing rather than a decision\n#  Admission IS real       ~12 concurrent sequences at 32k, and KV binds before\n#                         max_num_seqs, so a KV policy can fire\n# ===========================================================================\nextends: base.yaml\n\ntopology:\n  mode: aggregated\n  # Each engine does prefill and decode for its own requests, so no KV hop\n  # exists and kv_transport must not be set.\n  pools:\n    engine:\n      replicas: 1\n      tensor_parallel_size: 1\n      host: gpu-1\n",
+      "resolved": {
+        "hosts": [
+          {
+            "name": "gpu-1",
+            "address_env": "LAMBDA_HOST_1",
+            "private_env": "LAMBDA_PRIVATE_1",
+            "gpu": {
+              "kind": "A100",
+              "count": 1,
+              "hbm_gb": 40
+            }
+          },
+          {
+            "name": "gpu-2",
+            "address_env": "LAMBDA_HOST_2",
+            "private_env": "LAMBDA_PRIVATE_2",
+            "gpu": {
+              "kind": "A100",
+              "count": 1,
+              "hbm_gb": 40
+            }
+          },
+          {
+            "name": "gpu-3",
+            "address_env": "LAMBDA_HOST_3",
+            "private_env": "LAMBDA_PRIVATE_3",
+            "gpu": {
+              "kind": "A100",
+              "count": 1,
+              "hbm_gb": 40
+            }
+          },
+          {
+            "name": "gpu-4",
+            "address_env": "LAMBDA_HOST_4",
+            "private_env": "LAMBDA_PRIVATE_4",
+            "gpu": {
+              "kind": "A100",
+              "count": 1,
+              "hbm_gb": 40
+            }
+          }
+        ],
+        "model": {
+          "id": "Qwen/Qwen2.5-7B-Instruct",
+          "quantization": null,
+          "dtype": "auto",
+          "slicing": false,
+          "attention": {
+            "layers": 28,
+            "kv_heads": 4,
+            "head_dim": 128,
+            "dtype_bytes": 2
+          }
+        },
+        "engine": {
+          "max_model_len": 32768,
+          "gpu_memory_utilization": 0.9,
+          "max_num_seqs": 64,
+          "enable_prefix_caching": true,
+          "distributed_executor_backend": "mp",
+          "scheduling_policy": "priority",
+          "tool_call_parser": "hermes",
+          "enable_auto_tool_choice": true
+        },
+        "placement": {
+          "strategy": "least_loaded"
+        },
+        "overflow": {
+          "provider": "superlinked",
+          "base_url": "https://api.superlinked.com/v1",
+          "model": "Qwen/Qwen3.5-4B",
+          "max_requests": 20,
+          "max_tokens": 64,
+          "true": [
+            503,
+            529
+          ]
+        },
+        "admission": {
+          "policy": "kv_threshold",
+          "params": {
+            "threshold": 0.9
+          },
+          "require_saturation": true
+        },
+        "config_name": "single",
+        "topology": {
+          "mode": "aggregated",
+          "pools": {
+            "engine": {
+              "replicas": 1,
+              "tensor_parallel_size": 1,
+              "host": "gpu-1"
+            }
+          }
+        }
+      }
+    }
   }
 }

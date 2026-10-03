@@ -1,20 +1,22 @@
 """AdmitPerf CLI.
 
-Two groups, matching the two jobs:
+Two config files, and everything follows from them:
 
-    admitperf infra  up | status | smoke | down     provision an engine
-    admitperf bench  run | compare                  measure policies against it
+    infra/config/<name>.yaml      WHAT IS DEPLOYED, including the active policy
+    experiments/<name>/           WHAT LOAD TO SEND, pointing at one of those
 
-They are separate because bringing a model up takes minutes and you will run
-many policies against one deployment.
+The commands, in the order you use them:
 
-    admitperf infra up -c experiments/shedding-vs-tail-latency
-    admitperf infra smoke
-    admitperf bench run -c experiments/shedding-vs-tail-latency
-    admitperf bench compare results/
-    admitperf infra down
+    admitperf infra render infra/config/single.yaml --plan   what would deploy
+    admitperf run experiments/signal-liveness --mock         run it
+    admitperf report <results>/<arm>/report.json             read one
+    admitperf dashboard                                      read all of them
 
-Every setting lives in the config file; flags override it for one-offs.
+There is deliberately no `bench run`. It read a second experiment schema and
+drove a second, unvalidated runner, and when pointed at a current experiment file
+it silently substituted its own defaults — a different model, a different policy
+and a different arrival rate than the file asked for. One run path, one config per
+concern.
 """
 
 from __future__ import annotations
@@ -26,50 +28,8 @@ from pathlib import Path
 
 import click
 
-from admitperf.bench.workloads.poisson import Baseline
 from admitperf.core import __version__
-from admitperf.core.config import ConfigError, ExperimentConfig
 from admitperf.core.registry import available, get_policy
-
-
-def _load(config: str | None, **overrides: object) -> ExperimentConfig:
-    base = ExperimentConfig.load(config) if config else ExperimentConfig()
-    return base.with_overrides(**overrides)
-
-
-def _resolve_endpoint(engine_url: str | None) -> tuple[str, str]:
-    """Explicit URL, else the provisioned session."""
-    from admitperf.core.session import SessionStore
-
-    if engine_url:
-        return engine_url, "lab"
-    try:
-        session = SessionStore().load()
-    except FileNotFoundError as exc:
-        raise SystemExit(str(exc)) from exc
-    return session.primary, session.served_model_name
-
-
-def _baseline_for(cfg: ExperimentConfig, engine_url: str | None) -> Baseline | None:
-    """The measured baseline relative SLOs scale from, if one is needed."""
-    from admitperf.core.session import SessionStore
-
-    if cfg.workload.slo_mode != "relative":
-        return None
-
-    store = SessionStore()
-    saved = store.load().baseline if store.exists() else None
-    if not saved:
-        raise SystemExit(
-            "slo_mode is 'relative' but no baseline has been measured. "
-            "Run `admitperf infra calibrate` first, or set slo_mode: absolute."
-        )
-    return Baseline(
-        ttft_p50_ms=saved["ttft_p50_ms"],
-        itl_p50_ms=saved["itl_p50_ms"],
-        samples=int(saved.get("samples", 0)),
-    )
-
 
 #: Keys that came from `.env` rather than the shell, so `infra up` can say
 #: which credentials it is about to deploy with.
@@ -147,77 +107,8 @@ def infra() -> None:
     """Render a cluster config, and check a running engine."""
 
 
-@infra.command("status")
-def infra_status() -> None:
-    """Show the current session, if there is one."""
-    from admitperf.core.session import SessionStore
-
-    store = SessionStore()
-    if not store.exists():
-        click.echo("no session. Run `admitperf infra up`.")
-        return
-    s = store.load()
-    click.echo(f"provider: {s.provider}\nengine:   {s.engine}\nmodel:    {s.model}")
-    click.echo(f"gpu:      {s.gpu}\nendpoint: {s.primary}\ncreated:  {s.created_at}")
-    engine = (s.config.get("infra") or {}).get("engine") or {}
-    if engine:
-        click.echo(
-            f"config:   tp={engine.get('tensor_parallel_size')} "
-            f"pp={engine.get('pipeline_parallel_size')} "
-            f"max_num_seqs={engine.get('max_num_seqs')} "
-            f"prefix_caching={engine.get('enable_prefix_caching')}"
-        )
-
-
-def _startup_budget(engine_url: str | None, default: float = 600.0) -> float:
-    """How long this deployment said it needs to come up.
-
-    An engine you started yourself is either up or it is not, so there is
-    nothing to wait for; a rented cluster has a configured startup budget and
-    that is the honest number to use.
-    """
-    if engine_url:
-        return 30.0
-    from admitperf.core.session import SessionStore
-
-    store = SessionStore()
-    if not store.exists():
-        return default
-    infra = store.load().config.get("infra") or {}
-    return float(infra.get("startup_timeout_s") or default)
-
-
-async def wait_for_engine(
-    engine, *, timeout_s: float, tick=None, initial_delay: float = 2.0
-) -> bool:
-    """Poll until the engine answers, or the startup budget runs out.
-
-    A bring-up returns when the pod reports ready, which is minutes before the
-    engine can serve: the container is created on the first request, and then
-    has to load weights. Checking once and reporting FAIL describes the clock,
-    not the deployment.
-    """
-    import time as _time
-
-    deadline = _time.monotonic() + timeout_s
-    delay = initial_delay
-    while True:
-        try:
-            if await engine.health():
-                return True
-        except Exception:  # noqa: BLE001 - still starting, not yet an error
-            pass
-        remaining = deadline - _time.monotonic()
-        if remaining <= 0:
-            return False
-        if tick is not None:
-            tick(timeout_s - remaining)
-        await asyncio.sleep(min(delay, remaining))
-        delay = min(delay * 1.5, 15.0)
-
-
 @infra.command("smoke")
-@click.option("--engine-url", default=None, help="Override the session endpoint")
+@click.option("--engine-url", required=True, help="e.g. http://127.0.0.1:8000")
 @click.option(
     "--wait/--no-wait",
     default=True,
@@ -227,16 +118,17 @@ async def wait_for_engine(
 @click.option(
     "--timeout",
     type=float,
-    default=None,
-    help="Seconds to wait for startup. Defaults to the session's startup_timeout_s.",
+    default=600.0,
+    show_default=True,
+    help="Seconds to wait for startup. A pod reports READY minutes before it serves.",
 )
-def infra_smoke(engine_url: str | None, wait: bool, timeout: float | None) -> None:
+def infra_smoke(engine_url: str, wait: bool, timeout: float) -> None:
     """Check the engine serves /v1/models, /metrics and a completion."""
     from admitperf.core.api import Request
     from admitperf.core.engine import VllmConfig, VllmEngine
 
-    url, served = _resolve_endpoint(engine_url)
-    budget = timeout if timeout is not None else _startup_budget(engine_url)
+    url, served = engine_url, "lab"
+    budget = timeout
 
     async def check() -> int:
         engine = VllmEngine(VllmConfig(base_url=url, model=served))
@@ -244,11 +136,21 @@ def infra_smoke(engine_url: str | None, wait: bool, timeout: float | None) -> No
         try:
             if wait:
                 click.echo(f"waiting for {url} to answer (up to {budget:.0f}s)...")
-                ready = await wait_for_engine(
-                    engine,
-                    timeout_s=budget,
-                    tick=lambda spent: click.echo(f"  still starting... {spent:.0f}s"),
-                )
+                # Polled here rather than in a helper, because the helper lived in
+                # the deleted provisioning path and this is the whole of it.
+                import time as _time
+
+                deadline = _time.monotonic() + budget
+                ready = False
+                while True:
+                    if await engine.health():
+                        ready = True
+                        break
+                    left = deadline - _time.monotonic()
+                    if left <= 0:
+                        break
+                    click.echo(f"  still starting... {budget - left:.0f}s")
+                    await asyncio.sleep(min(5.0, left))
                 if not ready:
                     click.echo(
                         f"FAIL  engine did not answer within {budget:.0f}s. "
@@ -312,11 +214,10 @@ def infra_calibrate(engine_url: str | None, samples: int) -> None:
     """
     from admitperf.bench.calibrate import calibrate
     from admitperf.core.engine import VllmConfig, VllmEngine
-    from admitperf.core.session import SessionStore
 
-    url, served = _resolve_endpoint(engine_url)
+    url, served = engine_url, "lab"
 
-    async def go() -> Baseline:
+    async def go():
         engine = VllmEngine(VllmConfig(base_url=url, model=served))
         try:
             return await calibrate(engine, samples=samples)
@@ -329,19 +230,16 @@ def infra_calibrate(engine_url: str | None, samples: int) -> None:
     click.echo(f"  unloaded TTFT p50 : {baseline.ttft_p50_ms:.0f}ms")
     click.echo(f"  unloaded ITL  p50 : {baseline.itl_p50_ms:.1f}ms")
     click.echo(f"  samples           : {baseline.samples}")
-
-    store = SessionStore()
-    if store.exists():
-        session = store.load()
-        session.baseline = {
-            "ttft_p50_ms": baseline.ttft_p50_ms,
-            "itl_p50_ms": baseline.itl_p50_ms,
-            "samples": float(baseline.samples),
-        }
-        store.save(session)
-        click.echo("saved to the session; `slo_mode: relative` will use it")
-    else:
-        click.echo("no session to save into — pass these as absolute deadlines instead")
+    click.echo("")
+    # Printed for the config rather than stashed in a session file. Reporting item 2
+    # wants deadlines expressed relative to these, and a number that lives in the
+    # experiment config travels with the run that used it.
+    click.echo("Put these in the experiment config, so a run records what its")
+    click.echo("deadlines were calibrated against:")
+    click.echo("")
+    click.echo("  calibration:")
+    click.echo(f"    unloaded_ttft_ms: {baseline.ttft_p50_ms:.0f}")
+    click.echo(f"    unloaded_itl_ms: {baseline.itl_p50_ms:.1f}")
 
 
 @infra.command("render")
@@ -385,175 +283,6 @@ def infra_render(
 
 # ---------------------------------------------------------------------------
 # bench — measurement
-# ---------------------------------------------------------------------------
-
-
-@main.group()
-def bench() -> None:
-    """Measure admission policies against a running engine."""
-
-
-@bench.command("run")
-@click.option("-c", "--config", default=None, help="Experiment YAML")
-@click.option("--engine-url", default=None, help="Override the session endpoint")
-@click.option("--policy", multiple=True, help="Policy name; repeatable")
-@click.option("-n", type=int, default=None, help="Requests per run")
-@click.option("--rate", type=float, default=None, help="Arrivals per second")
-@click.option("--seed", type=int, default=None)
-@click.option("--repeats", type=int, default=None, help="Runs per policy")
-@click.option(
-    "--out",
-    default=None,
-    help="Where to write. Defaults to results/ inside the experiment folder.",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Write even if the target already holds runs. They will be replaced.",
-)
-def bench_run(
-    config: str | None,
-    engine_url: str | None,
-    out: str | None,
-    force: bool,
-    **overrides: object,
-) -> None:
-    """Drive load through each policy and record what it cost."""
-    from admitperf.bench.experiment import (
-        ResultsExistError,
-        guard_results_dir,
-        results_dir_for,
-        run_experiment,
-    )
-
-    try:
-        cfg = _load(config, **overrides)
-    except ConfigError as exc:
-        raise SystemExit(f"config error: {exc}") from exc
-
-    out_dir = results_dir_for(config, out)
-    if out_dir is not None:
-        try:
-            guard_results_dir(out_dir, force=force)
-        except ResultsExistError as exc:
-            raise SystemExit(str(exc)) from exc
-
-    url, served = _resolve_endpoint(engine_url)
-    baseline = _baseline_for(cfg, engine_url)
-
-    try:
-        asyncio.run(
-            run_experiment(
-                cfg,
-                engine_url=url,
-                served_model=served,
-                out_dir=out_dir,
-                baseline=baseline,
-            )
-        )
-    except KeyboardInterrupt:
-        raise SystemExit("interrupted") from None
-
-
-@bench.command("compare")
-@click.argument("path", default="results", required=False)
-def bench_compare(path: str) -> None:
-    """Compare every run under a directory, grouped by policy."""
-    from admitperf.bench.compare import compare_dir
-
-    text = compare_dir(Path(path))
-    if text is None:
-        raise SystemExit(f"no result bundles under {path}")
-    click.echo(text)
-
-
-@bench.command("capacity")
-@click.option("-c", "--config", default=None, help="Experiment YAML")
-@click.option("--engine-url", default=None, help="Override the session endpoint")
-@click.option(
-    "--rates",
-    default="2,4,6,8,12,16,24",
-    show_default=True,
-    help="Arrival rates to walk, lowest first. Stops at the first failure.",
-)
-@click.option("--target", default=0.9, show_default=True, help="Attainment that counts as served")
-@click.option("--duration", default=30.0, show_default=True, help="Seconds per rung")
-@click.option("--warmup", default=10.0, show_default=True, help="Warmup seconds per rung")
-def bench_capacity(
-    config: str | None,
-    engine_url: str | None,
-    rates: str,
-    target: float,
-    duration: float,
-    warmup: float,
-) -> None:
-    """Measure what this deployment serves, so the load axis means something.
-
-    Runs the no-admission baseline at each rate and finds where it stops
-    meeting its SLOs. Print a `loads:` block for a policy comparison.
-    """
-    from admitperf.bench.capacity import measure, render_text
-
-    try:
-        cfg = _load(config)
-    except ConfigError as exc:
-        raise SystemExit(f"config error: {exc}") from exc
-
-    url, served = _resolve_endpoint(engine_url)
-    ladder = [float(r) for r in rates.split(",") if r.strip()]
-    baseline = _baseline_for(cfg, engine_url)
-
-    click.echo(f"walking {len(ladder)} rates against {url}, {duration:.0f}s each")
-    cap = asyncio.run(
-        measure(
-            cfg,
-            engine_url=url,
-            served_model=served,
-            rates=ladder,
-            target=target,
-            duration_s=duration,
-            warmup_s=warmup,
-            baseline=baseline,
-            echo=click.echo,
-        )
-    )
-    click.echo("")
-    click.echo(render_text(cap))
-
-
-@bench.command("decide")
-@click.argument("path", default="results", required=False)
-def bench_decide(path: str) -> None:
-    """Which policy to use, per situation, across the runs under a directory."""
-    from admitperf.bench.decide import decide, render_text
-    from admitperf.bench.report import load_bundles
-
-    bundles = load_bundles(Path(path))
-    if not bundles:
-        raise SystemExit(f"no result bundles under {path}")
-    click.echo(render_text(decide(bundles)))
-
-
-@bench.command("report")
-@click.argument("path", default="results", required=False)
-@click.option("--out", default=None, help="Where to write it (default: alongside the runs)")
-def bench_report(path: str, out: str | None) -> None:
-    """Write a self-contained HTML report for the runs under a directory."""
-    from admitperf.bench.report import write
-
-    root = Path(path)
-    written = write(root, out_dir=Path(out) if out else None)
-    if written is None:
-        raise SystemExit(f"no result bundles under {path}")
-    click.echo(f"report:  {written}")
-    click.echo(f"table:   {written.parent / 'compare.txt'}")
-    figures = written.parent / "figures"
-    if figures.exists():
-        click.echo(f"figures: {figures}/")
-
-
-# ---------------------------------------------------------------------------
-# report — the artifact
 # ---------------------------------------------------------------------------
 
 

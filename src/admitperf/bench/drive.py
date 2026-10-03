@@ -420,6 +420,24 @@ def write_arm(
         "wall_s": round(arm.wall_s, 2),
     }
     payload["expect"] = exp.expect
+
+    # Both configs, verbatim, inside the report. This is what makes the three views
+    # connect: a reader opens one file and sees the result, the load that produced
+    # it, and the deployment it ran against. Referencing them by path instead would
+    # let an edit after the run change what the result appears to have measured.
+    payload["configs"] = {
+        "experiment": {
+            "path": str(exp.path),
+            "yaml": exp.path.read_text(),
+        },
+        "cluster": {
+            "path": str(exp.cluster_path),
+            "yaml": exp.cluster_path.read_text(),
+            # Resolved, because `extends` means the file on disk is not the whole
+            # story and the resolved form is what actually ran.
+            "resolved": exp.cluster,
+        },
+    }
     (out / "report.json").write_text(json.dumps(payload, indent=2) + "\n")
 
     # Written here rather than on demand, so the page and the data are produced

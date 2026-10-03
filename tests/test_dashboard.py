@@ -381,3 +381,12 @@ def test_the_report_page_says_what_the_verdict_means() -> None:
     assert "Can support a claim about the policy" in source
     assert "Says nothing about the policy" in source
     assert "Change the load, not the policy" in source
+
+
+def test_the_report_shows_both_configs_from_the_report_not_from_disk() -> None:
+    """The three views have to connect: a result, the load that produced it, and the
+    deployment it ran against. Reading the files from disk instead would let an edit
+    after the run change what the result appears to have measured."""
+    source = (DASHBOARD / "views" / "report.py").read_text()
+    assert 'payload.get("configs")' in source
+    assert "What produced it" in source

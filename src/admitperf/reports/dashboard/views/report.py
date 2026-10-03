@@ -254,5 +254,27 @@ else:
         "worked — not that it did."
     )
 
+# --- the two configs that produced it -------------------------------------
+# Embedded in the report rather than read from disk, so what is shown is what ran.
+# Reading the files instead would let an edit after the run change what the result
+# appears to have measured.
+configs = payload.get("configs") or {}
+if configs:
+    st.divider()
+    st.markdown("#### 4 &nbsp;·&nbsp; What produced it")
+    exp_cfg, cl_cfg = configs.get("experiment") or {}, configs.get("cluster") or {}
+    left, right = st.columns(2)
+    with left:
+        st.markdown(f"**Experiment** · `{exp_cfg.get('path', '?')}`")
+        st.caption("what load was sent")
+        st.code(exp_cfg.get("yaml", ""), language="yaml")
+    with right:
+        st.markdown(f"**Cluster** · `{cl_cfg.get('path', '?')}`")
+        st.caption("what was deployed, and which policy was active")
+        st.code(cl_cfg.get("yaml", ""), language="yaml")
+    if cl_cfg.get("resolved"):
+        with st.expander("cluster config, resolved (`extends` applied)"):
+            st.json(cl_cfg["resolved"])
+
 with st.expander("report.json"):
     st.json(payload)

@@ -14,6 +14,7 @@ because four copies of the same fact is how they drift apart.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -29,6 +30,10 @@ from admitperf.report import (
     sparkline,
     summarise,
 )
+
+REPO = Path(__file__).resolve().parents[1]
+
+REPO = Path(__file__).resolve().parents[1]
 
 # --------------------------------------------------------------------------
 # One declaration, four consumers
@@ -757,3 +762,19 @@ def test_html_handles_a_run_with_no_signal() -> None:
     from admitperf.report import render_html
 
     assert "no signal recorded" in render_html(_payload(values=[]))
+
+
+def test_the_report_embeds_both_configs_verbatim(tmp_path) -> None:
+    """A result whose provenance lives in separate files can drift from them. The
+    configs are copied into the report so what is shown is what ran."""
+    import json
+
+    found = sorted((REPO / "experiments").rglob("report.json"))
+    if not found:
+        pytest.skip("no runs on disk")
+    payload = json.loads(found[0].read_text())
+    configs = payload["configs"]
+    assert configs["experiment"]["yaml"].strip()
+    assert configs["cluster"]["yaml"].strip()
+    # Resolved too, because `extends` means the file on disk is not the whole story.
+    assert "admission" in configs["cluster"]["resolved"]
