@@ -1,14 +1,13 @@
-"""The AdmitPerf Report, in the dashboard.
+"""Reports produced by `admitperf run`.
 
-Reads `report.json` and displays it. It computes nothing — no verdict, no range,
-no item status. Every number here came out of the same file the text and HTML
-renderers use.
+The CLI runs experiments and writes `report.json`. This page finds them and shows
+them. There is nothing to upload: a dashboard that asks you to supply the artifact
+it exists to display has the arrows pointing the wrong way.
 
-That restraint is the point. A dashboard that recomputes a verdict is a second
-implementation of the thing that matters, and two implementations drift. This
-repository has already shipped that bug once, when the dashboard resolved its
-asset path independently of the test that checked it and the two silently
-disagreed.
+It computes nothing either — no verdict, no range, no item status. Every number
+here came out of the file the CLI wrote, which is the same file the text and HTML
+renderers read. A page that re-derives a verdict is a second implementation of the
+thing that matters, and two implementations drift.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from typing import Any
 import streamlit as st
 
 from admitperf.report.schema import SCHEMA_VERSION, problems
+from admitperf.reports.paths import experiments_dir
 
 VERDICT_STYLE = {
     "LIVE": ("✅", "success"),
@@ -28,55 +28,88 @@ VERDICT_STYLE = {
     "UNKNOWN": ("❓", "info"),
 }
 
-st.title("AdmitPerf Report")
+st.title("Reports")
+
+
+def _discover() -> dict[str, list[Path]]:
+    """Every run, grouped by the experiment that produced it, newest first."""
+    out: dict[str, list[Path]] = {}
+    root = experiments_dir()
+    if not root.is_dir():
+        return out
+    for q in sorted(root.rglob("report.json")):
+        parts = q.relative_to(root).parts
+        if parts:
+            out.setdefault(parts[0], []).append(q)
+    for runs in out.values():
+        runs.sort(key=lambda r: r.stat().st_mtime, reverse=True)
+    return out
+
+
+groups = _discover()
+if not groups:
+    st.info(
+        "No reports yet. Run an experiment:\n\n"
+        "```\nadmitperf run experiments/signal-liveness --mock\n```\n\n"
+        "That drives load through the policy and its baseline, and writes one "
+        "`report.json` per arm."
+    )
+    st.stop()
+
+experiment = st.selectbox("Experiment", sorted(groups))
+
+loaded: list[tuple[str, dict[str, Any]]] = []
+for q in groups[experiment]:
+    try:
+        loaded.append((q.parent.name, json.loads(q.read_text())))
+    except (OSError, json.JSONDecodeError) as exc:
+        st.warning(f"{q.parent.name}: unreadable ({exc})")
+
+major = SCHEMA_VERSION.split(".")[0]
+stale = [n for n, d in loaded if str(d.get("schema_version", "0")).split(".")[0] != major]
+if stale:
+    st.error(
+        f"{len(stale)} run(s) use an incompatible report schema and are hidden: "
+        f"{', '.join(stale)}. Re-run them rather than reading them — the fields would "
+        "be interpreted as something they are not."
+    )
+    loaded = [(n, d) for n, d in loaded if n not in stale]
+if not loaded:
+    st.stop()
+
+# --- every arm at once: the comparison IS the point ------------------------
+st.subheader(f"{len(loaded)} run(s)")
 st.caption(
-    "Rendered from `report.json`. Nothing on this page is recomputed — the verdict, "
-    "the range and the item statuses all come out of the file."
+    "Two arms differing only in which policy was consulted belong side by side — and "
+    "whether either could have shown anything belongs next to them."
+)
+st.dataframe(
+    {
+        "run": [n for n, _ in loaded],
+        "liveness": [d["liveness"]["verdict"] for _, d in loaded],
+        "signal max": [d["signal"].get("max") for _, d in loaded],
+        "threshold": [d["signal"].get("threshold") for _, d in loaded],
+        "rejected": [d["decisions"]["rejected"] for _, d in loaded],
+        "total": [d["decisions"]["total"] for _, d in loaded],
+        "scrapes failed": [(d.get("harness") or {}).get("scrapes_failed") for _, d in loaded],
+    },
+    hide_index=True,
+    use_container_width=True,
 )
 
-
-def _find_reports() -> list[Path]:
-    """Any report.json under experiments/ or results/, newest first."""
-    root = Path(__file__).resolve().parents[4]
-    found: list[Path] = []
-    for base in ("experiments", "results", "runs"):
-        d = root / base
-        if d.is_dir():
-            found += d.rglob("report.json")
-    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
-
-
-uploaded = st.file_uploader("report.json", type="json")
-payload: dict[str, Any] | None = None
-
-if uploaded is not None:
-    payload = json.load(uploaded)
-else:
-    found = _find_reports()
-    if found:
-        root = Path(__file__).resolve().parents[4]
-        pick = st.selectbox(
-            "or pick one from this repository",
-            found,
-            format_func=lambda p: str(p.relative_to(root)),
-        )
-        payload = json.loads(pick.read_text())
-
-if payload is None:
-    st.info(
-        "No report yet. Generate one with:\n\n"
-        "```\nadmitperf report decisions.jsonl --policy kv_threshold "
-        "--format json -o report.json\n```"
+inert = [n for n, d in loaded if d["liveness"]["verdict"] in ("INERT", "UNKNOWN")]
+if inert:
+    st.warning(
+        f"**{len(inert)} of {len(loaded)} run(s) could not have fired:** "
+        f"{', '.join(inert)}. Those rows say nothing about the policy — the signal "
+        "never reached its threshold. The usual cause is load rather than the policy: "
+        "concurrency is arrival rate times request duration, so short requests cannot "
+        "fill a cache at any rate."
     )
-    st.stop()
 
-got = str(payload.get("schema_version", "0"))
-if got.split(".")[0] != SCHEMA_VERSION.split(".")[0]:
-    st.error(
-        f"This report is schema {got}; the dashboard reads {SCHEMA_VERSION}. "
-        "Major versions are not compatible, so the numbers below would be wrong."
-    )
-    st.stop()
+st.divider()
+chosen = st.selectbox("Run", [n for n, _ in loaded])
+payload = next(d for n, d in loaded if n == chosen)
 
 run, live, pol, sig = (
     payload["run"],
@@ -90,8 +123,9 @@ run, live, pol, sig = (
 icon, kind = VERDICT_STYLE.get(live["verdict"], VERDICT_STYLE["UNKNOWN"])
 getattr(st, kind)(f"{icon} **SIGNAL LIVENESS: {live['verdict']}** — {live['explanation']}")
 
-bits = [run["id"]] + [str(run[k]) for k in ("cluster", "model", "engine", "commit") if run.get(k)]
-st.caption(" · ".join(bits))
+st.caption(
+    " · ".join(str(run[k]) for k in ("id", "cluster", "model", "engine", "commit") if run.get(k))
+)
 
 left, right = st.columns(2)
 
@@ -167,6 +201,21 @@ st.dataframe(
     hide_index=True,
     use_container_width=True,
 )
+
+harness = payload.get("harness") or {}
+if harness:
+    st.subheader("Harness")
+    st.caption(
+        "How the instrument behaved. A run whose scrapes failed produces "
+        "ordinary-looking numbers that mean nothing, because the policy decided on a "
+        "stale snapshot — a different failure from an inert signal, and invisible "
+        "unless it is written down."
+    )
+    st.dataframe(
+        {"": list(harness), "value": list(harness.values())},
+        hide_index=True,
+        use_container_width=True,
+    )
 
 found_problems = problems(payload)
 if found_problems:

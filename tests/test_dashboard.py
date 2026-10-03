@@ -349,3 +349,24 @@ def test_provenance_a_paper_would_need_is_recorded() -> None:
     assert "commit" in code and "dirty" in code
     if code["commit"] is not None:
         assert len(code["commit"]) >= 7, "a short sha still has to identify a commit"
+
+
+def test_the_report_page_discovers_runs_rather_than_asking_for_them() -> None:
+    """The CLI produces reports; the dashboard shows them.
+
+    The page used to lead with a file uploader, which has the arrows pointing the
+    wrong way: a dashboard that asks you to supply the artifact it exists to display
+    is asking you to do its job.
+    """
+    source = (DASHBOARD / "views" / "report.py").read_text()
+    assert "file_uploader" not in source
+    assert "_discover" in source
+
+
+def test_the_report_page_computes_no_verdict() -> None:
+    """Every number comes out of report.json. A page that re-derives a verdict is a
+    second implementation of the thing that matters, and two implementations drift —
+    which has already happened here once, with a resolved path."""
+    source = (DASHBOARD / "views" / "report.py").read_text()
+    for forbidden in ("summarise(", "facts_from(", "evaluate("):
+        assert forbidden not in source, forbidden
