@@ -109,8 +109,11 @@ def test_plan_names_the_host_the_mode_and_the_fit(cfg: dict[str, Any]) -> None:
 # --------------------------------------------------------------------------
 
 
+ENV = {"LAMBDA_HOST_GPU_A": "ubuntu@10.0.0.1", "LAMBDA_HOST_GPU_B": "ubuntu@10.0.0.2"}
+
+
 def test_disaggregated_env_separates_the_pools(cfg: dict[str, Any]) -> None:
-    env = gateway_env(cfg)
+    env = gateway_env(cfg, ENV)
     assert env["LAB_TOPOLOGY"] == "disaggregated"
     assert env["PREFILL_URLS"] != env["DECODE_URLS"]
     assert env["KV_BACKEND"] == "mooncake"
@@ -122,7 +125,7 @@ def test_aggregated_env_points_both_lists_at_one_pool(cfg: dict[str, Any]) -> No
         "mode": "aggregated",
         "pools": {"engine": {"replicas": 2, "tensor_parallel_size": 2, "host": "gpu-a"}},
     }
-    env = gateway_env(cfg)
+    env = gateway_env(cfg, ENV)
     assert env["LAB_TOPOLOGY"] == "aggregated"
     assert env["PREFILL_URLS"] == env["DECODE_URLS"]
     assert len(env["PREFILL_URLS"].split(",")) == 2
@@ -243,14 +246,7 @@ def test_bad_memory_utilization_is_refused(cfg: dict[str, Any]) -> None:
 
 
 def _two_hosts(cfg: dict[str, Any]) -> dict[str, Any]:
-    cfg["hosts"].append(
-        {
-            "name": "gpu-b",
-            "ssh": "ubuntu@10.0.0.2",
-            "ssh_key": "~/.ssh/k",
-            "gpu": {"kind": "H100", "count": 4, "hbm_gb": 80},
-        }
-    )
+    cfg["hosts"].append({"name": "gpu-b", "gpu": {"kind": "H100", "count": 4, "hbm_gb": 80}})
     cfg["topology"]["pools"]["decode"]["host"] = "gpu-b"
     return cfg
 
@@ -278,16 +274,14 @@ def test_render_can_target_one_host(cfg: dict[str, Any]) -> None:
 
 
 def test_render_refuses_a_host_with_no_pools(cfg: dict[str, Any]) -> None:
-    cfg["hosts"].append(
-        {"name": "gpu-idle", "ssh": "u@h", "ssh_key": "k", "gpu": {"count": 4, "hbm_gb": 80}}
-    )
+    cfg["hosts"].append({"name": "gpu-idle", "gpu": {"count": 4, "hbm_gb": 80}})
     with pytest.raises(ConfigError, match="no pools are placed"):
         render(cfg, host="gpu-idle")
 
 
 def test_urls_span_hosts(cfg: dict[str, Any]) -> None:
     cfg = _two_hosts(cfg)
-    env = gateway_env(cfg)
+    env = gateway_env(cfg, ENV)
     assert "10.0.0.2" in env["DECODE_URLS"]
     assert "10.0.0.2" not in env["PREFILL_URLS"]
 
@@ -318,3 +312,102 @@ def test_weight_estimate_declines_rather_than_guesses() -> None:
     """A model whose name carries no parameter count returns None, so the fit
     check skips instead of inventing a number to refuse on."""
     assert weights_gb("my-org/some-finetune", "fp8") is None
+
+
+# --------------------------------------------------------------------------
+# Addresses and secrets live in .env, not in the committed config
+# --------------------------------------------------------------------------
+
+
+def test_config_declares_no_address_and_no_key(cfg: dict[str, Any]) -> None:
+    """The committed file must not carry an IP or a key path, ever."""
+    for host in cfg["hosts"]:
+        assert not (set(host) & {"ssh", "ssh_key", "address", "ip"})
+
+
+def test_an_address_in_the_config_is_refused(cfg: dict[str, Any]) -> None:
+    """Refused rather than ignored: ignoring it means someone commits a key path
+    and believes it is being used."""
+    cfg["hosts"][0]["ssh"] = "ubuntu@1.2.3.4"
+    with pytest.raises(ConfigError, match="do not belong"):
+        hosts_from(cfg)
+
+
+def test_a_key_in_the_config_is_refused(cfg: dict[str, Any]) -> None:
+    cfg["hosts"][0]["ssh_key"] = "~/.ssh/id_ed25519"
+    with pytest.raises(ConfigError, match="do not belong"):
+        hosts_from(cfg)
+
+
+def test_unset_address_names_the_variable_to_set(cfg: dict[str, Any]) -> None:
+    with pytest.raises(ConfigError, match="LAMBDA_HOST_GPU_A"):
+        gateway_env(cfg, {})
+
+
+def test_lambda_works_for_a_single_host(cfg: dict[str, Any]) -> None:
+    """The lab's existing variable keeps working when there is only one box."""
+    env = gateway_env(cfg, {"LAMBDA": "ubuntu@10.1.1.5"})
+    assert "10.1.1.5" in env["PREFILL_URLS"]
+
+
+def test_lambda_is_ambiguous_with_two_hosts_and_is_refused(cfg: dict[str, Any]) -> None:
+    """Applying one address to both boxes would point every URL at one machine
+    while the plan claimed two — a two-worker run that is really one."""
+    cfg = _two_hosts(cfg)
+    with pytest.raises(ConfigError, match="LAMBDA_HOST_GPU_A"):
+        gateway_env(cfg, {"LAMBDA": "ubuntu@10.1.1.5"})
+
+
+def test_per_host_addresses_reach_the_right_pool(cfg: dict[str, Any]) -> None:
+    cfg = _two_hosts(cfg)
+    env = gateway_env(cfg, ENV)
+    assert "10.0.0.1" in env["PREFILL_URLS"]
+    assert "10.0.0.2" in env["DECODE_URLS"]
+
+
+def test_plan_works_with_no_addresses_at_all(cfg: dict[str, Any]) -> None:
+    """Planning a topology must not require having rented anything yet."""
+    out = plan(cfg)
+    assert "unset" in out
+
+
+def test_overflow_env_comes_from_the_config(cfg: dict[str, Any]) -> None:
+    """Emitted, not typed twice. Two copies drift and the environment wins silently."""
+    env = gateway_env(cfg, ENV)
+    assert env["OVERFLOW_BASE_URL"] == cfg["overflow"]["base_url"]
+    assert env["OVERFLOW_MODEL"] == cfg["overflow"]["model"]
+    assert env["OVERFLOW_MAX_REQS"] == str(cfg["overflow"]["max_requests"])
+
+
+def test_the_overflow_api_key_is_never_emitted(cfg: dict[str, Any]) -> None:
+    """The one secret in that block. It stays in .env and must not appear in a
+    rendered environment, a manifest, or the plan."""
+    assert "OVERFLOW_API_KEY" not in gateway_env(cfg, ENV)
+    assert "OVERFLOW_API_KEY" not in plan(cfg)
+    assert "OVERFLOW_API_KEY" not in render(cfg)
+
+
+def test_the_config_file_assigns_no_secret() -> None:
+    """Checks for an assigned value, not for the words.
+
+    The config mentions OVERFLOW_API_KEY in a comment explaining that it is NOT
+    here, which is exactly the kind of text a naive substring search flags. Walk
+    the parsed structure instead.
+    """
+    secretish = {"api_key", "apikey", "token", "secret", "password", "ssh_key"}
+
+    def walk(node: object, path: str = "") -> list[str]:
+        found = []
+        if isinstance(node, dict):
+            for k, v in node.items():
+                here = f"{path}.{k}" if path else str(k)
+                if str(k).lower() in secretish and v:
+                    found.append(here)
+                found += walk(v, here)
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                found += walk(v, f"{path}[{i}]")
+        return found
+
+    assigned = walk(yaml.safe_load(SHIPPED.read_text()))
+    assert not assigned, f"secrets assigned in a committed config: {assigned}"

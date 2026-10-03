@@ -21,9 +21,11 @@ restriction anyway: TP all-reduces every layer and expects NVLink.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 import yaml
@@ -55,12 +57,42 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Host:
+    """A machine's SHAPE. Its address and key are not here on purpose.
+
+    An IP and a private key are facts about today, not about the topology. They
+    live in .env so that re-renting a box is an edit, not a commit — and so that
+    a key path is never committed at all.
+    """
+
     name: str
-    ssh: str
-    ssh_key: str
     gpu_kind: str
     gpu_count: int
     hbm_gb: float
+
+    @property
+    def env_suffix(self) -> str:
+        return self.name.upper().replace("-", "_").replace(".", "_")
+
+    def address(self, env: Mapping[str, str], *, sole: bool = False) -> str:
+        """ubuntu@1.2.3.4 from the environment, or "" when unset.
+
+        LAMBDA is accepted only when there is exactly one host. With two boxes it
+        is ambiguous, and silently applying it to both would point every URL at
+        one machine while the plan claimed two.
+        """
+        specific = env.get(f"LAMBDA_HOST_{self.env_suffix}", "").strip()
+        if specific:
+            return specific
+        return env.get("LAMBDA", "").strip() if sole else ""
+
+    def key(self, env: Mapping[str, str]) -> str:
+        return (
+            env.get(f"LAMBDA_SSH_KEY_{self.env_suffix}", "").strip()
+            or env.get("LAMBDA_SSH_KEY", "").strip()
+        )
+
+    def env_var(self) -> str:
+        return f"LAMBDA_HOST_{self.env_suffix}"
 
 
 @dataclass(frozen=True)
@@ -110,10 +142,15 @@ def hosts_from(cfg: dict[str, Any]) -> dict[str, Host]:
         if name in out:
             raise ConfigError(f"duplicate host name {name!r}")
         gpu = h.get("gpu") or {}
+        for banned in ("ssh", "ssh_key", "address", "ip"):
+            if banned in h:
+                raise ConfigError(
+                    f"host {name!r} declares {banned!r}. Addresses and keys do not belong "
+                    f"in a committed config — set {Host(name, '', 0, 0).env_var()} in .env "
+                    "instead."
+                )
         out[name] = Host(
             name=name,
-            ssh=str(h.get("ssh", "")),
-            ssh_key=str(h.get("ssh_key", "")),
             gpu_kind=str(gpu.get("kind", "unknown")),
             gpu_count=int(gpu.get("count", 0)),
             hbm_gb=float(gpu.get("hbm_gb", 0)),
@@ -449,40 +486,77 @@ def render(cfg: dict[str, Any], host: str | None = None) -> str:
     return header + yaml.dump_all(docs, Dumper=_NoAliases, sort_keys=False)
 
 
-def gateway_env(cfg: dict[str, Any]) -> dict[str, str]:
+def gateway_env(
+    cfg: dict[str, Any], env: Mapping[str, str] | None = None, *, strict: bool = True
+) -> dict[str, str]:
     """The environment the gateway reads, derived rather than hand-maintained.
 
-    This is the bridge between the config and router/pools.py. Note the overload
-    it has to honour: under split=capability the gateway treats PREFILL_URLS as
-    the text pool and DECODE_URLS as the vision pool, with no hop involved.
+    This is the bridge between the config and router/pools.py. Host addresses come
+    from `env` (your .env), because they are not topology. With strict=True an
+    unset address is an error naming the variable to set; --plan passes
+    strict=False so it still works offline.
+
+    Note the overload this has to honour: under split=capability the gateway
+    treats PREFILL_URLS as the text pool and DECODE_URLS as the vision pool, with
+    no hop involved.
+
+    OVERFLOW_API_KEY is deliberately absent. It is the one secret in the overflow
+    block and it stays in .env; everything else is emitted from the config so it
+    cannot be typed twice and drift.
     """
     validate(cfg)
+    env = dict(os.environ if env is None else env)
     topo = cfg["topology"]
     mode, split = str(topo["mode"]), str(topo.get("split", "phase"))
     workers = workers_from(cfg)
+    hosts = hosts_from(cfg)
+    sole = len(hosts) == 1
+
+    addr: dict[str, str] = {}
+    for name, host in hosts.items():
+        if not any(w.host.name == name for w in workers):
+            continue
+        a = host.address(env, sole=sole)
+        if not a:
+            if strict:
+                hint = f" (or LAMBDA, since {name!r} is the only host)" if sole else ""
+                raise ConfigError(
+                    f"host {name!r} has no address. Set {host.env_var()} in .env{hint}. "
+                    "It is not in the config because an IP is a fact about today."
+                )
+            a = f"<{host.env_var()}-unset>"
+        addr[name] = a
 
     def urls(pool: str) -> str:
         return ",".join(
-            f"http://{w.host.ssh.split('@')[-1] or '127.0.0.1'}:{w.host_port}"
+            f"http://{addr[w.host.name].split('@')[-1]}:{w.host_port}"
             for w in workers
             if w.pool == pool
         )
 
-    env = {
+    out = {
         "LAB_TOPOLOGY": mode,
         "LAB_SPLIT": split,
         "LOCAL_MODEL": str(cfg["model"]["id"]),
     }
     if mode == "aggregated":
         # One pool. pools.py treats equal lists as a single set of engines.
-        env["PREFILL_URLS"] = urls("engine")
-        env["DECODE_URLS"] = env["PREFILL_URLS"]
+        out["PREFILL_URLS"] = urls("engine")
+        out["DECODE_URLS"] = out["PREFILL_URLS"]
     else:
-        env["PREFILL_URLS"] = urls("prefill")
-        env["DECODE_URLS"] = urls("decode")
+        out["PREFILL_URLS"] = urls("prefill")
+        out["DECODE_URLS"] = urls("decode")
         if topo.get("kv_transport"):
-            env["KV_BACKEND"] = str(topo["kv_transport"])
-    return env
+            out["KV_BACKEND"] = str(topo["kv_transport"])
+
+    ov = cfg.get("overflow") or {}
+    if ov.get("base_url"):
+        out["OVERFLOW_BACKEND"] = str(ov.get("provider", ""))
+        out["OVERFLOW_BASE_URL"] = str(ov["base_url"])
+        out["OVERFLOW_MODEL"] = str(ov.get("model", ""))
+        out["OVERFLOW_MAX_REQS"] = str(ov.get("max_requests", ""))
+        out["OVERFLOW_MAX_TOKENS"] = str(ov.get("max_tokens", ""))
+    return out
 
 
 def plan(cfg: dict[str, Any]) -> str:
@@ -513,7 +587,7 @@ def plan(cfg: dict[str, Any]) -> str:
         if not mine:
             lines.append("    (no pools placed here)")
     lines += ["", "gateway environment:"]
-    lines += [f"    {k}={v}" for k, v in gateway_env(cfg).items()]
+    lines += [f"    {k}={v}" for k, v in gateway_env(cfg, strict=False).items()]
     return "\n".join(lines)
 
 
