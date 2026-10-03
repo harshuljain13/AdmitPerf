@@ -6,7 +6,6 @@ import time
 from collections.abc import Callable, Sequence
 
 from gateway.metrics import METRICS
-from router.planner import plan as plan_replicas
 from gateway.types import (
     KV_SATURATION,
     STALE_S,
@@ -18,6 +17,7 @@ from gateway.types import (
     Snapshot,
     Worker,
 )
+from router.planner import plan as plan_replicas
 
 Scorer = Callable[[Snapshot, Request], float | None]
 

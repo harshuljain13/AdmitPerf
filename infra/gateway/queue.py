@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from gateway.types import Handoff, Request
 
+
 def enqueue(handoff: Handoff, req: Request) -> tuple[dict | None, dict | None]:
 
     if handoff.decode is handoff.prefill:

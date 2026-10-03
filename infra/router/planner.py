@@ -3,6 +3,7 @@ from __future__ import annotations
 from gateway.metrics import METRICS
 from gateway.types import PLAN_HIGH_WATER
 
+
 def plan(
     *,
     current_prefill: int,

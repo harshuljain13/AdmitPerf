@@ -23,9 +23,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Any
 
 import yaml
@@ -49,6 +49,32 @@ DEFAULT_BYTES_PER_PARAM = 2.0  # bf16 / fp16 / "auto"
 # Weights must leave this fraction of usable HBM free, per card, or the config
 # is refused. Fitting is not the bar — fitting with room to serve is.
 MIN_KV_HEADROOM_FRACTION = 0.05
+
+# Compute capability by card, and what each generation can actually execute.
+# fp8 tensor cores arrived with Hopper (sm90) and Ada (sm89). On an A100 (sm80)
+# an fp8 checkpoint fails AFTER the weights download, which is the most expensive
+# way to learn this.
+GPU_COMPUTE_CAPABILITY = {
+    "H100": 9.0,
+    "H200": 9.0,
+    "GH200": 9.0,
+    "L40S": 8.9,
+    "L4": 8.9,
+    "RTX4090": 8.9,
+    "A100": 8.0,
+    "A10": 8.6,
+    "A6000": 8.6,
+    "A40": 8.6,
+    "V100": 7.0,
+    "T4": 7.5,
+}
+MIN_CAPABILITY_FOR = {"fp8": 8.9}
+
+# Bytes of KV per token, for the capacity estimate:
+#   2 (K and V) x layers x kv_heads x head_dim x dtype_bytes
+# Grouped-query attention means kv_heads is usually far below attention heads,
+# which is why these numbers are smaller than people expect.
+KV_DTYPE_BYTES = 2
 
 
 class ConfigError(ValueError):
@@ -123,6 +149,37 @@ class Worker:
     @property
     def gpus(self) -> int:
         return self.tp * self.pp
+
+
+def load_dotenv(root: Path | None = None) -> dict[str, str]:
+    """Read .env the way the bring-up scripts do, without adding a dependency.
+
+    Already-exported variables win, matching `set -a; source .env` — so a one-off
+    `LAMBDA_HOST_GPU_A=... python -m infra.render --env` still overrides the file.
+
+    Without this, --env silently reports every address as unset while .env sits
+    right there, which reads as "the config is broken" rather than "nothing read
+    the file".
+    """
+    root = root or Path(__file__).resolve().parent.parent
+    out: dict[str, str] = {}
+    path = root / ".env"
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :]
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            out[k.strip()] = v
+    out.update({k: v for k, v in os.environ.items() if v})
+    return out
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -217,14 +274,48 @@ def weights_gb(model_id: str, quantization: str | None) -> float | None:
     return params * per / 1e9
 
 
+def kv_bytes_per_token(cfg: dict[str, Any]) -> int | None:
+    """From the config's declared attention shape, or None if it is not given.
+
+    Declared rather than fetched: reading config.json needs the weights, and this
+    number decides whether the experiment can work at all, so it has to be
+    available before anything is rented. Verify it against the model's config.json
+    once the cluster is up — an estimate that is wrong by 2x moves the predicted
+    concurrency by 2x.
+    """
+    a = cfg.get("model", {}).get("attention") or {}
+    try:
+        return (
+            2
+            * int(a["layers"])
+            * int(a["kv_heads"])
+            * int(a["head_dim"])
+            * int(a.get("dtype_bytes", KV_DTYPE_BYTES))
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def concurrency_estimate(cfg: dict[str, Any], kv_gb_total: float) -> float | None:
+    """Sequences that fit at max_model_len. The number the experiment lives on.
+
+    If this is comfortably above max_num_seqs, the scheduler caps concurrency
+    before KV does and a KV-pressure policy never fires — which is exactly how
+    `half-capacity-headroom` produced three runs of flat signals.
+    """
+    per_token = kv_bytes_per_token(cfg)
+    if not per_token:
+        return None
+    per_seq = per_token * int(cfg["engine"]["max_model_len"])
+    return kv_gb_total * 1e9 / per_seq
+
+
 def validate(cfg: dict[str, Any]) -> None:
     """Refuse what would otherwise fail ten minutes into a deploy."""
     topo = cfg["topology"]
     mode = str(topo.get("mode", ""))
     if mode not in POOLS_FOR_MODE:
-        raise ConfigError(
-            f"topology.mode must be one of {sorted(POOLS_FOR_MODE)}, got {mode!r}"
-        )
+        raise ConfigError(f"topology.mode must be one of {sorted(POOLS_FOR_MODE)}, got {mode!r}")
 
     expected = POOLS_FOR_MODE[mode]
     declared = set((topo.get("pools") or {}).keys())
@@ -296,6 +387,23 @@ def validate(cfg: dict[str, Any]) -> None:
                     "cannot span hosts — it all-reduces every layer and expects NVLink."
                 )
 
+        # A quantization the silicon cannot execute. Checked before the fit,
+        # because "it does not fit" is misleading when the real answer is "this
+        # card cannot run that format at all".
+        cap = GPU_COMPUTE_CAPABILITY.get(host.gpu_kind.upper())
+        for w in mine:
+            need = MIN_CAPABILITY_FOR.get((w.quantization or "").lower())
+            if need is None or cap is None:
+                continue
+            if cap < need:
+                raise ConfigError(
+                    f"{w.name}: quantization {w.quantization!r} needs compute capability "
+                    f"{need}, but host {host_name!r} is a {host.gpu_kind} (sm{int(cap * 10)}). "
+                    f"fp8 tensor cores arrived with Hopper and Ada; on this card the "
+                    f"checkpoint fails after the weights download. Use int8, awq or "
+                    f"gptq, or bf16 if it fits."
+                )
+
         # The check that catches the expensive mistake: weights that do not fit
         # the card they are sharded onto.
         for w in mine:
@@ -365,17 +473,29 @@ def validate(cfg: dict[str, Any]) -> None:
 def engine_args(cfg: dict[str, Any], w: Worker) -> list[str]:
     e = cfg["engine"]
     args = [
-        "--model", w.model_id,
-        "--served-model-name", w.model_id, w.served_name,
-        "--host", "0.0.0.0",
-        "--port", "8000",
-        "--max-model-len", str(e["max_model_len"]),
-        "--gpu-memory-utilization", str(e["gpu_memory_utilization"]),
-        "--max-num-seqs", str(e["max_num_seqs"]),
-        "--tensor-parallel-size", str(w.tp),
-        "--pipeline-parallel-size", str(w.pp),
-        "--distributed-executor-backend", str(e.get("distributed_executor_backend", "mp")),
-        "--scheduling-policy", str(e.get("scheduling_policy", "priority")),
+        "--model",
+        w.model_id,
+        "--served-model-name",
+        w.model_id,
+        w.served_name,
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--max-model-len",
+        str(e["max_model_len"]),
+        "--gpu-memory-utilization",
+        str(e["gpu_memory_utilization"]),
+        "--max-num-seqs",
+        str(e["max_num_seqs"]),
+        "--tensor-parallel-size",
+        str(w.tp),
+        "--pipeline-parallel-size",
+        str(w.pp),
+        "--distributed-executor-backend",
+        str(e.get("distributed_executor_backend", "mp")),
+        "--scheduling-policy",
+        str(e.get("scheduling_policy", "priority")),
     ]
     if e.get("enable_prefix_caching"):
         args.append("--enable-prefix-caching")
@@ -424,9 +544,7 @@ def deployment(cfg: dict[str, Any], w: Worker) -> dict[str, Any]:
                                     },
                                 }
                             ],
-                            "ports": [
-                                {"containerPort": 8000, "hostPort": w.host_port}
-                            ],
+                            "ports": [{"containerPort": 8000, "hostPort": w.host_port}],
                             # Whole GPUs. No gpumem/gpucores: a slice cannot hold
                             # these weights, and two slices of one card would
                             # masquerade as TP=2 across two.
@@ -505,7 +623,7 @@ def gateway_env(
     cannot be typed twice and drift.
     """
     validate(cfg)
-    env = dict(os.environ if env is None else env)
+    env = load_dotenv() if env is None else dict(env)
     topo = cfg["topology"]
     mode, split = str(topo["mode"]), str(topo.get("split", "phase"))
     workers = workers_from(cfg)
@@ -559,8 +677,12 @@ def gateway_env(
     return out
 
 
-def plan(cfg: dict[str, Any]) -> str:
-    """What lands where, in one screen, before anything is rented."""
+def plan(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> str:
+    """What lands where, in one screen, before anything is rented.
+
+    Takes `env` explicitly so a caller — a test especially — is never at the mercy
+    of whether a .env happens to exist on the machine running it.
+    """
     validate(cfg)
     hosts, workers = hosts_from(cfg), workers_from(cfg)
     topo, util = cfg["topology"], float(cfg["engine"]["gpu_memory_utilization"])
@@ -584,10 +706,24 @@ def plan(cfg: dict[str, Any]) -> str:
                 f"    {w.name:<20} TP={w.tp} PP={w.pp}  {w.gpus} GPU  "
                 f":{w.host_port}  {w.model_id}{fit}"
             )
+            if gb and host.hbm_gb:
+                kv_total = (host.hbm_gb * util - gb / w.gpus) * w.gpus
+                n = concurrency_estimate(cfg, kv_total)
+                if n is not None:
+                    cap = int(cfg["engine"]["max_num_seqs"])
+                    verdict = (
+                        "KV binds — admission can bite"
+                        if n <= cap
+                        else f"SCHEDULER binds at {cap}, not KV — a KV policy may never fire"
+                    )
+                    lines.append(
+                        f"    {'':<20} ~{n:.0f} seqs at {cfg['engine']['max_model_len']} "
+                        f"tokens ({kv_total:.0f}GB KV), max_num_seqs={cap} -> {verdict}"
+                    )
         if not mine:
             lines.append("    (no pools placed here)")
     lines += ["", "gateway environment:"]
-    lines += [f"    {k}={v}" for k, v in gateway_env(cfg, strict=False).items()]
+    lines += [f"    {k}={v}" for k, v in gateway_env(cfg, env, strict=False).items()]
     return "\n".join(lines)
 
 

@@ -5,8 +5,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from router.kvbus import KVBus
 from gateway.types import KV_SATURATION, Request, SliceOOM, Snapshot, request_messages
+from router.kvbus import KVBus
 
 PREFILL_CHUNK = 64
 DECODE_PACK = 8

@@ -98,7 +98,7 @@ def test_prefix_caching_reaches_the_engine(cfg: dict[str, Any]) -> None:
 
 
 def test_plan_names_the_host_the_mode_and_the_fit(cfg: dict[str, Any]) -> None:
-    out = plan(cfg)
+    out = plan(cfg, ENV)
     assert "gpu-a" in out
     assert "disaggregated" in out
     assert "GB/card" in out
@@ -201,10 +201,16 @@ def test_weights_that_do_not_fit_are_refused_before_the_download(
 ) -> None:
     """The mistake this catches was made in this project's own planning.
 
-    72B in bf16 is ~145 GB, so ~72.5 GB a card at TP=2 against ~72 GB usable.
-    It does not fit, and without this check the failure is an OOM after a 145 GB
-    download.
+    72B in bf16 is ~144 GB, so ~72 GB a card at TP=2 against ~72 GB usable. It
+    does not fit with room to serve, and without this check the failure is an OOM
+    after a 144 GB download.
+
+    The hardware and model are set explicitly rather than inherited from the
+    shipped config. A test that moves when the config moves is asserting
+    something about today's deployment, not about the check.
     """
+    cfg["hosts"][0]["gpu"].update(kind="H100", count=4, hbm_gb=80)
+    cfg["model"]["id"] = "Qwen/Qwen2.5-72B-Instruct"
     cfg["model"]["quantization"] = None
     with pytest.raises(ConfigError, match="does not fit"):
         validate(cfg)
@@ -212,8 +218,18 @@ def test_weights_that_do_not_fit_are_refused_before_the_download(
 
 def test_fp8_does_fit_the_same_topology(cfg: dict[str, Any]) -> None:
     """The counterpart: the check is not simply refusing everything at 72B."""
+    cfg["hosts"][0]["gpu"].update(kind="H100", count=4, hbm_gb=80)
+    cfg["model"]["id"] = "Qwen/Qwen2.5-72B-Instruct"
     cfg["model"]["quantization"] = "fp8"
     validate(cfg)
+
+
+def test_a_32b_fits_two_a100_40s_with_room_for_kv(cfg: dict[str, Any]) -> None:
+    """The shipped shape. int8 at TP=2 is ~16 GB a card of ~36 GB usable, so KV
+    gets ~20 GB a card — scarce enough that admission bites, which is the point."""
+    validate(cfg)
+    assert cfg["hosts"][0]["gpu"]["kind"] == "A100"
+    assert cfg["model"]["quantization"] != "fp8"
 
 
 def test_overflow_on_429_is_refused(cfg: dict[str, Any]) -> None:
@@ -366,8 +382,14 @@ def test_per_host_addresses_reach_the_right_pool(cfg: dict[str, Any]) -> None:
 
 
 def test_plan_works_with_no_addresses_at_all(cfg: dict[str, Any]) -> None:
-    """Planning a topology must not require having rented anything yet."""
-    out = plan(cfg)
+    """Planning a topology must not require having rented anything yet.
+
+    The empty env is passed explicitly. Letting this fall through to the real
+    environment made the test pass or fail depending on whether the developer
+    running it happened to have a .env — the assertion was about the machine, not
+    the code.
+    """
+    out = plan(cfg, {})
     assert "unset" in out
 
 
@@ -383,7 +405,7 @@ def test_the_overflow_api_key_is_never_emitted(cfg: dict[str, Any]) -> None:
     """The one secret in that block. It stays in .env and must not appear in a
     rendered environment, a manifest, or the plan."""
     assert "OVERFLOW_API_KEY" not in gateway_env(cfg, ENV)
-    assert "OVERFLOW_API_KEY" not in plan(cfg)
+    assert "OVERFLOW_API_KEY" not in plan(cfg, ENV)
     assert "OVERFLOW_API_KEY" not in render(cfg)
 
 
@@ -411,3 +433,67 @@ def test_the_config_file_assigns_no_secret() -> None:
 
     assigned = walk(yaml.safe_load(SHIPPED.read_text()))
     assert not assigned, f"secrets assigned in a committed config: {assigned}"
+
+
+# --------------------------------------------------------------------------
+# What the silicon can actually execute, and how much fits
+# --------------------------------------------------------------------------
+
+
+def test_fp8_on_an_a100_is_refused(cfg: dict[str, Any]) -> None:
+    """A100 is sm80. fp8 tensor cores arrived with Hopper and Ada, so an fp8
+    checkpoint fails after the weights download — the most expensive way to
+    learn it."""
+    cfg["hosts"][0]["gpu"]["kind"] = "A100"
+    cfg["model"]["quantization"] = "fp8"
+    with pytest.raises(ConfigError, match="compute capability"):
+        validate(cfg)
+
+
+def test_fp8_on_an_h100_is_allowed(cfg: dict[str, Any]) -> None:
+    cfg["hosts"][0]["gpu"]["kind"] = "H100"
+    cfg["hosts"][0]["gpu"]["hbm_gb"] = 80
+    cfg["model"]["quantization"] = "fp8"
+    validate(cfg)
+
+
+def test_int8_on_an_a100_is_allowed(cfg: dict[str, Any]) -> None:
+    cfg["hosts"][0]["gpu"]["kind"] = "A100"
+    cfg["model"]["quantization"] = "int8"
+    validate(cfg)
+
+
+def test_an_unknown_card_does_not_block_a_quantization(cfg: dict[str, Any]) -> None:
+    """Refusing what we cannot verify would make the config unusable on new
+    hardware. The fit check still applies."""
+    cfg["hosts"][0]["gpu"]["kind"] = "B200"
+    cfg["model"]["quantization"] = "fp8"
+    validate(cfg)
+
+
+def test_kv_bytes_per_token_follows_the_attention_shape(cfg: dict[str, Any]) -> None:
+    from infra.render import kv_bytes_per_token
+
+    # 2 x 64 layers x 8 kv_heads x 128 head_dim x 2 bytes = 256 KiB
+    assert kv_bytes_per_token(cfg) == 2 * 64 * 8 * 128 * 2
+
+
+def test_kv_estimate_declines_without_a_declared_shape(cfg: dict[str, Any]) -> None:
+    from infra.render import kv_bytes_per_token
+
+    cfg["model"].pop("attention")
+    assert kv_bytes_per_token(cfg) is None
+
+
+def test_plan_says_whether_kv_or_the_scheduler_binds(cfg: dict[str, Any]) -> None:
+    """The sentence that decides whether a run can prove anything.
+
+    If max_num_seqs caps concurrency below what KV allows, the scheduler refuses
+    before the cache does and a KV-pressure policy never fires. That is exactly
+    how half-capacity-headroom produced three runs of flat signals.
+    """
+    out = plan(cfg, ENV)
+    assert "KV binds" in out
+
+    cfg["engine"]["max_num_seqs"] = 1
+    assert "SCHEDULER binds" in plan(cfg, ENV)

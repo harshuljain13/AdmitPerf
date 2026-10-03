@@ -6,19 +6,27 @@
 hosts:
   - name: gpu-a            # address: LAMBDA_HOST_GPU_A in .env (or LAMBDA)
     gpu:
-      kind: H100
+      kind: A100
       count: 4
-      hbm_gb: 80
+      hbm_gb: 40
 
   # - name: gpu-b
   #   gpu: {kind: H100, count: 4, hbm_gb: 80}
 
 
 model:
-  id: Qwen/Qwen2.5-72B-Instruct
-  quantization: fp8        # bf16 at TP=2 does not leave room for KV
+  id: Qwen/Qwen2.5-32B-Instruct
+  quantization: int8       # NOT fp8 — A100 is sm80 and cannot execute it
   dtype: auto
   slicing: false           # whole GPUs; a slice cannot hold these weights
+
+  # Declared, not fetched: the KV estimate must work before anything is rented.
+  # Verify against the model's config.json once the cluster is up.
+  attention:
+    layers: 64
+    kv_heads: 8
+    head_dim: 128
+    dtype_bytes: 2
 
 
 engine:

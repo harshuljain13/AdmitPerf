@@ -6,12 +6,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from app.guardrails import inspect
-from router.overflow import Overflow
-from router.router import Router, infer_capability
 from gateway.admission import Gateway
 from gateway.metrics import METRICS, Metrics
-from router.pools import build_pools
 from gateway.types import request_from_openai
+from router.overflow import Overflow
+from router.pools import build_pools
+from router.router import Router, infer_capability
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,7 +49,7 @@ def sse_from_completion(body: dict, *, model: str = "text") -> bytes:
             }
         ],
     }
-    return f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode("utf-8")
+    return f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode()
 
 def listed_models() -> dict:
     ids: list[str] = []
