@@ -56,7 +56,13 @@ if not groups:
     )
     st.stop()
 
-experiment = st.selectbox("Experiment", sorted(groups))
+st.markdown("#### 1 &nbsp;·&nbsp; Which experiment")
+experiment = st.selectbox(
+    "Experiment",
+    sorted(groups),
+    label_visibility="collapsed",
+    help="Each experiment sends a defined load at a cluster config. Written by `admitperf run`.",
+)
 
 loaded: list[tuple[str, dict[str, Any]]] = []
 for q in groups[experiment]:
@@ -78,10 +84,10 @@ if not loaded:
     st.stop()
 
 # --- every arm at once: the comparison IS the point ------------------------
-st.subheader(f"{len(loaded)} run(s)")
+st.markdown(f"#### 2 &nbsp;·&nbsp; Its {len(loaded)} run(s)")
 st.caption(
-    "Two arms differing only in which policy was consulted belong side by side — and "
-    "whether either could have shown anything belongs next to them."
+    "One row per arm. Two arms differing only in which policy was consulted belong "
+    "side by side — and whether either could have shown anything belongs next to them."
 )
 st.dataframe(
     {
@@ -108,7 +114,8 @@ if inert:
     )
 
 st.divider()
-chosen = st.selectbox("Run", [n for n, _ in loaded])
+st.markdown("#### 3 &nbsp;·&nbsp; One run, in full")
+chosen = st.selectbox("Run", [n for n, _ in loaded], label_visibility="collapsed")
 payload = next(d for n, d in loaded if n == chosen)
 
 run, live, pol, sig = (
@@ -120,8 +127,27 @@ run, live, pol, sig = (
 
 # The verdict first, as everywhere else. A reader who looks at nothing else
 # should still know whether the run can support a claim.
+#: What the verdict means for whether this run can be cited. The verdict alone is
+#: vocabulary; this says what to do with it.
+MEANS = {
+    "LIVE": "**This run can support a claim about the policy.** The signal reached "
+    "its threshold, so the policy had the opportunity to act and what it did is "
+    "measurable.",
+    "MARGINAL": "**This run cannot support a claim about the policy.** The signal "
+    "came close but never crossed, so the policy never fired. It does tell you the "
+    "load is near the transition point, which is useful for choosing the next run.",
+    "INERT": "**This run says nothing about the policy.** The signal never "
+    "approached its threshold, so the policy could not have fired and its numbers "
+    "are indistinguishable from no policy at all. Change the load, not the policy.",
+    "UNKNOWN": "**This run cannot be judged.** No signal was recorded, so whether "
+    "the policy could have fired is unknown.",
+}
+
+st.markdown(f"### {chosen}")
 icon, kind = VERDICT_STYLE.get(live["verdict"], VERDICT_STYLE["UNKNOWN"])
-getattr(st, kind)(f"{icon} **SIGNAL LIVENESS: {live['verdict']}** — {live['explanation']}")
+getattr(st, kind)(
+    f"{icon} **{live['verdict']}** — {live['explanation']}.\n\n{MEANS.get(live['verdict'], '')}"
+)
 
 st.caption(
     " · ".join(str(run[k]) for k in ("id", "cluster", "model", "engine", "commit") if run.get(k))
@@ -147,7 +173,7 @@ with left:
     )
 
 with right:
-    st.subheader(f"Signal — {sig['name']}")
+    st.markdown(f"**Signal — `{sig['name']}`**")
     if sig["samples"]:
         st.dataframe(
             {
@@ -172,7 +198,7 @@ a.metric("Decisions", d["total"])
 b.metric("Rejected", d["rejected"])
 c.metric("Deferred", d["deferred"])
 
-st.subheader("Signal over the run")
+st.markdown("##### Signal over the run")
 # `samples`, not the sparkline string: the no-signal sentinel is truthy and its
 # spaces parse as level zero, which would plot a flat line that looks measured.
 if sig.get("samples") and sig.get("sparkline"):
@@ -189,7 +215,12 @@ if sig.get("samples") and sig.get("sparkline"):
 else:
     st.caption("No signal was recorded, so there is nothing to plot.")
 
-st.subheader("Seven reporting items")
+st.markdown("##### Seven reporting items")
+st.caption(
+    "The things the survey found published work diverges on. `n/a` means this run "
+    "does not carry what the item needs — unevidenced rather than failed, and the "
+    "two must not be confused."
+)
 items = payload.get("reporting_items", [])
 st.dataframe(
     {
@@ -204,7 +235,7 @@ st.dataframe(
 
 harness = payload.get("harness") or {}
 if harness:
-    st.subheader("Harness")
+    st.markdown("##### Harness")
     st.caption(
         "How the instrument behaved. A run whose scrapes failed produces "
         "ordinary-looking numbers that mean nothing, because the policy decided on a "
@@ -219,7 +250,7 @@ if harness:
 
 found_problems = problems(payload)
 if found_problems:
-    st.subheader("Why this run should not be cited")
+    st.markdown("##### Why this run should not be cited")
     for line in found_problems:
         st.warning(line)
 else:
