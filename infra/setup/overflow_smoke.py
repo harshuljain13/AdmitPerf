@@ -5,14 +5,14 @@ import os
 import sys
 from pathlib import Path
 
-from router.overflow import FakeOverflow, Overflow
-from router.router import Router
 from gateway.admission import Gateway
-from router.kvbus import KVBus
 from gateway.metrics import METRICS
-from router.pools import FakeWorker
-from router.trace import TRACES
 from gateway.types import Request
+from router.kvbus import KVBus
+from router.overflow import FakeOverflow, Overflow
+from router.pools import FakeWorker
+from router.router import Router
+from router.trace import TRACES
 
 ROOT = Path(__file__).resolve().parents[1]
 

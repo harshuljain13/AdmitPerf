@@ -3,19 +3,19 @@ from __future__ import annotations
 import argparse
 import io
 import os
+from collections.abc import Callable
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
-from router.overflow import FakeOverflow, send
-from router.router import Router, plan
 from gateway.admission import Gateway
-from router.kvbus import KVBus
 from gateway.metrics import METRICS
+from gateway.types import STALE_S, Request
+from router.kvbus import KVBus
+from router.overflow import FakeOverflow, send
 from router.pools import FakeWorker
+from router.router import Router, plan
 from router.trace import TRACES
-from gateway.types import Request, STALE_S
 
 ROOT = Path(__file__).resolve().parents[1]
 INCIDENTS = ROOT / "INCIDENTS.md"

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+
 class RequestTrace:
 
     def __init__(self) -> None:

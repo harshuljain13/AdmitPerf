@@ -8,6 +8,7 @@ import urllib.request
 from gateway.metrics import METRICS
 from gateway.types import Request
 
+
 class KVBus:
 
     def __init__(self) -> None:
