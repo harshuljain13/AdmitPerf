@@ -378,6 +378,6 @@ def test_the_report_page_says_what_the_verdict_means() -> None:
     the policy — otherwise the obvious response is to change the policy, which is
     exactly the wrong move."""
     source = (DASHBOARD / "views" / "report.py").read_text()
-    assert "can support a claim about the policy" in source
-    assert "says nothing about the policy" in source
+    assert "Can support a claim about the policy" in source
+    assert "Says nothing about the policy" in source
     assert "Change the load, not the policy" in source

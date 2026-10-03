@@ -85,10 +85,7 @@ if not loaded:
 
 # --- every arm at once: the comparison IS the point ------------------------
 st.markdown(f"#### 2 &nbsp;·&nbsp; Its {len(loaded)} run(s)")
-st.caption(
-    "One row per arm. Two arms differing only in which policy was consulted belong "
-    "side by side — and whether either could have shown anything belongs next to them."
-)
+
 st.dataframe(
     {
         "run": [n for n, _ in loaded],
@@ -129,18 +126,15 @@ run, live, pol, sig = (
 # should still know whether the run can support a claim.
 #: What the verdict means for whether this run can be cited. The verdict alone is
 #: vocabulary; this says what to do with it.
+#: What to DO with the verdict. Kept because the verdict alone is vocabulary, and
+#: the response to an inert run is to change the load rather than the policy — which
+#: is not obvious and is the mistake the project exists to prevent.
 MEANS = {
-    "LIVE": "**This run can support a claim about the policy.** The signal reached "
-    "its threshold, so the policy had the opportunity to act and what it did is "
-    "measurable.",
-    "MARGINAL": "**This run cannot support a claim about the policy.** The signal "
-    "came close but never crossed, so the policy never fired. It does tell you the "
-    "load is near the transition point, which is useful for choosing the next run.",
-    "INERT": "**This run says nothing about the policy.** The signal never "
-    "approached its threshold, so the policy could not have fired and its numbers "
-    "are indistinguishable from no policy at all. Change the load, not the policy.",
-    "UNKNOWN": "**This run cannot be judged.** No signal was recorded, so whether "
-    "the policy could have fired is unknown.",
+    "LIVE": "Can support a claim about the policy.",
+    "MARGINAL": "Cannot support a claim — the policy never fired. Load is near the "
+    "transition point.",
+    "INERT": "Says nothing about the policy. **Change the load, not the policy.**",
+    "UNKNOWN": "Cannot be judged — no signal was recorded.",
 }
 
 st.markdown(f"### {chosen}")
@@ -193,7 +187,7 @@ with right:
             hide_index=True,
             use_container_width=True,
         )
-        st.caption(f"crossed the threshold in {sig['crossings']} of {sig['samples']} decisions")
+        st.caption(f"crossed in {sig['crossings']} of {sig['samples']} decisions")
         if sig.get("missing"):
             st.warning(
                 f"{sig['missing']} decisions recorded no value, so the range above is "
@@ -221,16 +215,12 @@ if sig.get("samples") and sig.get("sparkline"):
             {"signal / threshold": levels, "threshold": [1.0] * len(levels)},
             height=220,
         )
-        st.caption("1.0 = the threshold. A flat line near zero is an inert run.")
+        st.caption("1.0 = threshold")
 else:
-    st.caption("No signal was recorded, so there is nothing to plot.")
+    st.caption("No signal recorded.")
 
 st.markdown("##### Seven reporting items")
-st.caption(
-    "The things the survey found published work diverges on. `n/a` means this run "
-    "does not carry what the item needs — unevidenced rather than failed, and the "
-    "two must not be confused."
-)
+st.caption("`n/a` = the run does not carry what the item needs. Not a failure.")
 items = payload.get("reporting_items", [])
 st.dataframe(
     {
@@ -246,12 +236,7 @@ st.dataframe(
 harness = payload.get("harness") or {}
 if harness:
     st.markdown("##### Harness")
-    st.caption(
-        "How the instrument behaved. A run whose scrapes failed produces "
-        "ordinary-looking numbers that mean nothing, because the policy decided on a "
-        "stale snapshot — a different failure from an inert signal, and invisible "
-        "unless it is written down."
-    )
+
     st.dataframe(
         {"": list(harness), "value": list(harness.values())},
         hide_index=True,
