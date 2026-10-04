@@ -1,197 +1,56 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="AdmitPerf — benchmark-driven admission control layer for LLM inference" width="100%"/>
+  <img src="assets/banner.svg" alt="AdmitPerf — standardized admission control for LLM inference" width="100%"/>
 </p>
 
 # AdmitPerf
 
-*A benchmark-driven admission control layer for LLM inference.*
+*Standardized admission control for LLM inference.*
 
-Two things in one repository: an **admission control library** you put in front
-of vLLM / SGLang — it decides admit / defer / reject per request — and a
-**benchmark harness** that runs any policy against a real engine on real
-hardware and reports what it cost. Same code path in both, so a number you can
-defend is also a thing you can deploy.
+**Bring your own infra.** Your gateway already has raw metrics. AdmitPerf turns them
+into signals, policies decide on signals, and every decision is recorded in a form a
+report can compare across deployments.
 
-> **Why** — across 14 admission-primary papers surveyed, no two share a
-> baseline, engine version, workload, or SLO definition. Head-to-head
-> comparison is not currently possible. [`docs/motivation.md`](src/admitperf/docs/motivation.md)
+It does not provision, serve, scrape, or generate load. A real gateway does auth,
+rate limiting, routing and retries — admission is one concern inside it, and a
+library that tries to *be* the gateway competes with the host's architecture.
 
-**Status**: working MVP, verified on real hardware.
-[Results](src/admitperf/docs/results.md) · [honest gaps](src/admitperf/docs/status.md)
+## Status
 
-## Start here
+**Being rebuilt, in the open.** This commit removes the benchmark harness the package
+grew around — engine adapters, a provisioner, two run paths — so that the contract
+replacing it is not built next to them. The contract and the CLI land in the PRs
+stacked on this one.
 
-No GPU, nothing to pay for:
+**Measured results: none.** Earlier figures were removed rather than carried forward,
+because they could not be reproduced.
 
-```bash
-pip install -e '.[all]'
-make mock-engine        # terminal 1: a mock engine that gets busy under load
-make dashboard          # terminal 2: configure an experiment, run it, read it
-```
+What exists today: `infra/`, one worked example of a host — cluster configs, a
+renderer with real refusals (fp8 on an sm80 card, weights leaving no room for KV,
+tensor parallelism split across hosts), and the bring-up scripts. It is deliberately
+not part of the package.
 
-The dashboard runs the whole pipeline — provision, run, aggregate, report, tear
-down — one stage at a time. [`reports/dashboard/README.md`](src/admitperf/reports/dashboard/README.md)
+## Why
 
-## Or from the CLI
+Across sixteen admission-primary papers surveyed, no two share a baseline, engine,
+workload, or SLO definition — and **not one reports the observed range of the quantity
+its policy reads**. So no reader can tell which published results describe a policy
+acting and which describe a policy that never got the chance.
 
-Two command groups, matching the two jobs: `infra` provisions, `bench` measures.
+The arithmetic matters as much as the literature. On one A100-40GB serving
+Qwen2.5-7B, the KV pool holds roughly 384k tokens. At `max_num_seqs=64` with a
+2,168-token request, resident tokens cap near 139k — so `kv_used_fraction` cannot
+exceed about **0.35**, and a policy thresholded at 0.90 is unreachable at any arrival
+rate. A run like that reports numbers indistinguishable from no policy at all, and
+nothing in the literature would tell you.
 
-```bash
-admitperf infra up   -c experiments/shedding-vs-tail-latency   # real vLLM on a real GPU
-admitperf infra smoke                           # is it actually serving?
-admitperf bench run  -c experiments/shedding-vs-tail-latency   # every policy, repeated
-admitperf bench compare results/                # who won, and by how much
-admitperf bench report  results/                # report.html you can attach
-admitperf infra down                            # stop paying for it
-```
+That is the question AdmitPerf answers first: **could the policy have fired at all?**
 
-Every policy faces the **same deployment** — started once, never re-provisioned
-between policies — so the accept/refuse decision is the only thing that varies.
-`infra up` writes the endpoint to `.admitperf/session.json` and `bench run`
-reads it; point at your own engine instead with `--engine-url`.
-
-To vary the hardware or engine settings too, add a `matrix:` and use
-`bench sweep`. Results stay grouped per deployment and are never pooled: a table
-mixing an A10G row with an A100 row reports the machine, not the policy.
-
-Everything lives in one config file, and flags override it for one-offs.
-Examples in [`experiments/`](experiments/).
-
-## What a run leaves behind
+## Layout
 
 ```
-results/<timestamp>-<experiment>/<policy>-r<n>/
-├── manifest.json     what was run, against what, with which settings
-├── summary.json      the numbers, each tagged with where it came from
-├── decisions.jsonl   every admit/defer/reject, with the state it was decided on
-└── outcomes.jsonl    per-request TTFT, inter-token gaps, deadline verdict
+src/admitperf/        the package
+infra/                one worked example of a host. NOT part of the package.
+tests/                boundaries enforced, not intended
 ```
 
-`bench report` turns a directory of those into a self-contained `report.html` —
-verdict, caveats, figures, provenance — plus loose PNGs for a paper.
-
-## A result
-
-Qwen2.5-0.5B on an A10G, `max_num_seqs=4`, 80 requests at 15/s, two repeats:
-
-| policy | admit % | TTFT p95 | goodput |
-|---|---|---|---|
-| `no_admission` | 100.0% | 2285ms ±725 | 0.319 |
-| `queue_depth[max_waiting=8]` | 88.1% | 1668ms ±145 | 0.300 |
-| `queue_depth[max_waiting=2]` | 63.1% | **951ms ±136** | 0.319 |
-
-Shedding 37% of traffic cut tail latency **2.4× at identical goodput** — the
-refused requests would have missed their deadline anyway. The spread says as
-much as the median: unmanaged queueing is unpredictable, not merely slow.
-
-**The signal mattered more than the threshold.** `kv_cache_usage_perc` never
-exceeded 0.005 while the queue reached 24 deep — on a 0.5B model a KV-pressure
-policy reads a flat line and silently becomes admit-everything. Which signal
-carries the pressure depends on the regime, which is why policies declare what
-they need. Full numbers: [`docs/results.md`](src/admitperf/docs/results.md).
-
-## Writing a policy
-
-```python
-from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
-
-class KVThreshold(AdmissionPolicy):
-    """Reject when the KV cache is above 90% utilization."""
-
-    name = "kv_threshold"
-    requires = frozenset({"kv_used_fraction"})   # checked once, at startup
-
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        if (state.kv_used_fraction or 0.0) >= 0.90:
-            return Decision.reject(reason="kv_pressure")
-        return Decision.admit()
-```
-
-`requires` is how a policy declares the signals it needs. If the engine cannot
-report one, the run stops at startup rather than reading the missing value as
-zero and quietly behaving as an admit-everything baseline.
-
-Policies in **your own** pip package are discovered automatically — no edit to
-this repo. `admitperf policies` lists everything resolvable.
-
-```toml
-[project.entry-points."policies"]
-my_policy = "my_pkg.policies:MyPolicy"
-```
-
-## Installing
-
-```bash
-pip install -e '.[all]'          # everything, for working on the repo
-uv sync --all-extras             # or reproduce exactly, from the lock
-```
-
-Or just the parts you need: `.` (the decision path — click, httpx, pyyaml,
-rich), `[modal]`, `[dashboard]`, `[analysis]`, `[dev]`. The runtime dependency
-list is deliberately short; putting admission control in front of a fleet
-should not drag in a plotting stack.
-
-Nothing else is required — the mock-engine path needs no configuration, and
-Modal needs only your existing `modal setup` credentials. Gated weights need a
-token, which lives in a Modal secret rather than a file:
-
-```bash
-modal secret create huggingface HF_TOKEN=hf_xxx
-admitperf infra up --model meta-llama/Llama-3.1-8B --hf-secret huggingface
-```
-
-## Repo layout
-
-```
-src/admitperf/   core (the four objects, registry, runner) · engines · infra · bench
-policies/        the policies under study, as a separate package
-experiments/     example configs          reports/dashboard/  the Streamlit app
-docs/            motivation → design → metrics → results
-reports/         written studies, each backed by a run bundle
-scripts/         mock_vllm.py, a mock engine for testing without a GPU
-```
-
-`make test` · `make lint` · `make dashboard` · `make mock-engine` · `make diagrams`. Architecture in
-[`docs/architecture/`](src/admitperf/docs/architecture/), following the
-[C4 model](https://c4model.com); the `.mmd` files are the source of truth.
-
-## Documentation
-
-| Read this to... | Go here |
-|---|---|
-| Understand why AdmitPerf exists | [`docs/motivation.md`](src/admitperf/docs/motivation.md) |
-| See what exists and what does not | [`docs/status.md`](src/admitperf/docs/status.md) |
-| See the first real-hardware results | [`docs/results.md`](src/admitperf/docs/results.md) |
-| Read the data-flow + reproducibility contract | [`docs/design.md`](src/admitperf/docs/design.md) |
-| Read the metric definitions, and what is not measurable | [`docs/metrics.md`](src/admitperf/docs/metrics.md) |
-| See which policies fit behind this API, and the candidate list | [`docs/scope.md`](src/admitperf/docs/scope.md) · [`docs/policies.md`](src/admitperf/docs/policies.md) |
-| See what each policy does, without reading code | [`src/admitperf/policies/README.md`](src/admitperf/policies/README.md) |
-| Explore results interactively | [`reports/dashboard/README.md`](src/admitperf/reports/dashboard/README.md) |
-| Read the written studies, and the plan | [`reports/`](src/admitperf/reports/) · [`docs/PROPOSAL.md`](src/admitperf/docs/PROPOSAL.md) |
-| Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](src/admitperf/docs/prior-art/adversarial_review.md) |
-| Understand where the design came from | [`docs/lineage.md`](src/admitperf/docs/lineage.md) |
-
-## Contributing
-
-New policies, workloads, engine adapters and metrics are welcome.
-[`CONTRIBUTING.md`](CONTRIBUTING.md) has the adapter contract, the fidelity rule
-for reference-policy ports (never claim `"CONCUR"` when you mean
-`"CONCUR-inspired"`), conventions and PR flow.
-
-## Authors
-
-**Harshul Jain**, Independent Researcher, harshuljain1393@gmail.com
-
-## Citation
-
-```bibtex
-@software{admitperf2026,
-  title = {AdmitPerf: A Benchmark-Driven Admission Control Layer for LLM Inference},
-  author = {Jain, Harshul},
-  year = {2026},
-  url = {https://github.com/harshuljain13/AdmitPerf}
-}
-```
-
-MIT for code, CC-BY 4.0 for docs and results bundles. Companion survey of the
-admission-control literature: preprint pending.
+`make test` · `make lint`

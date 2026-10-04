@@ -31,11 +31,10 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      # EVERY extra, not just dev. The suite collects tests for the dashboard, the trace
-      # loaders and the Modal provider; with a narrower install those are collected and
-      # then fail to import. This exact failure shipped once already: '.[dev]' passed
-      # locally only because the working venv had accumulated pandas and streamlit by
-      # hand, which is the thing CI exists to notice.
+      # EVERY extra, not just dev. The suite collects tests for every optional surface;
+      # with a narrower install those are collected and then fail to import. That exact
+      # failure shipped once already, because '.[dev]' passed locally only on a working
+      # venv that had accumulated pandas and streamlit by hand.
       - name: Install
         run: |
           python -m pip install --upgrade pip
@@ -76,5 +75,4 @@ jobs:
         run: |
           python -m venv /tmp/fresh
           /tmp/fresh/bin/pip install dist/*.whl
-          /tmp/fresh/bin/python -c "from admitperf import AdmissionPolicy, Decision, Request, SystemState; print('public API ok')"
-          /tmp/fresh/bin/admitperf --help > /dev/null
+          /tmp/fresh/bin/python -c "import admitperf; print('import ok', admitperf.__version__)"
