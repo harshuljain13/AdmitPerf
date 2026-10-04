@@ -48,6 +48,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/admitperf"]
+# The dashboard's wordmark and favicon. Without these in the wheel a pip-installed
+# dashboard falls back to markup, which works but is not the brand.
+artifacts = ["src/admitperf/dashboard/assets/*.png"]
 
 [tool.ruff]
 line-length = 100

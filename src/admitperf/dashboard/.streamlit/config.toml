@@ -1,0 +1,12 @@
+# Themed here as well as in CSS, because Streamlit renders its own widgets — the
+# sidebar, selectboxes, expanders — before any CSS of ours applies.
+[theme]
+base = "dark"
+primaryColor = "#F5C518"
+backgroundColor = "#0B0B0B"
+secondaryBackgroundColor = "#141414"
+textColor = "#FFFFFF"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

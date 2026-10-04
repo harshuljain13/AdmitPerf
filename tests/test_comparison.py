@@ -89,7 +89,7 @@ def test_mismatched_load_is_called_out(tmp_path) -> None:
 def test_the_same_load_within_ten_percent_is_comparable(tmp_path) -> None:
     c = _pair(tmp_path, n=40)
     assert c.comparable_load()
-    assert "both runs were offered the same load" in c.text()
+    assert "both were offered the same load" in c.text()
 
 
 def test_cost_is_not_invented_when_no_outcomes_were_recorded(tmp_path) -> None:

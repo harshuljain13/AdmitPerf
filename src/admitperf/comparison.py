@@ -13,7 +13,7 @@ RULE = "=" * WIDTH
 def _reports(target: str | Path) -> list[Report]:
     """One log, or every log in a directory.
 
-    A directory is how an arm gets repeats. Sorted by name so `r1, r2, r10` is at
+    A directory is how a policy gets more than one run. Sorted by name so `r1, r2, r10` is at
     least stable between invocations, even though it is not numeric order — the
     comparison does not care about sequence, only that the same set is read twice.
     """
@@ -56,16 +56,16 @@ class Comparison:
         self.policies = [policy] if isinstance(policy, Report) else list(policy)
         if not self.baselines or not self.policies:
             raise ValueError("a comparison needs at least one run on each side")
-        #: The representative run of each arm, for the parts that do not vary between
+        #: The representative run of each side, for the parts that do not vary between
         #: repeats: which policy, its parameters, whether it fired.
         self.baseline = self.baselines[0]
         self.policy = self.policies[0]
 
     @classmethod
     def from_logs(cls, baseline: str | Path, policy: str | Path) -> Comparison:
-        """Each side is a log file, or a DIRECTORY of repeats of that arm.
+        """Each side is a log file, or a DIRECTORY holding every run of one policy.
 
-        A directory is how you get an error bar. One run of each arm has none, and a
+        A directory is how you get an error bar. One run of each has none, and a
         gap smaller than the spread between repeats is not a result — so the tool has
         to be able to read more than one.
         """
@@ -90,9 +90,9 @@ class Comparison:
         return self._spread(values) if values else None
 
     def separated(self) -> bool | None:
-        """Whether the two arms are further apart than their own repeats are.
+        """Whether the two policies are further apart than their own runs are.
 
-        None when there is only one run per arm, because then the question cannot be
+        None when there is only one run each, because then the question cannot be
         asked — and answering it anyway is how a difference inside the noise gets
         published as a finding.
         """
@@ -102,7 +102,7 @@ class Comparison:
         pol = self._arm(self.policies, self._goodput)
         if base is None or pol is None:
             return None
-        # No overlap between the two arms' observed ranges.
+        # No overlap between the two policies' observed ranges.
         return base[2] < pol[1] or pol[2] < base[1]
 
     # -- the three checks --------------------------------------------------
@@ -232,7 +232,7 @@ class Comparison:
         if sep is False:
             out += [
                 "",
-                f"  BUT the two arms overlap across {self.repeats} repeats, so this gap is",
+                f"  BUT the two overlap across {self.repeats} repeats, so this gap is",
                 "  inside the run-to-run noise. It is not a result yet — more repeats, or a",
                 "  larger effect.",
             ]
@@ -290,7 +290,7 @@ class Comparison:
         out = []
         mark = {True: "ok ", False: "NO "}
         out.append(f"  {mark[self.fired()]} the policy fired at all")
-        out.append(f"  {mark[self.comparable_load()]} both runs were offered the same load")
+        out.append(f"  {mark[self.comparable_load()]} both were offered the same load")
         if not self.comparable_load():
             out.append(
                 f"      {len(self.baseline.decisions)} vs {len(self.policy.decisions)} "
@@ -299,9 +299,9 @@ class Comparison:
         out.append(f"  {mark[self.measurable()]} outcomes recorded, so cost is measurable")
         sep = self.separated()
         if sep is None:
-            out.append("--  only one run per arm, so there is no error bar")
+            out.append("--  only one run per policy, so there is no error bar")
         else:
-            out.append(f"  {mark[sep]} the arms separate across {self.repeats} repeats")
+            out.append(f"  {mark[sep]} the two separate across {self.repeats} repeats")
         for name, reports in (("baseline", self.baselines), ("policy", self.policies)):
             for i, r in enumerate(reports, 1):
                 for fault in r.fault_text():
@@ -321,6 +321,6 @@ class Comparison:
                 "  The first three hold, but one run of each has no error bar. Run the pair",
                 "  again — a gap smaller than the spread between repeats is not a result:",
                 "",
-                "      python examples/compare_two_policies.py --repeats 5",
+                "      admitperf demo --repeats 5",
             ]
         return out

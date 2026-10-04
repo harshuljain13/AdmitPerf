@@ -22,6 +22,9 @@ class DualGate(Policy):
     """
 
     name = "dual_gate"
+    signal_quantity = "kv_pressure"
+    slo_awareness = "throughput"
+    signal_structure = "dual-gate"
 
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         pressure = KV_PRESSURE.read(metrics)
