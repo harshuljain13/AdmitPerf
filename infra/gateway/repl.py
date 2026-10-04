@@ -6,13 +6,13 @@ import sys
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
 
-from router.overflow import FakeOverflow, Overflow
-from router.router import Router, plan
 from gateway.admission import Gateway
-from router.kvbus import KVBus
 from gateway.metrics import METRICS
-from router.pools import FakeWorker
 from gateway.types import Request, Response
+from router.kvbus import KVBus
+from router.overflow import FakeOverflow, Overflow
+from router.pools import FakeWorker
+from router.router import Router, plan
 
 LEAVE = {503, 529}
 STAY = {429, 500, "slice_oom"}

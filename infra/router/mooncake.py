@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+
 class Store:
     def __init__(self) -> None:
         self.blocks: dict[str, dict] = {}

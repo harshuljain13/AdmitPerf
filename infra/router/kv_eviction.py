@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
+
 @dataclass
 class Prefix:
     prefix_hash: str

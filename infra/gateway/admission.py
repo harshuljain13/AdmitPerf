@@ -3,10 +3,10 @@ from __future__ import annotations
 import time
 import urllib.error
 
-from gateway.queue import enqueue
 from gateway.metrics import METRICS
-from router.router import Router
+from gateway.queue import enqueue
 from gateway.types import Request, Response, Shed, SliceOOM
+from router.router import Router
 
 WINDOW_S = 60.0
 

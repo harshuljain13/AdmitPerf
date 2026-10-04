@@ -1,75 +1,88 @@
-# The one place the cluster is described. Manifests are generated from this.
-#   python -m infra.render config/cluster.yaml
+# The cluster, in one file. Rendered by `python -m infra.render`.
+# Why each choice is what it is: infra/docs/topology.md
 #
-# Nothing below is repeated in a manifest by hand. If a value appears twice,
-# that is a bug — "same cluster, only the policy changed" stops being true.
+# No addresses and no secrets here — this file is committed. They come from .env.
 
-name: default
+hosts:
+  - name: gpu-a            # address: LAMBDA_HOST_GPU_A in .env (or LAMBDA)
+    gpu:
+      kind: H100
+      count: 4
+      hbm_gb: 80
 
-gpu:
-  kind: H100
-  count: 4
-  hbm_gb: 80
+  # - name: gpu-b
+  #   gpu: {kind: H100, count: 4, hbm_gb: 80}
 
-# Two workers, each one model sharded across two GPUs.
-#   TP is an engine flag. "workers" is a deployment fact (two servers), not
-#   vLLM's --data-parallel-size, which means something else.
-topology:
-  workers: 2
-  tensor_parallel_size: 2
-  pipeline_parallel_size: 1
 
-# One model on every worker keeps them interchangeable, so placement is a load
-# decision and admission has a real choice to make.
-#
-# VL-72B takes text AND images, so there is no need for a separate vision
-# worker. That is the whole reason to pick it: multi-modal without splitting
-# the fleet by capability, which would leave a vision request with exactly one
-# destination and no placement decision to make.
-#
-# For multi-modal, give a worker its own model and capability. Workers then stop
-# being interchangeable and placement becomes capability routing — fine for a
-# demo, but it weakens any policy comparison. Keep them uniform while measuring.
 model:
-  id: Qwen/Qwen2.5-VL-72B-Instruct
-  quantization: fp8        # 72B in bf16 is ~145 GB; at TP=2 that is 72.5 GB a
-                           # card against ~72 GB usable. The weights alone do
-                           # not fit. fp8 halves it. null = bf16.
-  served_name: lab
-  capability: text+vision
+  id: Qwen/Qwen2.5-32B-Instruct
+  quantization: fp8        # vLLM quantizes from the bf16 checkpoint at load;
+                           # H100 runs it natively. Refused on A100 (sm80).
+  dtype: auto
+  slicing: false           # whole GPUs; a slice cannot hold these weights
 
-# Per-worker overrides. Empty means every worker runs `model` above.
-workers_override: []
-# - index: 1
-#   model: {id: Qwen/Qwen2.5-VL-7B-Instruct, capability: vision}
+  # Declared, not fetched: the KV estimate must work before anything is rented.
+  # Verify against the model's config.json once the cluster is up.
+  attention:
+    layers: 64
+    kv_heads: 8
+    head_dim: 128
+    dtype_bytes: 2
+
 
 engine:
-  max_model_len: 32768          # deep research grows long; this is what binds KV
+  max_model_len: 32768
   gpu_memory_utilization: 0.90
   max_num_seqs: 64
-  enable_prefix_caching: true   # shared system+tool prefix is the point
+  enable_prefix_caching: true    # an agent resends its prompt every turn
+  distributed_executor_backend: mp
   scheduling_policy: priority
-  distributed_executor_backend: mp   # single node. ray is for multi-node only
+  tool_call_parser: hermes
   enable_auto_tool_choice: true
-  tool_call_parser: hermes      # Qwen2.5. Verify on one GPU before renting four
 
-hop:
-  backend: mooncake             # nccl and nixl in this tree are no-op stubs
+
+topology:
+  mode: disaggregated      # aggregated | disaggregated
+  split: phase             # phase | capability
+  kv_transport: mooncake   # required by disaggregated, refused by aggregated
+
+  # Two replicas per pool so placement is a real decision, TP=1 so four workers
+  # fit on four cards. At TP=2 there would be one replica per pool and placement
+  # would have a single destination.
+  pools:
+    prefill:
+      replicas: 2
+      tensor_parallel_size: 1
+      pipeline_parallel_size: 1
+      host: gpu-a
+
+    decode:
+      replicas: 2
+      tensor_parallel_size: 1
+      pipeline_parallel_size: 1
+      host: gpu-a
+
+  # aggregated instead:
+  # pools:
+  #   engine: {replicas: 2, tensor_parallel_size: 2, host: gpu-a}
+
+
+placement:
+  strategy: least_loaded   # least_loaded | round_robin | prefix_affinity
+
 
 overflow:
   provider: superlinked
   base_url: https://api.superlinked.com/v1
-  model: Qwen/Qwen3.5-4B        # 4B answering for a 72B. A relief valve, not
-                                # an equal service — see the note below.
-  max_requests: 20              # LIFETIME counter per gateway process, not a
-                                # rate limit. Once spent, overflow is off until
-                                # restart and requests fall back to the local
-                                # 503. Bounds the bill; see issue on the
-                                # measurement hazard that creates.
-  max_tokens: 64                # output cap on the overflow path only
-  on: [503, 529]                # never 429 — a quota refusal stays local
+  model: Qwen/Qwen3.5-4B   # a 4B standing in for a 72B; not an equal service
+  max_requests: 20         # lifetime counter per process, not a rate
+  max_tokens: 64
+  on: [503, 529]           # never 429 — a quota refusal stays local
+  # key: OVERFLOW_API_KEY in .env
+
 
 admission:
-  policy: kv_threshold          # resolved from admitperf's registry
+  policy: kv_threshold     # resolved from admitperf's registry
   params:
     threshold: 0.90
+  require_saturation: true # a run whose signal never moved is reported inert

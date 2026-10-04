@@ -8,8 +8,9 @@ import urllib.request
 from typing import Any, Protocol
 
 from gateway.metrics import METRICS
-from router.trace import TRACES
 from gateway.types import Request, Response, request_messages
+from router.trace import TRACES
+
 
 class OverflowPort(Protocol):
 
