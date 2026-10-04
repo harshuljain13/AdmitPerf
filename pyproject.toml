@@ -23,6 +23,10 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
     "mypy>=1.10",
+    # The suite covers infra/render.py, which reads cluster YAML. pyyaml is a
+    # dev dependency rather than a runtime one: `infra/` is a worked example of a
+    # host, not part of the package, so the decision path must not need it.
+    "pyyaml>=6.0",
 ]
 dashboard = [
     "streamlit>=1.40",
@@ -77,4 +81,3 @@ ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
