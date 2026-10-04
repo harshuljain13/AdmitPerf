@@ -1,197 +1,134 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="AdmitPerf — benchmark-driven admission control layer for LLM inference" width="100%"/>
+  <img src="assets/banner.svg" alt="AdmitPerf — standardized admission control for LLM inference" width="100%"/>
 </p>
 
 # AdmitPerf
 
-*A benchmark-driven admission control layer for LLM inference.*
+*Standardized admission control for LLM inference.*
 
-Two things in one repository: an **admission control library** you put in front
-of vLLM / SGLang — it decides admit / defer / reject per request — and a
-**benchmark harness** that runs any policy against a real engine on real
-hardware and reports what it cost. Same code path in both, so a number you can
-defend is also a thing you can deploy.
+**Bring your own infra.** Your gateway already has raw metrics. AdmitPerf turns
+them into signals, policies decide on signals, and every decision is recorded in
+a form a report can compare across deployments.
 
-> **Why** — across 14 admission-primary papers surveyed, no two share a
-> baseline, engine version, workload, or SLO definition. Head-to-head
-> comparison is not currently possible. [`docs/motivation.md`](src/admitperf/docs/motivation.md)
+It does not provision, serve, scrape, or generate load.
 
-**Status**: working MVP, verified on real hardware.
-[Results](src/admitperf/docs/results.md) · [honest gaps](src/admitperf/docs/status.md)
+`admitperf.core` — the part that runs in your request path — imports nothing but
+the standard library, opens no socket and spawns no subprocess. The CLI needs
+`click`; core does not, and a test checks that by importing it with `click` blocked.
 
-## Start here
+## Three things
 
-No GPU, nothing to pay for:
+| | |
+|---|---|
+| **Metrics** | whatever you scrape. Raw names, hundreds of keys, any stack. Yours. |
+| **Signal** | a named quantity, and how to read it from your metrics. Ours, so `kv_pressure = 0.93` means the same thing in two deployments. |
+| **Policy** | decides on signals. Four ship with AdmitPerf; yours is an equal citizen. |
 
-```bash
-pip install -e '.[all]'
-make mock-engine        # terminal 1: a mock engine that gets busy under load
-make dashboard          # terminal 2: configure an experiment, run it, read it
-```
-
-The dashboard runs the whole pipeline — provision, run, aggregate, report, tear
-down — one stage at a time. [`reports/dashboard/README.md`](src/admitperf/reports/dashboard/README.md)
-
-## Or from the CLI
-
-Two command groups, matching the two jobs: `infra` provisions, `bench` measures.
-
-```bash
-admitperf infra up   -c experiments/shedding-vs-tail-latency   # real vLLM on a real GPU
-admitperf infra smoke                           # is it actually serving?
-admitperf bench run  -c experiments/shedding-vs-tail-latency   # every policy, repeated
-admitperf bench compare results/                # who won, and by how much
-admitperf bench report  results/                # report.html you can attach
-admitperf infra down                            # stop paying for it
-```
-
-Every policy faces the **same deployment** — started once, never re-provisioned
-between policies — so the accept/refuse decision is the only thing that varies.
-`infra up` writes the endpoint to `.admitperf/session.json` and `bench run`
-reads it; point at your own engine instead with `--engine-url`.
-
-To vary the hardware or engine settings too, add a `matrix:` and use
-`bench sweep`. Results stay grouped per deployment and are never pooled: a table
-mixing an A10G row with an A100 row reports the machine, not the policy.
-
-Everything lives in one config file, and flags override it for one-offs.
-Examples in [`experiments/`](experiments/).
-
-## What a run leaves behind
-
-```
-results/<timestamp>-<experiment>/<policy>-r<n>/
-├── manifest.json     what was run, against what, with which settings
-├── summary.json      the numbers, each tagged with where it came from
-├── decisions.jsonl   every admit/defer/reject, with the state it was decided on
-└── outcomes.jsonl    per-request TTFT, inter-token gaps, deadline verdict
-```
-
-`bench report` turns a directory of those into a self-contained `report.html` —
-verdict, caveats, figures, provenance — plus loose PNGs for a paper.
-
-## A result
-
-Qwen2.5-0.5B on an A10G, `max_num_seqs=4`, 80 requests at 15/s, two repeats:
-
-| policy | admit % | TTFT p95 | goodput |
-|---|---|---|---|
-| `no_admission` | 100.0% | 2285ms ±725 | 0.319 |
-| `queue_depth[max_waiting=8]` | 88.1% | 1668ms ±145 | 0.300 |
-| `queue_depth[max_waiting=2]` | 63.1% | **951ms ±136** | 0.319 |
-
-Shedding 37% of traffic cut tail latency **2.4× at identical goodput** — the
-refused requests would have missed their deadline anyway. The spread says as
-much as the median: unmanaged queueing is unpredictable, not merely slow.
-
-**The signal mattered more than the threshold.** `kv_cache_usage_perc` never
-exceeded 0.005 while the queue reached 24 deep — on a 0.5B model a KV-pressure
-policy reads a flat line and silently becomes admit-everything. Which signal
-carries the pressure depends on the regime, which is why policies declare what
-they need. Full numbers: [`docs/results.md`](src/admitperf/docs/results.md).
-
-## Writing a policy
+## Use it
 
 ```python
-from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
+from admitperf import Policy
+from admitperf.core.signals import KV_PRESSURE, QUEUE_DEPTH
 
-class KVThreshold(AdmissionPolicy):
-    """Reject when the KV cache is above 90% utilization."""
 
-    name = "kv_threshold"
-    requires = frozenset({"kv_used_fraction"})   # checked once, at startup
+class KvWall(Policy):
+    name = "kv_wall"
 
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        if (state.kv_used_fraction or 0.0) >= 0.90:
-            return Decision.reject(reason="kv_pressure")
-        return Decision.admit()
+    def decide(self, metrics):
+        if KV_PRESSURE.read(metrics) >= self.threshold:
+            return self.reject("kv_pressure")
+        if QUEUE_DEPTH.read(metrics) > self.max_waiting:
+            return self.defer("queue_depth", retry_after_ms=200)
+        return self.admit()
 ```
 
-`requires` is how a policy declares the signals it needs. If the engine cannot
-report one, the run stops at startup rather than reading the missing value as
-zero and quietly behaving as an admit-everything baseline.
+In your gateway:
 
-Policies in **your own** pip package are discovered automatically — no edit to
-this repo. `admitperf policies` lists everything resolvable.
+```python
+policy = KvWall(threshold=0.90, max_waiting=32, log="decisions.jsonl")
 
-```toml
-[project.entry-points."policies"]
-my_policy = "my_pkg.policies:MyPolicy"
+d = policy(raw_metrics, request_id=rid)  # whatever you scraped
+if not d.admitted:
+    return Response(d.status, retry_after=d.retry_after_ms)
 ```
 
-## Installing
+`d.status` is derived from the reason — 503 for capacity, 429 for client-attributable
+causes — so your refusals are comparable with anyone else's without you choosing a
+code.
 
-```bash
-pip install -e '.[all]'          # everything, for working on the repo
-uv sync --all-extras             # or reproduce exactly, from the lock
+## Your metrics, whatever they are called
+
+A signal tries its sources in order. Add yours and it goes first:
+
+```python
+from admitperf.core.signals import KV_PRESSURE
+
+KV_PRESSURE.add_source("acme.cache.used_frac")  # your name
+KV_PRESSURE.add_source(lambda m: m["blocks_used"] / m["blocks_total"])  # computed
 ```
 
-Or just the parts you need: `.` (the decision path — click, httpx, pyyaml,
-rich), `[modal]`, `[dashboard]`, `[analysis]`, `[dev]`. The runtime dependency
-list is deliberately short; putting admission control in front of a fleet
-should not drag in a plotting stack.
+Out of the box it already reads vLLM (`kv_cache_usage_perc`, and the older
+`gpu_cache_usage_perc`, so a version difference is a non-event) and DCGM — including
+the 0–100 to fraction conversion, because every host getting that wrong differently
+is how a shared metric name stops meaning anything.
 
-Nothing else is required — the mock-engine path needs no configuration, and
-Modal needs only your existing `modal setup` credentials. Gated weights need a
-token, which lives in a Modal secret rather than a file:
+## Two rules it will not break
 
-```bash
-modal secret create huggingface HF_TOKEN=hf_xxx
-admitperf infra up --model meta-llama/Llama-3.1-8B --hf-secret huggingface
+**Absence is never zero.** A signal nothing supplies reads `None`. A KV pressure of
+`0.0` claims the cache is empty, which looks like headroom — so the policy would
+admit everything while appearing to work.
+
+**A value outside its range is skipped, not clamped.** Map a 0–100 metric to a
+fraction and you get `None`, not a cluster that appears permanently saturated.
+
+## What gets recorded
+
+One JSON line per decision, holding **every** signal and the raw metrics — not just
+the one your policy read. That is what lets a report say *"your signal never moved,
+but queue depth hit 61"*, and what makes replaying a different policy over your own
+production trace possible at all.
+
+```python
+policy.outcome(rid, ttft_ms=418, ok=True)  # optional; without it, no goodput
 ```
 
-## Repo layout
+## Shadow mode, and a counterfactual
 
-```
-src/admitperf/   core (the four objects, registry, runner) · engines · infra · bench
-policies/        the policies under study, as a separate package
-experiments/     example configs          reports/dashboard/  the Streamlit app
-docs/            motivation → design → metrics → results
-reports/         written studies, each backed by a run bundle
-scripts/         mock_vllm.py, a mock engine for testing without a GPU
+Call it and ignore the verdict: recording is unconditional and enforcement is yours,
+so that is a complete shadow deployment with no flag.
+
+```python
+policy = KvWall(threshold=0.90, enforce=0.5)  # half the traffic governed
 ```
 
-`make test` · `make lint` · `make dashboard` · `make mock-engine` · `make diagrams`. Architecture in
-[`docs/architecture/`](src/admitperf/docs/architecture/), following the
-[C4 model](https://c4model.com); the `.mmd` files are the source of truth.
+Both arms in one run under identical conditions, split deterministically by request
+id so a retry is treated the same way twice. In production it caps the blast radius.
 
-## Documentation
+## Why
 
-| Read this to... | Go here |
-|---|---|
-| Understand why AdmitPerf exists | [`docs/motivation.md`](src/admitperf/docs/motivation.md) |
-| See what exists and what does not | [`docs/status.md`](src/admitperf/docs/status.md) |
-| See the first real-hardware results | [`docs/results.md`](src/admitperf/docs/results.md) |
-| Read the data-flow + reproducibility contract | [`docs/design.md`](src/admitperf/docs/design.md) |
-| Read the metric definitions, and what is not measurable | [`docs/metrics.md`](src/admitperf/docs/metrics.md) |
-| See which policies fit behind this API, and the candidate list | [`docs/scope.md`](src/admitperf/docs/scope.md) · [`docs/policies.md`](src/admitperf/docs/policies.md) |
-| See what each policy does, without reading code | [`src/admitperf/policies/README.md`](src/admitperf/policies/README.md) |
-| Explore results interactively | [`reports/dashboard/README.md`](src/admitperf/reports/dashboard/README.md) |
-| Read the written studies, and the plan | [`reports/`](src/admitperf/reports/) · [`docs/PROPOSAL.md`](src/admitperf/docs/PROPOSAL.md) |
-| Read the adversarial review of the framing | [`docs/prior-art/adversarial_review.md`](src/admitperf/docs/prior-art/adversarial_review.md) |
-| Understand where the design came from | [`docs/lineage.md`](src/admitperf/docs/lineage.md) |
+Across sixteen admission-primary papers surveyed, no two share a baseline, engine,
+workload, or SLO definition — and **not one reports the observed range of the
+quantity its policy reads**. So no reader can tell which published results describe
+a policy acting and which describe a policy that never got the chance.
 
-## Contributing
+## Layout
 
-New policies, workloads, engine adapters and metrics are welcome.
-[`CONTRIBUTING.md`](CONTRIBUTING.md) has the adapter contract, the fidelity rule
-for reference-policy ports (never claim `"CONCUR"` when you mean
-`"CONCUR-inspired"`), conventions and PR flow.
-
-## Authors
-
-**Harshul Jain**, Independent Researcher, harshuljain1393@gmail.com
-
-## Citation
-
-```bibtex
-@software{admitperf2026,
-  title = {AdmitPerf: A Benchmark-Driven Admission Control Layer for LLM Inference},
-  author = {Jain, Harshul},
-  year = {2026},
-  url = {https://github.com/harshuljain13/AdmitPerf}
-}
+```
+src/admitperf/
+  core/               runs in YOUR request path. Stdlib only, no sockets. One class per file.
+    signal.py         Signal          signals.py    the signals we ship
+    policy.py         Policy          decision.py   Decision
+    verdict.py        Verdict         reasons.py    reason -> status code
+    log.py            Log
+  policies/           four baked-in policies, one per file
+infra/                one worked example of a host. NOT part of the package.
+docs/superseded/      the harness design this replaced, and why
 ```
 
-MIT for code, CC-BY 4.0 for docs and results bundles. Companion survey of the
-admission-control literature: preprint pending.
+`admitperf.core` imports nothing but the standard library, opens no socket, and
+spawns no subprocess — `tests/test_layering.py` enforces each, because that is what
+makes it safe to install in a gateway.
+
+The CLI (`watch`, `report`, `dashboard`) lands next.
+
+`make test` · `make lint`

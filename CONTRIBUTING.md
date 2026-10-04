@@ -1,50 +1,56 @@
 # Contributing to AdmitPerf
 
-Thanks for wanting to add a policy, workload, engine adapter, or metric. This guide covers the four things every contribution needs to satisfy.
+Thanks for wanting to add a policy, a signal, or a report. This guide covers what
+every contribution has to satisfy.
 
-## 1. The adapter API contract
+## 1. The contract
 
-Every policy implements a single interface:
-
-```python
-from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
-
-class YourPolicy(AdmissionPolicy):
-    name = "your_policy"          # unique across the registry
-
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        # pure function: same (req, state) -> same Decision, always
-        ...
-        return Decision.admit()               # or
-        return Decision.defer(retry_after_ms=50, reason="queue_full")   # or
-        return Decision.reject(reason="kv_pressure")   # 429 to the client
-```
-
-**Rules**:
-- `decide()` MUST be a pure function of its inputs. No hidden state, no clock reads, no random numbers without a seed.
-- If your policy needs state across calls (AIMD counters, EWMA windows), keep it on `self` and expose the fields so tests can pin them.
-- Do not mutate `req` or `state`. Both are frozen dataclasses.
-
-Declare which signals it needs, so a mismatch fails at startup instead of silently
-reading a missing value as zero. This is not theoretical: a KV-threshold policy on a
-small model reads `kv_used_fraction` near 0.0 forever and quietly becomes an
-admit-everything baseline. See [`docs/policies.md`](src/admitperf/docs/policies.md#choosing-a-signal).
+A policy decides on **signals**, which AdmitPerf derives from whatever raw metrics
+your host exports:
 
 ```python
-class YourPolicy(AdmissionPolicy):
+from admitperf import Policy
+from admitperf.core.signals import KV_PRESSURE
+
+
+class YourPolicy(Policy):
     name = "your_policy"
-    requires = frozenset({"kv_used_fraction"})
+
+    def decide(self, metrics):
+        if KV_PRESSURE.read(metrics) >= self.threshold:
+            return self.reject("kv_pressure")
+        return self.admit()
 ```
 
-If the policy belongs in this repo, add it to `src/admitperf/policies/` and register it there.
-If it lives in **your own package**, declare an entry point instead — no edit here needed:
+**Rules**
 
-```toml
-[project.entry-points."policies"]
-your_policy = "your_pkg.policies:YourPolicy"
+- `decide()` is a pure function of its input. No clock reads, no unseeded randomness.
+  State across calls (AIMD counters, EWMA windows) lives on `self` and is exposed so a
+  test can pin it.
+- A refusal reason must come from `admitperf.core.reasons.REASONS`. Reports group by
+  reason, and a reason nobody else uses cannot be grouped with anyone else's. The
+  status code is derived from it, so a policy never picks one.
+- `Signal.read()` returns `None` when nothing supplies the signal. Handle that — a
+  policy that treats a missing KV fraction as `0.0` concludes the cache is empty,
+  admits everything, and scores identically to no policy at all.
+- Do not reach for a vendor metric name. If you need a quantity AdmitPerf does not
+  define, read `metrics["your:metric"]` directly: it stays host-specific, which is
+  honest, and still lands in the log.
+
+### Adding a signal
+
+A signal is a promise that two deployments reporting the same number mean the same
+thing, so adding one to `core/signals.py` is a deliberate act — and a promise nobody
+checks is worse than no entry. It needs a `help` string, a floor, and an upper bound
+if it is a fraction, because a fraction without one cannot catch a source returning
+percent.
+
+Teaching an existing signal to read a new stack needs no change here:
+
+```python
+KV_PRESSURE.add_source("acme.cache.used_frac")
+KV_PRESSURE.add_source(lambda m: m["blocks_used"] / m["blocks_total"])
 ```
-
-`admitperf policies` lists everything resolvable either way.
 
 ## 2. The fidelity rule for reference-policy ports
 
@@ -52,7 +58,7 @@ If you are porting a published algorithm (Chronos, QLM, CONCUR, etc.), you must 
 
 - ✅ `class ChronosWCRT` — implements the exact bound from the paper, cites the equation number.
 - ✅ `class ChronosInspiredThreshold` — takes the *idea* but simplifies; class name says "inspired" not the paper's system name.
-- ❌ Never name a class after a published system unless you can defend the port line-by-line against the paper. See [`docs/scope.md`](src/admitperf/docs/scope.md#the-fidelity-rule-for-reference-ports).
+- ❌ Never name a class after a published system unless you can defend the port line-by-line against the paper. See [`docs/scope.md`](docs/superseded/scope.md#the-fidelity-rule-for-reference-ports).
 
 Add a short docstring header linking the source paper and stating what was preserved vs simplified.
 
@@ -74,12 +80,19 @@ pytest -k determinism                     # cross-policy determinism suite
 
 Against the mock engine, no GPU needed:
 
-```bash
-python scripts/mock_vllm.py --port 8077 &
-admitperf bench run --engine-url http://127.0.0.1:8077 \
-    --policy your_policy --policy no_admission -n 40 --rate 20 --repeats 2
-admitperf bench compare results/
+```python
+from admitperf.core.log import Log
+
+with YourPolicy(threshold=0.9, log="decisions.jsonl") as p:
+    for metrics in your_recorded_trace:
+        p(metrics, request_id=next_id())
+
+print(Log.read("decisions.jsonl"))
 ```
+
+No cluster needed: a policy is a function of metrics, so a recorded trace exercises
+it exactly as production would. AdmitPerf does not generate load — that is your
+infra's job, and `vllm bench serve` already does it well.
 
 ## 4. Coding conventions
 
@@ -100,12 +113,13 @@ admitperf bench compare results/
 
 ## What we do NOT accept
 
-- Policies that require patching engine internals (see [`docs/scope.md`](src/admitperf/docs/scope.md#class-b--batch-formation-not-portable)).
+- Policies that require patching engine internals (see [`docs/scope.md`](docs/superseded/scope.md#class-b--batch-formation-not-portable)).
 - Claims of a faithful port that we cannot verify against the source paper.
-- New metrics without a definition in [`docs/metrics.md`](src/admitperf/docs/metrics.md).
-- Changes to the adapter API (`Request`, `SystemState`, `Decision`, `AdmissionPolicy`) — that is v0 frozen. If you think the API needs to change, open an issue first.
+- New metrics without a definition in [`docs/metrics.md`](docs/superseded/metrics.md).
+- Changes to the contract (`Policy`, `Decision`, `Signal`, `REASONS`) or to a signal's
+  meaning — those are what make two deployments comparable. Open an issue first.
 - Metrics estimated rather than measured. If a number cannot be obtained from the engine or from client-side timing, it belongs in the bundle's `unavailable` block with a reason.
 
 ## Questions
 
-Open an issue with the `question` label, or read the [motivation](src/admitperf/docs/motivation.md), [scope](src/admitperf/docs/scope.md) and [status](src/admitperf/docs/status.md) docs first.
+Open an issue with the `question` label, or read the [motivation](docs/superseded/motivation.md), [scope](docs/superseded/scope.md) and [status](docs/status.md) docs first.
