@@ -119,11 +119,71 @@ rate. A run like that reports numbers indistinguishable from no policy at all.
 
 That is the question AdmitPerf answers first: **could the policy have fired at all?**
 
-## Status
+## The CLI
 
-**No measured results yet.** Earlier figures were removed rather than carried
-forward, because they could not be reproduced. The CLI — `watch`, `report`,
-`dashboard` — lands in the next PR, and with it the first real-fleet run.
+Three verbs, and none of them is in a request path.
+
+```bash
+admitperf signals                                   # what can your stack already feed?
+admitperf watch http://host:8000/metrics --for 1h   # record it, no code change
+admitperf report trace.jsonl                        # the finding
+admitperf dashboard                                 # every log, in a browser
+```
+
+Start with `watch`. It answers *could a policy have fired here, and which signal
+actually moved* before you touch your gateway:
+
+```
+THE FINDING — UNKNOWN  (3600 state samples)
+
+  signal                  min      p50      p95      max   n
+  kv_pressure            0.07     0.21     0.44     0.44  3600
+  queue_depth               0        3       47       61  3600
+  gpu_util               0.11     0.88     0.96     0.99  3600
+  prefix_hit_rate          --   never supplied by your metrics
+```
+
+KV pressure never passed 0.44, so a policy thresholded at 0.90 could not have fired
+no matter how it was written. Queue depth hit 61. That is the finding, and it cost no
+integration.
+
+`admitperf report --check` exits non-zero unless the log can support a claim, which
+makes it usable in CI.
+
+## On a real fleet
+
+Nothing here provisions or drives load — that is your infra's job. AdmitPerf's part
+is the last two commands.
+
+```bash
+# --- on the GPU box: your infra, your tooling ---
+bash infra/setup/lambda_vllm.sh                  # serves Qwen2.5-7B on :8000
+
+# --- from your laptop ---
+ssh -L 8000:127.0.0.1:8000 -N ubuntu@$HOST       # Lambda allows SSH only
+
+admitperf watch http://127.0.0.1:8000/metrics --for 10m -o trace.jsonl &
+
+vllm bench serve --base-url http://127.0.0.1:8000 \
+    --model Qwen/Qwen2.5-7B-Instruct \
+    --random-input-len 8192 --random-output-len 512 --ignore-eos \
+    --num-prompts 150 --request-rate 5
+
+admitperf report trace.jsonl
+```
+
+**`--ignore-eos` is not optional.** Without it the model stops whenever it stops, and
+on a filler prompt that can be 40 tokens instead of 512. The token count barely moves,
+but *duration* collapses by an order of magnitude — and concurrency is rate × duration,
+so the cache never fills and the whole run comes back inert for the wrong reason.
+
+**8192 input, not 2048.** From the arithmetic above: at `max_num_seqs=64` a short
+request caps `kv_used_fraction` near 0.35. Requests need to be longer than about
+**6k tokens** before KV binds before the scheduler does, and only then can a
+KV-pressure policy fire at all.
+
+**Measured results: none yet.** Earlier figures were removed rather than carried
+forward, because they could not be reproduced. This is the next thing to do.
 
 ## Layout
 

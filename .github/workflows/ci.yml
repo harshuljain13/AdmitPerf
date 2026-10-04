@@ -80,3 +80,8 @@ jobs:
           # usable without the extras. A missing module in the manifest only shows up
           # here: the editable install above sees the working tree, not the package.
           /tmp/fresh/bin/python -c "from admitperf.policies import KvThreshold, QueueDepth, DualGate, NoAdmission; print('policies ok')"
+          /tmp/fresh/bin/admitperf --help > /dev/null
+          /tmp/fresh/bin/admitperf signals > /dev/null
+          # The dashboard is an extra. Invoking it without streamlit installed must say
+          # so rather than traceback, because that is the first thing a new user tries.
+          /tmp/fresh/bin/admitperf dashboard 2>&1 | grep -q "admitperf\[dashboard\]"
