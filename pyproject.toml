@@ -35,8 +35,8 @@ all = [
     "admitperf[dev,dashboard]",
 ]
 
-# The console script returns with the CLI, in a following PR. Pointing it at a
-# deleted module would break `pip install`.
+[project.scripts]
+admitperf = "admitperf.cli:main"
 
 [build-system]
 requires = ["hatchling"]
