@@ -1,6 +1,6 @@
 [project]
 name = "admitperf"
-version = "0.0.1"
+version = "0.1.0"
 description = "An open benchmark for LLM admission-control policies"
 readme = "README.md"
 license = { text = "MIT" }

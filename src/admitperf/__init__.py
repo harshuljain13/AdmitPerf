@@ -16,15 +16,21 @@ a report can compare across deployments.
             return self.admit()
 
 `admitperf.core` is what runs in your request path and imports nothing but the
-standard library. The CLI, the watcher, the report and the dashboard are consumers
-of what it writes, and are not involved in serving a request.
+standard library. Everything else is a consumer of what it writes.
 """
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from admitperf.core import REASONS, Decision, Log, Policy, Signal, Verdict
 
-__version__ = "0.1.0"
+try:
+    # Read from installed metadata rather than restating it. Two copies of a version
+    # number is one too many, and the stale one is always the one a report quotes.
+    __version__ = version("admitperf")
+except PackageNotFoundError:  # a source tree with no install
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "REASONS",

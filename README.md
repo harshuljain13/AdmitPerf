@@ -107,9 +107,23 @@ id so a retry is treated the same way twice. In production it caps the blast rad
 ## Why
 
 Across sixteen admission-primary papers surveyed, no two share a baseline, engine,
-workload, or SLO definition — and **not one reports the observed range of the
-quantity its policy reads**. So no reader can tell which published results describe
-a policy acting and which describe a policy that never got the chance.
+workload, or SLO definition — and **not one reports the observed range of the quantity
+its policy reads**. So no reader can tell which published results describe a policy
+acting and which describe a policy that never got the chance.
+
+The arithmetic matters as much as the literature. On one A100-40GB serving
+Qwen2.5-7B, the KV pool holds roughly 384k tokens. At `max_num_seqs=64` with a
+2,168-token request, resident tokens cap near 139k — so `kv_used_fraction` cannot
+exceed about **0.35**, and a policy thresholded at 0.90 is unreachable at any arrival
+rate. A run like that reports numbers indistinguishable from no policy at all.
+
+That is the question AdmitPerf answers first: **could the policy have fired at all?**
+
+## Status
+
+**No measured results yet.** Earlier figures were removed rather than carried
+forward, because they could not be reproduced. The CLI — `watch`, `report`,
+`dashboard` — lands in the next PR, and with it the first real-fleet run.
 
 ## Layout
 
@@ -122,13 +136,10 @@ src/admitperf/
     log.py            Log
   policies/           four baked-in policies, one per file
 infra/                one worked example of a host. NOT part of the package.
-docs/superseded/      the harness design this replaced, and why
 ```
 
 `admitperf.core` imports nothing but the standard library, opens no socket, and
 spawns no subprocess — `tests/test_layering.py` enforces each, because that is what
 makes it safe to install in a gateway.
-
-The CLI (`watch`, `report`, `dashboard`) lands next.
 
 `make test` · `make lint`
