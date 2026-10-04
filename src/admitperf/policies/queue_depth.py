@@ -21,6 +21,9 @@ class QueueDepth(Policy):
     """
 
     name = "queue_depth"
+    signal_quantity = "queue_depth"
+    slo_awareness = "stability"
+    signal_structure = "scalar"
 
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         waiting = QUEUE_DEPTH.read(metrics)

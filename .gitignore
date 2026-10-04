@@ -107,5 +107,7 @@ experiments/*/results/**/trace.jsonl
 # Spec-dev drafts stay local
 .spec-dev/
 
-# Output of examples/
-example-runs/
+# Everything AdmitPerf writes lands in experiments/<experiment>/<policy>/r<n>.jsonl.
+# Runs are outputs, not source: they are large, machine-written, and reproducible from
+# the command that made them.
+experiments/

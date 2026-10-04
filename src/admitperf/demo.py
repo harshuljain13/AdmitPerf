@@ -1,11 +1,21 @@
-"""A working example: what does admission control buy you?
+"""The demo: what does admission control buy you?
+
+    admitperf demo
+    admitperf demo --repeats 5
 
 Drives identical traffic through a simulated engine three times — admitting
 everything, then with a KV-pressure policy, then with a queue-depth policy — and
 compares the reports.
 
-    python examples/compare_two_policies.py                 # one run per arm
-    python examples/compare_two_policies.py --repeats 5     # with an error bar
+This is a DEMO, not an experiment runner, and the distinction is the whole boundary
+of this package. AdmitPerf does not generate load or serve requests; the engine below
+is forty lines of arithmetic that exist so the package can demonstrate itself with no
+hardware. It takes no engine URL and no workload configuration, deliberately: against
+a real cluster your own load generator drives traffic and `admitperf watch` records
+it, and nothing here is involved.
+
+What transfers to a real deployment is the four lines inside `run()`. A policy is a
+pure function of metrics, so it cannot tell a simulated scrape from a real one.
 
 The result is the reason the comparison exists. The KV policy cuts p95 TTFT by more
 than 10x and makes goodput WORSE, because a threshold chosen without reference to the
@@ -34,7 +44,14 @@ from admitperf.comparison import Comparison
 from admitperf.policies import KvThreshold, NoAdmission, QueueDepth
 from admitperf.report import Report
 
-OUT = Path("example-runs")
+#: One convention for everything AdmitPerf writes:
+#:
+#:     experiments/<experiment>/<policy>/r<n>.jsonl
+#:
+#: The directory mirrors the identity the policy declared, so a reader can find a run
+#: from its report and vice versa. A separate folder per tool would have been a second
+#: convention for the same thing.
+DEFAULT_OUT = Path("experiments")
 
 # --- the engine being modelled ------------------------------------------------
 # Numbers from a real deployment: one A100-40GB serving Qwen2.5-7B in bf16 leaves
@@ -56,7 +73,7 @@ SLO_TTFT_MS = 1_500
 #: Arrivals are Poisson and service times are jittered, so repeats of the same
 #: configuration differ. Without that, every repeat is byte-identical, the spread is
 #: zero, and the error bar the comparison prints would be theatre — it would report
-#: two arms as cleanly separated on the strength of one deterministic run each.
+#: two policies as cleanly separated on the strength of one deterministic run each.
 SERVICE_JITTER = 0.35
 
 
@@ -142,7 +159,7 @@ class FakeEngine:
 def run(policy, seed: int = 0) -> None:
     """Drive traffic through one policy.
 
-    The seed is shared between arms within a repeat, so the two arms see the same
+    The seed is shared between arms within a repeat, so the two policies see the same
     traffic — otherwise a difference between them could be a difference between
     traffic patterns and the comparison would be measuring the generator. It CHANGES
     between repeats, because repeats of an identical trace have no spread to report
@@ -190,51 +207,68 @@ def run(policy, seed: int = 0) -> None:
 MAX_WAITING = int((SLO_TTFT_MS - 180) / TICK_MS * (MAX_CONCURRENT / SERVICE_TICKS))
 
 
-def main(repeats: int = 1) -> None:
-    OUT.mkdir(exist_ok=True)
+def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Path]:
+    """Run every arm, print the reports and the comparisons, return the arm directories."""
+    out = DEFAULT_OUT if out is None else Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    #: Named, so a report can group these three as one comparable set rather than
+    #: inferring it from the directory they happen to sit in.
+    experiment = "demo"
+    capacity = MAX_CONCURRENT // SERVICE_TICKS
+    notes = (
+        f"simulated engine, no hardware · {ARRIVALS_PER_TICK / capacity:.1f}x overload "
+        f"({ARRIVALS_PER_TICK}/tick offered against {capacity}/tick capacity) · "
+        f"{MAX_CONCURRENT} slots · {TOKENS_PER_REQUEST} tokens/request · "
+        f"SLO {SLO_TTFT_MS}ms TTFT"
+    )
+    ident = {"experiment": experiment, "notes": notes}
+
+    # Run directories are named by POLICY, not by a label of mine, so the path and the
+    # log's own `policy` field cannot disagree.
+    root = out / experiment
     arms = {
-        "no admission (baseline)": (OUT / "baseline", lambda log: NoAdmission(log=log)),
+        "no admission (baseline)": (
+            root / "no_admission",
+            lambda log, run: NoAdmission(log=log, run=run, **ident),
+        ),
         "kv_threshold 0.90": (
-            OUT / "kv_threshold",
-            lambda log: KvThreshold(threshold=0.90, log=log),
+            root / "kv_threshold",
+            lambda log, run: KvThreshold(threshold=0.90, log=log, run=run, **ident),
         ),
         f"queue_depth {MAX_WAITING}": (
-            OUT / "queue_depth",
-            lambda log: QueueDepth(max_waiting=MAX_WAITING, log=log),
+            root / "queue_depth",
+            lambda log, run: QueueDepth(max_waiting=MAX_WAITING, log=log, run=run, **ident),
         ),
     }
 
     for repeat in range(1, repeats + 1):
-        for _, (arm_dir, build) in arms.items():
-            arm_dir.mkdir(parents=True, exist_ok=True)
-            log = arm_dir / f"r{repeat}.jsonl"
+        for _, (policy_dir, build) in arms.items():
+            policy_dir.mkdir(parents=True, exist_ok=True)
+            log = policy_dir / f"r{repeat}.jsonl"
             log.unlink(missing_ok=True)
-            run(build(log), seed=repeat)
+            run(build(log, f"r{repeat}"), seed=repeat)
 
     baseline = arms["no admission (baseline)"][0]
-    for name, (arm_dir, _) in arms.items():
-        print(f"\n{'=' * 68}\n  {name}  (repeat 1 of {repeats})\n{'=' * 68}")
-        print(Report.from_log(arm_dir / "r1.jsonl").text())
+    for name, (policy_dir, _) in arms.items():
+        echo(f"\n{'=' * 68}\n  {name}  (repeat 1 of {repeats})\n{'=' * 68}")
+        echo(Report.from_log(policy_dir / "r1.jsonl").text())
 
-    for name, (arm_dir, _) in arms.items():
-        if arm_dir == baseline:
+    for name, (policy_dir, _) in arms.items():
+        if policy_dir == baseline:
             continue
-        print(f"\n\n### baseline  vs  {name}")
-        print(Comparison.from_logs(baseline, arm_dir).text())
+        echo(f"\n\n### baseline  vs  {name}")
+        echo(Comparison.from_logs(baseline, policy_dir).text())
 
-    print(f"\nlogs in {OUT}/  —  a directory per arm, one file per repeat. Try:")
-    for _, (arm_dir, _) in arms.items():
-        if arm_dir != baseline:
-            print(f"  admitperf compare {baseline} {arm_dir}")
+    echo(f"\nexperiment {experiment!r} · {repeats} run(s) per policy · logs in {root}/")
+    echo("\n  admitperf compare --experiment " + experiment)
+    echo("  admitperf dashboard")
+    echo(f"\nthe code that produced this: {Path(__file__).name} in the admitperf package")
+    return {name: arm_dir for name, (arm_dir, _) in arms.items()}
 
 
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
-        "--repeats",
-        type=int,
-        default=1,
-        help="runs per arm. One has no error bar, and a gap smaller than the spread "
-        "between repeats is not a result.",
-    )
-    main(ap.parse_args().repeats)
+if __name__ == "__main__":  # python -m admitperf.demo
+    ap = argparse.ArgumentParser(description="AdmitPerf demo")
+    ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("-o", "--out", type=Path, default=None)
+    args = ap.parse_args()
+    main(args.repeats, args.out)

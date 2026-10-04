@@ -52,6 +52,73 @@ class Report:
         return self.decisions[0]["policy"] if self.decisions else None
 
     @property
+    def experiment(self) -> str | None:
+        """What question this log answers. None for a log written before the field
+        existed, or by a host that did not name its experiment."""
+        return self.decisions[0].get("experiment") if self.decisions else None
+
+    @property
+    def run(self) -> str | None:
+        return self.decisions[0].get("run") if self.decisions else None
+
+    @property
+    def notes(self) -> str | None:
+        return self.decisions[0].get("notes") if self.decisions else None
+
+    @property
+    def arm(self) -> str:
+        """How this log is labelled in a comparison: the policy, and the run if named.
+
+        Deliberately not the file path. A path tells a reader where bytes live, not
+        what was measured, and it changes when someone tidies a directory.
+        """
+        parts = [self.policy or "no policy"]
+        if self.run:
+            parts.append(self.run)
+        return " ".join(parts)
+
+    @property
+    def provenance(self) -> dict[str, str]:
+        """Where each parameter's value came from. Reporting item 5."""
+        return (self.decisions[0].get("provenance") or {}) if self.decisions else {}
+
+    @property
+    def card(self) -> dict[str, str | None]:
+        """The survey's taxonomy axes, as the policy declared them."""
+        return (self.decisions[0].get("card") or {}) if self.decisions else {}
+
+    def watched_signal(self) -> tuple[str, dict[str, float], float | None] | None:
+        """The signal this policy actually decided on, its range, and its threshold.
+
+        Which signal that is cannot be read off the log directly — every signal is
+        recorded, by design — so it is taken from the taxonomy quantity the policy
+        declared. A policy that declares none (a baseline) returns None, which is a
+        different finding from a signal that stayed flat.
+        """
+        quantity = self.card.get("signal_quantity")
+        if not quantity:
+            return None
+        rng = self.signal_range(quantity)
+        return (quantity, rng, self.threshold) if rng else None
+
+    def offered_rps(self) -> float | None:
+        """Requests per second offered, from the first and last decision. Item 7.
+
+        None for a single decision, because one timestamp is not a rate — and
+        inventing one from a single sample is how a load figure becomes fiction.
+        """
+        if len(self.decisions) < 2:
+            return None
+        span = self.decisions[-1]["at"] - self.decisions[0]["at"]
+        return len(self.decisions) / span if span > 0 else None
+
+    def items(self, *, repeats: int = 1, has_baseline: bool | None = None) -> list:
+        """The survey's seven reporting items, checked against this run."""
+        from admitperf.items import evaluate
+
+        return evaluate(self, repeats=repeats, has_baseline=has_baseline)
+
+    @property
     def is_baseline(self) -> bool:
         """Whether the policy refuses nothing by design.
 
@@ -160,7 +227,7 @@ class Report:
                 "  THE BASELINE — it admits everything",
                 "",
                 f"  {self.policy} admitted all {total} requests, which is its job. This is",
-                "  what the cluster does unmanaged, and it is the arm every claim about",
+                "  what the cluster does unmanaged, and it is the run every claim about",
                 '  admission control is measured against: without it, "the policy refused',
                 '  27%" has nothing to be 27% of.',
                 "",
@@ -191,7 +258,7 @@ class Report:
             out += [
                 "",
                 f"  {self.enforced} of {total} were actually enforced (enforce<1), so this",
-                "  log holds both arms: refusals that happened and refusals that would",
+                "  log holds both sides: refusals that happened and refusals that would",
                 "  have. That is the comparison, under identical conditions.",
             ]
         return out

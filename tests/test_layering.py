@@ -160,7 +160,10 @@ def test_engine_vocabulary_lives_only_in_signals() -> None:
     """A module that special-cases vLLM is a module that will be wrong for SGLang,
     Modal, and whatever comes next. Vendor metric names belong in the one file that
     lists them as guesses a host can override."""
-    allowed = {SRC / "core" / "signals.py"}
+    # signals.py lists them as overridable guesses. demo.py EMITS them, because the
+    # thing it demonstrates is a raw vLLM scrape being converted into signals — a demo
+    # that invented its own metric names would not show the conversion at all.
+    allowed = {SRC / "core" / "signals.py", SRC / "demo.py"}
     offenders = [
         f"{py.relative_to(REPO)} mentions {needle}"
         for py in sorted(SRC.rglob("*.py"))

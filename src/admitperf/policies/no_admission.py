@@ -12,7 +12,7 @@ class NoAdmission(Policy):
     """Admits everything.
 
     Not a placeholder. Without it "the policy refused 8%" has nothing to be 8% of,
-    and any latency figure is uninterpretable. It is also the arm that shows what
+    and any latency figure is uninterpretable. It is also what shows
     your cluster does when nothing is managing it, which is the comparison every
     claim about admission control rests on.
     """
@@ -20,7 +20,7 @@ class NoAdmission(Policy):
     name = "no_admission"
 
     #: Refusing nothing is the job, not a failure to fire. Without this the report
-    #: would call the comparison arm INERT and advise changing the load.
+    #: would call the baseline INERT and advise changing the load.
     baseline = True
 
     def decide(self, metrics: Mapping[str, float]) -> Decision:

@@ -24,6 +24,9 @@ class KvThreshold(Policy):
     """
 
     name = "kv_threshold"
+    signal_quantity = "kv_pressure"
+    slo_awareness = "throughput"
+    signal_structure = "scalar"
 
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         pressure = KV_PRESSURE.read(metrics)

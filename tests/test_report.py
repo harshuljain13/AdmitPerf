@@ -123,10 +123,10 @@ def test_goodput_counts_refusals_as_misses(tmp_path) -> None:
     assert "0.500" in r.text()
 
 
-def test_sampled_enforcement_is_reported_as_two_arms(tmp_path) -> None:
+def test_sampled_enforcement_is_reported_as_both_sides(tmp_path) -> None:
     r = Report.from_log(_log(tmp_path, [BUSY] * 40, enforce=0.5))
     assert 0 < r.enforced < 40
-    assert "holds both arms" in r.text()
+    assert "holds both sides" in r.text()
 
 
 # --- the instrument ------------------------------------------------------
