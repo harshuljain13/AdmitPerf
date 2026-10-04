@@ -1,111 +1,40 @@
 # Contributing to AdmitPerf
 
-Thanks for wanting to add a policy, workload, engine adapter, or metric. This guide covers the four things every contribution needs to satisfy.
+The package is being rebuilt around a contract: metrics in, signals derived, policies
+decide. Until that lands, the guidance that outlives it:
 
-## 1. The adapter API contract
+## What AdmitPerf is not
 
-Every policy implements a single interface:
+Not a gateway, not a provisioner, not a load generator, not an engine adapter. It
+installs into someone else's request path and must know nothing about their stack.
+A change that teaches the package about vLLM, Kubernetes, or a cloud provider is a
+change in the wrong direction.
 
-```python
-from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
+## The fidelity rule for reference-policy ports
 
-class YourPolicy(AdmissionPolicy):
-    name = "your_policy"          # unique across the registry
+Never name a class after a published system unless the port can be defended
+line-by-line against the paper. Ship the *mechanism*, never the paper's thresholds —
+those were tuned on other hardware, and parameter provenance is one of the seven
+reporting items.
 
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        # pure function: same (req, state) -> same Decision, always
-        ...
-        return Decision.admit()               # or
-        return Decision.defer(retry_after_ms=50, reason="queue_full")   # or
-        return Decision.reject(reason="kv_pressure")   # 429 to the client
-```
+A policy that cannot be implemented behind an ingress hook — one deciding at batch
+formation — should be documented as such rather than approximated under the paper's
+name. Six of the sixteen surveyed policies are in that category.
 
-**Rules**:
-- `decide()` MUST be a pure function of its inputs. No hidden state, no clock reads, no random numbers without a seed.
-- If your policy needs state across calls (AIMD counters, EWMA windows), keep it on `self` and expose the fields so tests can pin them.
-- Do not mutate `req` or `state`. Both are frozen dataclasses.
+## Rules that are tested, not trusted
 
-Declare which signals it needs, so a mismatch fails at startup instead of silently
-reading a missing value as zero. This is not theoretical: a KV-threshold policy on a
-small model reads `kv_used_fraction` near 0.0 forever and quietly becomes an
-admit-everything baseline. See [`docs/policies.md`](src/admitperf/docs/policies.md#choosing-a-signal).
+- The package may not import `infra`, name an infra path, or ship it in the wheel.
+- `admitperf.core` imports nothing but the standard library, opens no socket, and
+  spawns no subprocess. It runs in a production request path.
+- One class per file.
 
-```python
-class YourPolicy(AdmissionPolicy):
-    name = "your_policy"
-    requires = frozenset({"kv_used_fraction"})
-```
+`tests/test_layering.py` enforces each. It previously resolved its source path to a
+directory that did not exist, so it globbed zero files and stayed green throughout the
+period those rules were being broken — which is why it now asserts its own path first.
 
-If the policy belongs in this repo, add it to `src/admitperf/policies/` and register it there.
-If it lives in **your own package**, declare an entry point instead — no edit here needed:
+## Workflow
 
-```toml
-[project.entry-points."policies"]
-your_policy = "your_pkg.policies:YourPolicy"
-```
+Branch off `main` as `feat/<short>`, `fix/<short>`, `docs/<short>`. Conventional
+commits. Never commit to `main`. `make lint && make test` before pushing.
 
-`admitperf policies` lists everything resolvable either way.
-
-## 2. The fidelity rule for reference-policy ports
-
-If you are porting a published algorithm (Chronos, QLM, CONCUR, etc.), you must decide honestly whether it is a **faithful port** or an **ingress approximation**.
-
-- ✅ `class ChronosWCRT` — implements the exact bound from the paper, cites the equation number.
-- ✅ `class ChronosInspiredThreshold` — takes the *idea* but simplifies; class name says "inspired" not the paper's system name.
-- ❌ Never name a class after a published system unless you can defend the port line-by-line against the paper. See [`docs/scope.md`](src/admitperf/docs/scope.md#the-fidelity-rule-for-reference-ports).
-
-Add a short docstring header linking the source paper and stating what was preserved vs simplified.
-
-## 3. Tests
-
-Every policy needs at least three tests in `tests/policies/test_<your_policy>.py`:
-
-1. **Admits in the trivial case** — empty system, one request → `ADMIT`.
-2. **Rejects at the boundary** — construct the state that should trigger reject, verify `Decision.kind is DecisionKind.REJECT` and `reason` is set.
-3. **Determinism** — call `decide()` twice with the same inputs, assert equal outputs.
-
-Run locally:
-
-```bash
-pytest tests/                             # all tests
-pytest tests/policies/test_your_policy.py # just yours
-pytest -k determinism                     # cross-policy determinism suite
-```
-
-Against the mock engine, no GPU needed:
-
-```bash
-python scripts/mock_vllm.py --port 8077 &
-admitperf bench run --engine-url http://127.0.0.1:8077 \
-    --policy your_policy --policy no_admission -n 40 --rate 20 --repeats 2
-admitperf bench compare results/
-```
-
-## 4. Coding conventions
-
-- **Python 3.11+** with type hints on every public function.
-- **`ruff`** for formatting and linting — `ruff format . && ruff check .` before pushing.
-- **Docstrings** on every public class and function; one line is fine if the name is clear.
-- **No dependencies added lightly** — a new dependency requires a note in the PR explaining why the stdlib doesn't cover it.
-- **Never `except Exception`** — catch the specific error class.
-- **Never mutate frozen dataclasses** — construct new ones.
-
-## PR flow
-
-1. Fork or branch off `main`. Branch naming: `feat/<short>`, `fix/<short>`, `docs/<short>`.
-2. One logical change per PR. If you are adding a policy, do not also refactor the harness.
-3. Conventional commit prefixes: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`.
-4. PR description states: what the policy does, what paper it derives from (if any), and which of the three tests above you added.
-5. Wait for green CI + one reviewer approval.
-
-## What we do NOT accept
-
-- Policies that require patching engine internals (see [`docs/scope.md`](src/admitperf/docs/scope.md#class-b--batch-formation-not-portable)).
-- Claims of a faithful port that we cannot verify against the source paper.
-- New metrics without a definition in [`docs/metrics.md`](src/admitperf/docs/metrics.md).
-- Changes to the adapter API (`Request`, `SystemState`, `Decision`, `AdmissionPolicy`) — that is v0 frozen. If you think the API needs to change, open an issue first.
-- Metrics estimated rather than measured. If a number cannot be obtained from the engine or from client-side timing, it belongs in the bundle's `unavailable` block with a reason.
-
-## Questions
-
-Open an issue with the `question` label, or read the [motivation](src/admitperf/docs/motivation.md), [scope](src/admitperf/docs/scope.md) and [status](src/admitperf/docs/status.md) docs first.
+Open an issue with the `question` label if anything here is unclear.

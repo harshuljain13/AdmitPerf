@@ -1,54 +1,29 @@
-"""Core — the decision path, and the public surface.
+"""The contract: metrics in, signals derived, policies decide.
 
-The four objects (Request, SystemState, Decision, Outcome), the policy base
-class, the policy registry, and the cached state a policy reads. No engine
-provisioning, no benchmark machinery.
+This subpackage is the part that runs in your request path, so it holds the line
+that makes AdmitPerf safe to install: no third-party imports, no sockets, no
+subprocesses, no filesystem beyond the log you asked for. A test enforces each.
 
-Writing a policy needs only:
-
-    from admitperf.core import AdmissionPolicy, Decision, Request, SystemState
+Everything else in the package — the CLI, the watcher, the report, the dashboard —
+is a consumer of what this produces and may do as it likes.
 """
 
 from __future__ import annotations
 
-from admitperf.core.api import (
-    AdmissionPolicy,
-    Decision,
-    DecisionKind,
-    Request,
-    SystemState,
-)
-from admitperf.core.ports import (
-    STATE_AGE_KEY,
-    CapabilityError,
-    DecisionRecord,
-    EngineAdapter,
-    RequestOutcome,
-    check_compatibility,
-)
-from admitperf.core.registry import available, get_policy, register, requirements_of
-from admitperf.core.state import StateCache, empty_state, state_age
-
-__version__ = "0.0.1"
+from admitperf.core.decision import Decision
+from admitperf.core.log import Log
+from admitperf.core.policy import Policy
+from admitperf.core.reasons import ADMITTED, REASONS
+from admitperf.core.signal import Signal, Source
+from admitperf.core.verdict import Verdict
 
 __all__ = [
-    "STATE_AGE_KEY",
-    "AdmissionPolicy",
-    "CapabilityError",
+    "ADMITTED",
+    "REASONS",
     "Decision",
-    "DecisionKind",
-    "DecisionRecord",
-    "EngineAdapter",
-    "Request",
-    "RequestOutcome",
-    "StateCache",
-    "SystemState",
-    "__version__",
-    "available",
-    "check_compatibility",
-    "empty_state",
-    "get_policy",
-    "register",
-    "requirements_of",
-    "state_age",
+    "Log",
+    "Policy",
+    "Signal",
+    "Source",
+    "Verdict",
 ]

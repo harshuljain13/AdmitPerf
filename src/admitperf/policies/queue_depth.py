@@ -1,62 +1,32 @@
-"""Reject when the engine's own queue is too deep.
-
-Measured on a 0.5B model capped at `max_num_seqs=4`, `kv_cache_usage_perc`
-never left 0.0 while `num_requests_waiting` climbed to 12. The KV cache was
-orders of magnitude larger than four short sequences could fill, so the binding
-constraint was the concurrency cap, not memory.
-
-That is the case for this policy existing alongside `KVThreshold`: which signal
-carries the pressure depends on the regime. KV pressure binds for long contexts
-and large batches; queue depth binds when the concurrency cap is the ceiling. A
-policy reading the wrong one sees a flat line and silently degrades into
-admit-everything.
-"""
+"""Refuse on queue length."""
 
 from __future__ import annotations
 
-from admitperf.core.api import AdmissionPolicy, Decision, Request, SystemState
+from collections.abc import Mapping
+
+from admitperf.core.decision import Decision
+from admitperf.core.policy import Policy
+from admitperf.core.signals import QUEUE_DEPTH
 
 
-class QueueDepth(AdmissionPolicy):
-    """Reject once more than `max_waiting` requests are already queued."""
+class QueueDepth(Policy):
+    """Refuse when more than `max_waiting` requests are queued.
 
-    name = "queue_depth"
-    signal = "waiting_requests"
-    objective = "latency"
-    threshold = 8.0
+    Often the signal that actually moves. Queue depth responds to arrival rate
+    directly, where KV pressure needs resident tokens — so on short requests this
+    fires when a KV policy cannot.
 
-    def __init__(self, max_waiting: int = 8) -> None:
-        self.threshold = float(max_waiting)
-        if max_waiting < 0:
-            raise ValueError(f"max_waiting must be >= 0, got {max_waiting}")
-        self.max_waiting = max_waiting
-
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        if state.waiting_requests > self.max_waiting:
-            return Decision.reject(reason="queue_depth")
-        return Decision.admit()
-
-
-class QueueDepthDefer(AdmissionPolicy):
-    """Hold rather than refuse, and re-ask once the queue has drained.
-
-    The interesting contrast with `QueueDepth`: deferring converts a refusal
-    into latency. Whether that is an improvement depends entirely on whether
-    the client would rather wait than be told no, which is what the results are
-    for.
+    `retry_after_ms` turns the refusal into a defer, which tells a caller when to
+    come back rather than only that it failed. Set it to 0 to refuse outright.
     """
 
-    name = "queue_depth_defer"
-    signal = "waiting_requests"
-    objective = "latency"
-    threshold = 8.0
+    name = "queue_depth"
 
-    def __init__(self, max_waiting: int = 8, retry_after_ms: int = 250) -> None:
-        self.threshold = float(max_waiting)
-        self.max_waiting = max_waiting
-        self.retry_after_ms = retry_after_ms
-
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        if state.waiting_requests > self.max_waiting:
-            return Decision.defer(retry_after_ms=self.retry_after_ms, reason="queue_depth")
-        return Decision.admit()
+    def decide(self, metrics: Mapping[str, float]) -> Decision:
+        waiting = QUEUE_DEPTH.read(metrics)
+        if waiting is not None and waiting > self.max_waiting:
+            retry = getattr(self, "retry_after_ms", 0)
+            if retry:
+                return self.defer("queue_depth", retry_after_ms=retry)
+            return self.reject("queue_depth")
+        return self.admit()

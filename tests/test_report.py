@@ -1,421 +1,165 @@
-"""The AdmitPerf Report.
-
-Two things this file is mostly about.
-
-The report must never flatter a run. A missing input is reported as unevidenced,
-not as a pass; an inert signal fails item 3 rather than being omitted; and the
-sparkline is scaled so a run that never left the floor looks like one.
-
-And a policy author declares `signal` once. Everything else — the capability
-check, the liveness verdict, the policy card, the range table — derives from it,
-because four copies of the same fact is how they drift apart.
-"""
+"""Report — what a log can and cannot support."""
 
 from __future__ import annotations
 
-import math
+from admitperf.core.log import Log
+from admitperf.core.policy import Policy
+from admitperf.core.signals import KV_PRESSURE
+from admitperf.report import Report
 
-import pytest
 
-from admitperf.core.api import AdmissionPolicy, Decision, Request, SystemState
-from admitperf.core.registry import get_policy
-from admitperf.report import (
-    ItemStatus,
-    PolicyCard,
-    Verdict,
-    evaluate,
-    facts_from,
-    report_for,
-    sparkline,
-    summarise,
-)
+class KvWall(Policy):
+    name = "kv_wall"
 
-# --------------------------------------------------------------------------
-# One declaration, four consumers
-# --------------------------------------------------------------------------
+    def decide(self, metrics):
+        if KV_PRESSURE.read(metrics) >= self.threshold:
+            return self.reject("kv_pressure")
+        return self.admit()
 
 
-class _Spy(AdmissionPolicy):
-    name = "spy"
-    signal = "kv_used_fraction"
-    threshold = 0.75
+BUSY = {"vllm:kv_cache_usage_perc": 0.95, "vllm:num_requests_waiting": 41.0}
+IDLE = {"vllm:kv_cache_usage_perc": 0.05, "vllm:num_requests_waiting": 0.0}
 
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        return Decision.admit()
 
+def _log(tmp_path, metrics_seq, *, threshold=0.9, enforce=1.0):
+    path = tmp_path / "d.jsonl"
+    with KvWall(threshold=threshold, log=path, enforce=enforce) as p:
+        for i, m in enumerate(metrics_seq):
+            p(m, request_id=f"r{i}")
+    return path
 
-class _TwoSignals(AdmissionPolicy):
-    name = "two"
-    signal = "waiting_requests"
-    requires = frozenset({"waiting_requests", "running_requests"})
 
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        return Decision.admit()
+# --- the validity gate ----------------------------------------------------
 
 
-class _NoSignal(AdmissionPolicy):
-    name = "none"
+def test_a_policy_that_refused_is_live(tmp_path) -> None:
+    r = Report.from_log(_log(tmp_path, [BUSY] * 5))
+    assert r.verdict() == "LIVE"
+    assert r.refused == 5
+    assert "refused 5 of 5" in r.text()
 
-    def decide(self, req: Request, state: SystemState) -> Decision:
-        return Decision.admit()
 
+def test_a_policy_that_refused_nothing_is_inert(tmp_path) -> None:
+    """The finding none of the sixteen surveyed papers reports. Without it a latency
+    table from this log would be a measurement of two identical configurations."""
+    r = Report.from_log(_log(tmp_path, [IDLE] * 5))
+    assert r.verdict() == "INERT"
+    assert "indistinguishable from no policy" in r.text()
+    # And it points at the load rather than the policy, which is not the instinct.
+    assert "LOAD, not the policy" in r.text()
 
-def test_requires_derives_from_signal() -> None:
-    """The point of the whole design: declare the signal, get the capability check."""
-    assert _Spy.requires == frozenset({"kv_used_fraction"})
 
+def test_a_state_only_log_claims_nothing_about_a_policy(tmp_path) -> None:
+    """What `watch` produces. It is useful — it tells you which signal moved — and it
+    must not be dressed up as evidence about a policy that never ran."""
+    path = tmp_path / "t.jsonl"
+    log = Log(path)
+    log.write({"at": 1.0, "metrics": BUSY, "signals": {"kv_pressure": 0.95}})
+    log.close()
 
-def test_an_explicit_requires_still_wins() -> None:
-    """A policy reading two signals is not forced into the simple case."""
-    assert _TwoSignals.requires == frozenset({"waiting_requests", "running_requests"})
+    r = Report.from_log(path)
+    assert r.verdict() == "UNKNOWN"
+    assert "No policy ran" in r.text()
 
 
-def test_no_signal_means_no_derived_requirement() -> None:
-    assert _NoSignal.requires == frozenset()
+# --- which signals moved --------------------------------------------------
 
 
-def test_read_signal_pulls_the_declared_field() -> None:
-    state = SystemState(
-        now=0.0,
-        kv_used_fraction=0.42,
-        running_requests=1,
-        waiting_requests=0,
-        running_agents=0,
-        per_tenant_running={},
-        per_tenant_admitted_recent={},
-        engine_metrics={},
-    )
-    assert _Spy().read_signal(state) == pytest.approx(0.42)
-    assert _NoSignal().read_signal(state) is None
+def test_every_signal_gets_a_range_not_just_the_one_read(tmp_path) -> None:
+    """The asymmetry the design rests on. This is how you learn your signal was the
+    wrong one for the regime."""
+    r = Report.from_log(_log(tmp_path, [BUSY, IDLE]))
+    ranges = r.signals()
+    assert ranges["kv_pressure"]["max"] == 0.95
+    assert ranges["queue_depth"]["max"] == 41.0  # never read by the policy
+    assert ranges["prefix_hit_rate"] is None
 
 
-def test_read_signal_survives_a_missing_value() -> None:
-    """An engine that does not expose KV gives None, not a crash and not a zero.
+def test_percentiles_are_values_the_signal_actually_took(tmp_path) -> None:
+    """An interpolated p95 can report a number the signal never reached, which
+    defeats the purpose of showing a range."""
+    seq = [{"vllm:kv_cache_usage_perc": v} for v in (0.1, 0.2, 0.3, 0.4)]
+    rng = Report.from_log(_log(tmp_path, seq)).signal_range("kv_pressure")
+    for key in ("min", "p50", "p95", "max"):
+        assert rng[key] in (0.1, 0.2, 0.3, 0.4)
 
-    Treating it as zero would report an empty cache, which is the most dangerous
-    possible wrong answer here: it looks like headroom.
-    """
-    state = SystemState(
-        now=0.0,
-        kv_used_fraction=None,
-        running_requests=0,
-        waiting_requests=0,
-        running_agents=0,
-        per_tenant_running={},
-        per_tenant_admitted_recent={},
-        engine_metrics={},
-    )
-    assert _Spy().read_signal(state) is None
 
+def test_the_threshold_is_stated_so_a_range_can_be_judged(tmp_path) -> None:
+    r = Report.from_log(_log(tmp_path, [IDLE] * 3, threshold=0.9))
+    assert r.threshold == 0.9
+    assert "threshold was 0.9" in r.text()
 
-def test_the_shipped_policies_all_declare_their_signal() -> None:
-    """Every built-in should be reportable. A policy with no signal produces a
-    report that cannot say whether it had the chance to act."""
-    from admitperf.core.registry import available
 
-    missing = [n for n, c in available().items() if c.signal is None and n != "no_admission"]
-    assert not missing, f"policies without a declared signal: {missing}"
+def test_an_absent_signal_is_reported_as_absent(tmp_path) -> None:
+    text = Report.from_log(_log(tmp_path, [IDLE])).text()
+    assert "never supplied by your metrics" in text
+    assert "absent, not zero" in text
 
 
-# --------------------------------------------------------------------------
-# Liveness
-# --------------------------------------------------------------------------
+# --- what it did and what it cost ----------------------------------------
 
 
-def _range(values: list[float | None], threshold: float | None = 0.90):
-    return summarise(values, name="kv_used_fraction", threshold=threshold)
+def test_refusals_are_grouped_by_reason(tmp_path) -> None:
+    r = Report.from_log(_log(tmp_path, [BUSY] * 3))
+    assert r.by_reason() == {"kv_pressure": 3}
 
 
-def test_live_when_the_signal_crosses() -> None:
-    r = _range([0.1, 0.5, 0.95])
-    assert r.verdict is Verdict.LIVE
-    assert r.crossings == 1
+def test_cost_says_so_rather_than_quoting_a_number_it_cannot_support(tmp_path) -> None:
+    text = Report.from_log(_log(tmp_path, [BUSY])).text()
+    assert "not computed: no outcomes" in text
 
 
-def test_inert_when_the_signal_stays_far_below() -> None:
-    """The half-capacity-headroom shape, which is why this module exists."""
-    r = _range([0.0, 0.0012, 0.0071])
-    assert r.verdict is Verdict.INERT
-    assert r.crossings == 0
-    assert "could not have fired" in r.explain()
+def test_goodput_counts_refusals_as_misses(tmp_path) -> None:
+    """Definition 2: the denominator is everything OFFERED. Dividing by admitted
+    instead would reward a policy for refusing more rather than refusing better."""
+    path = tmp_path / "d.jsonl"
+    with KvWall(threshold=0.9, log=path) as p:
+        p(IDLE, request_id="a")
+        p.outcome("a", ttft_ms=100.0, ok=True)
+        p(BUSY, request_id="b")  # refused, so never gets an outcome
 
+    r = Report.from_log(path)
+    assert "1 met / 2 offered" in r.text()
+    assert "0.500" in r.text()
 
-def test_marginal_is_distinguished_from_inert() -> None:
-    """0.88 against a 0.90 threshold did not fire, and it is a different kind of
-    not-firing from peaking at 0.004. Collapsing them loses the transition point."""
-    assert _range([0.5, 0.88]).verdict is Verdict.MARGINAL
-    assert _range([0.5, 0.004]).verdict is Verdict.INERT
 
+def test_sampled_enforcement_is_reported_as_two_arms(tmp_path) -> None:
+    r = Report.from_log(_log(tmp_path, [BUSY] * 40, enforce=0.5))
+    assert 0 < r.enforced < 40
+    assert "holds both arms" in r.text()
 
-def test_unknown_when_nothing_was_recorded() -> None:
-    r = _range([None, None])
-    assert r.verdict is Verdict.UNKNOWN
-    assert r.samples == 0
-    assert r.missing == 2
 
+# --- the instrument ------------------------------------------------------
 
-def test_unknown_when_there_is_no_threshold_to_judge_against() -> None:
-    """A range can be described without a threshold. It cannot be judged."""
-    r = _range([0.1, 0.9], threshold=None)
-    assert r.verdict is Verdict.UNKNOWN
-    assert "nothing to compare" in r.explain()
 
+def test_failed_scrapes_are_surfaced(tmp_path) -> None:
+    """Otherwise the missing intervals read as a quiet cluster."""
+    path = tmp_path / "t.jsonl"
+    log = Log(path)
+    log.write({"at": 1.0, "scrape_error": "connection refused"})
+    log.close()
+    assert "1 scrape(s) failed" in Report.from_log(path).text()
 
-def test_missing_values_are_counted_not_dropped() -> None:
-    """A run where half the decisions had no signal is broken, and the count is
-    the only way anyone notices."""
-    r = _range([0.1, None, 0.2, None])
-    assert r.samples == 2
-    assert r.missing == 2
 
+def test_a_policy_fault_is_surfaced(tmp_path) -> None:
+    """A failed-open decision is the fallback, not the policy's judgement, and a run
+    full of them must not read as healthy."""
 
-def test_headroom_says_how_far_short() -> None:
-    r = _range([0.45])
-    assert r.headroom == pytest.approx(0.5)
-    assert "50% short" in r.explain()
+    class Broken(Policy):
+        name = "broken"
 
+        def decide(self, metrics):
+            raise ValueError("boom")
 
-def test_percentiles_are_values_the_signal_actually_took() -> None:
-    """Nearest-rank, not interpolated. An interpolated p95 can report a number the
-    signal never reached, which defeats the purpose of reporting the range."""
-    r = _range([0.1, 0.2, 0.3, 0.4])
-    for q in (r.min, r.p50, r.p95, r.p99, r.max):
-        assert q in (0.1, 0.2, 0.3, 0.4)
+    path = tmp_path / "d.jsonl"
+    with Broken(log=path) as p:
+        p(BUSY, request_id="r1")
+    assert "failed open" in Report.from_log(path).text()
 
 
-def test_empty_range_is_nan_rather_than_zero() -> None:
-    r = _range([])
-    assert math.isnan(r.min) and math.isnan(r.max)
-
-
-# --------------------------------------------------------------------------
-# The sparkline must not make an inert run look busy
-# --------------------------------------------------------------------------
-
-
-def test_sparkline_scales_to_the_threshold() -> None:
-    """Normalising to the series' own maximum would stretch a flat run to fill
-    the row. The whole point is that it should look flat."""
-    flat = sparkline([0.001, 0.002, 0.003], threshold=0.90)
-    assert set(flat) <= {" ", "▁"}, flat
-
-
-def test_sparkline_fills_when_the_signal_reaches_the_threshold() -> None:
-    assert "█" in sparkline([0.1, 0.5, 0.9], threshold=0.90)
-
-
-def test_sparkline_without_a_threshold_falls_back_to_its_own_max() -> None:
-    assert "█" in sparkline([0.001, 0.002, 0.003], threshold=None)
-
-
-def test_sparkline_says_so_when_there_is_nothing_to_draw() -> None:
-    assert sparkline([None, None]) == "(no signal recorded)"
-
-
-def test_sparkline_preserves_order_so_it_shows_the_run_not_the_distribution() -> None:
-    """A sorted sparkline is a picture of the histogram, which always slopes up."""
-    down = sparkline([0.9, 0.6, 0.3, 0.1], threshold=0.90)
-    assert down[0] > down[-1]
-
-
-# --------------------------------------------------------------------------
-# The seven items, and the refusal to flatter
-# --------------------------------------------------------------------------
-
-
-def _facts(**kw):
-    return facts_from(get_policy("kv_threshold", threshold=0.90), kw.pop("decisions", []), **kw)
-
-
-def test_an_inert_signal_fails_item_three() -> None:
-    facts = facts_from(
-        get_policy("kv_threshold", threshold=0.90),
-        [{"kv_used_fraction": 0.004, "kind": "admit"}] * 10,
-    )
-    item = next(i for i in evaluate(facts) if i.number == 3)
-    assert item.status is ItemStatus.FAIL
-
-
-def test_a_live_signal_passes_item_three() -> None:
-    facts = facts_from(
-        get_policy("kv_threshold", threshold=0.90),
-        [{"kv_used_fraction": 0.95, "kind": "reject"}],
-    )
-    item = next(i for i in evaluate(facts) if i.number == 3)
-    assert item.status is ItemStatus.OK
-
-
-def test_a_single_run_fails_the_repeats_item() -> None:
-    """One run has no error bar, so a gap against another run may be noise."""
-    item = next(i for i in evaluate(_facts(repeats=1)) if i.number == 4)
-    assert item.status is ItemStatus.FAIL
-
-
-def test_unevidenced_items_are_not_reported_as_passing() -> None:
-    """The failure mode this guards against is a flattering report: a run that
-    recorded nothing should not produce a page of ticks."""
-    items = evaluate(_facts())
-    assert all(i.status is not ItemStatus.OK for i in items), [
-        (i.number, i.status) for i in items if i.status is ItemStatus.OK
-    ]
-
-
-def test_unevidenced_is_distinct_from_failed() -> None:
-    """Conflating them either slanders the run or flatters it."""
-    items = {i.number: i.status for i in evaluate(_facts(repeats=1))}
-    assert items[1] is ItemStatus.UNKNOWN  # no load recorded
-    assert items[4] is ItemStatus.FAIL  # one run, actively insufficient
-
-
-def test_capacity_relative_load_needs_both_numbers() -> None:
-    assert next(i for i in evaluate(_facts(offered_rps=15.0)) if i.number == 1).status is (
-        ItemStatus.UNKNOWN
-    )
-    ok = _facts(offered_rps=15.0, capacity_rps=30.0)
-    item = next(i for i in evaluate(ok) if i.number == 1)
-    assert item.status is ItemStatus.OK
-    assert "50%" in item.detail
-
-
-def test_configuration_disclosure_names_what_is_missing() -> None:
-    item = next(i for i in evaluate(_facts(config_sha="abc123")) if i.number == 7)
-    assert item.status is ItemStatus.UNKNOWN
-    assert "commit" in item.detail
-
-
-# --------------------------------------------------------------------------
-# The policy card
-# --------------------------------------------------------------------------
-
-
-def test_card_reports_the_threshold_actually_used() -> None:
-    """A card quoting the default while the run used something else is worse than
-    no card at all."""
-    card = PolicyCard.of(get_policy("kv_threshold", threshold=0.70))
-    assert card.threshold == pytest.approx(0.70)
-
-
-def test_card_defaults_cover_the_common_case() -> None:
-    card = PolicyCard.of(_Spy())
-    assert (card.unit, card.setting, card.portability) == ("request", "online", "A")
-
-
-def test_card_flags_a_missing_signal() -> None:
-    notes = PolicyCard.of(_NoSignal()).anomalies()
-    assert any("no signal declared" in n for n in notes)
-
-
-def test_card_flags_a_signal_absent_from_requires() -> None:
-    """Exactly the drift the single declaration exists to prevent, caught for any
-    policy that opts out of it."""
-
-    class Drifted(AdmissionPolicy):
-        name = "drifted"
-        signal = "kv_used_fraction"
-        requires = frozenset({"waiting_requests"})
-
-        def decide(self, req: Request, state: SystemState) -> Decision:
-            return Decision.admit()
-
-    notes = PolicyCard.of(Drifted()).anomalies()
-    assert any("not in requires" in n for n in notes)
-
-
-def test_card_flags_a_value_outside_the_taxonomy() -> None:
-    class Odd(AdmissionPolicy):
-        name = "odd"
-        signal = "kv_used_fraction"
-        objective = "vibes"
-
-        def decide(self, req: Request, state: SystemState) -> Decision:
-            return Decision.admit()
-
-    assert any("outside the taxonomy" in n for n in PolicyCard.of(Odd()).anomalies())
-
-
-# --------------------------------------------------------------------------
-# One call
-# --------------------------------------------------------------------------
-
-
-def test_report_for_is_one_call() -> None:
-    page = report_for(
-        get_policy("kv_threshold", threshold=0.90),
-        [{"kv_used_fraction": 0.004, "kind": "admit"}] * 5,
-        run_id="r1",
-    )
-    assert "AdmitPerf Report" in page
-    assert "SIGNAL LIVENESS: INERT" in page
-
-
-def test_the_verdict_comes_before_any_outcome_number() -> None:
-    """A reader who stops after the first few lines should already know whether
-    the run proves anything."""
-    page = report_for(
-        get_policy("kv_threshold"),
-        [{"kv_used_fraction": 0.004, "kind": "admit"}],
-        run_id="r1",
-    )
-    assert page.index("SIGNAL LIVENESS") < page.index("SEVEN REPORTING ITEMS")
-
-
-def test_commit_reaches_item_seven_without_being_passed_twice() -> None:
-    page = report_for(
-        get_policy("kv_threshold"),
-        [{"kv_used_fraction": 0.95, "kind": "reject"}],
-        run_id="r1",
-        commit="deadbeef1234",
-        config_sha="cfg000111222",
-    )
-    assert "7 Configuration disclosure     ok" in page
-
-
-def test_decision_records_work_as_well_as_dicts() -> None:
-    """A caller is never blocked on adopting our type."""
-    from admitperf.core.ports import DecisionRecord
-
-    recs = [
-        DecisionRecord(
-            request_id=str(i),
-            tenant_id="t",
-            decided_at=0.0,
-            kind="admit",
-            reason=None,
-            http_status=200,
-            state_age_s=0.0,
-            kv_used_fraction=0.5,
-            waiting_requests=0,
-            running_requests=1,
-        )
-        for i in range(3)
-    ]
-    facts = facts_from(get_policy("kv_threshold"), recs)
-    assert facts.signal.samples == 3
-    assert facts.decisions == 3
-
-
-def test_a_gateway_can_log_one_generic_column() -> None:
-    """`signal_value` is the fallback, so a gateway writes one column whatever
-    policy happens to be loaded."""
-    facts = facts_from(get_policy("kv_threshold"), [{"signal_value": 0.95, "kind": "reject"}])
-    assert facts.signal.max == pytest.approx(0.95)
-
-
-def test_a_run_that_refused_nothing_says_so() -> None:
-    page = report_for(
-        get_policy("kv_threshold"),
-        [{"kv_used_fraction": 0.1, "kind": "admit"}] * 4,
-        run_id="r1",
-    )
-    assert "no admission behaviour was exercised" in page
-
-
-def test_markdown_carries_the_same_verdict() -> None:
-    md = report_for(
-        get_policy("kv_threshold"),
-        [{"kv_used_fraction": 0.004, "kind": "admit"}],
-        run_id="r1",
-        markdown=True,
-    )
-    assert md.startswith("# AdmitPerf Report")
-    assert "## Signal liveness: INERT" in md
+def test_the_finding_comes_before_any_other_number(tmp_path) -> None:
+    """A reader who stops after one line should still know whether the log proves
+    anything."""
+    text = Report.from_log(_log(tmp_path, [BUSY])).text()
+    assert text.index("THE FINDING") < text.index("WHICH SIGNALS MOVED")
+    assert text.index("WHICH SIGNALS MOVED") < text.index("WHAT IT COST")
