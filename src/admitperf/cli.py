@@ -169,7 +169,7 @@ def compare(baseline: str | None, policy: str | None, experiment: str | None, ch
                 f"experiment {experiment!r} has no baseline, so there is nothing to "
                 "compare against. Run a policy with `baseline = True` — NoAdmission is one."
             )
-        if not exp.treatments:
+        if not exp.candidates:
             raise SystemExit(f"experiment {experiment!r} has only a baseline")
         if exp.notes:
             click.echo(f"{experiment} — {exp.notes}\n")

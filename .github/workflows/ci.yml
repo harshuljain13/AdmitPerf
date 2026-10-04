@@ -53,10 +53,16 @@ jobs:
       - name: Test
         run: pytest -q
 
-      # The README quotes numbers this produces. Running it here is what stops those
+      # The README quotes numbers this produces, so running it is what stops those
       # numbers going stale silently — and it needs no GPU, which is the point of it.
-      - name: Run the working example
-        run: python examples/compare_two_policies.py > /dev/null
+      # Through the CLI rather than a path: `examples/compare_two_policies.py` became
+      # `admitperf demo` when it moved into the package, and a step pointing at a file
+      # that no longer exists is a step that fails for the wrong reason.
+      - name: Run the demo
+        run: |
+          admitperf demo --repeats 2 > /dev/null
+          admitperf experiments
+          admitperf compare --experiment demo --check > /dev/null
 
   package:
     name: Build the wheel and test what ships
