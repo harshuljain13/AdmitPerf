@@ -6,28 +6,103 @@
 
 *Standardized admission control for LLM inference.*
 
-**Bring your own infra.** Your gateway already has raw metrics. AdmitPerf turns them
-into signals, policies decide on signals, and every decision is recorded in a form a
-report can compare across deployments.
+**Bring your own infra.** Your gateway already has raw metrics. AdmitPerf turns
+them into signals, policies decide on signals, and every decision is recorded in
+a form a report can compare across deployments.
 
-It does not provision, serve, scrape, or generate load. A real gateway does auth,
-rate limiting, routing and retries — admission is one concern inside it, and a
-library that tries to *be* the gateway competes with the host's architecture.
+It does not provision, serve, scrape, or generate load.
 
-## Status
+`admitperf.core` — the part that runs in your request path — imports nothing but
+the standard library, opens no socket and spawns no subprocess. The CLI needs
+`click`; core does not, and a test checks that by importing it with `click` blocked.
 
-**Being rebuilt, in the open.** This commit removes the benchmark harness the package
-grew around — engine adapters, a provisioner, two run paths — so that the contract
-replacing it is not built next to them. The contract and the CLI land in the PRs
-stacked on this one.
+## Three things
 
-**Measured results: none.** Earlier figures were removed rather than carried forward,
-because they could not be reproduced.
+| | |
+|---|---|
+| **Metrics** | whatever you scrape. Raw names, hundreds of keys, any stack. Yours. |
+| **Signal** | a named quantity, and how to read it from your metrics. Ours, so `kv_pressure = 0.93` means the same thing in two deployments. |
+| **Policy** | decides on signals. Four ship with AdmitPerf; yours is an equal citizen. |
 
-What exists today: `infra/`, one worked example of a host — cluster configs, a
-renderer with real refusals (fp8 on an sm80 card, weights leaving no room for KV,
-tensor parallelism split across hosts), and the bring-up scripts. It is deliberately
-not part of the package.
+## Use it
+
+```python
+from admitperf import Policy
+from admitperf.core.signals import KV_PRESSURE, QUEUE_DEPTH
+
+
+class KvWall(Policy):
+    name = "kv_wall"
+
+    def decide(self, metrics):
+        if KV_PRESSURE.read(metrics) >= self.threshold:
+            return self.reject("kv_pressure")
+        if QUEUE_DEPTH.read(metrics) > self.max_waiting:
+            return self.defer("queue_depth", retry_after_ms=200)
+        return self.admit()
+```
+
+In your gateway:
+
+```python
+policy = KvWall(threshold=0.90, max_waiting=32, log="decisions.jsonl")
+
+d = policy(raw_metrics, request_id=rid)  # whatever you scraped
+if not d.admitted:
+    return Response(d.status, retry_after=d.retry_after_ms)
+```
+
+`d.status` is derived from the reason — 503 for capacity, 429 for client-attributable
+causes — so your refusals are comparable with anyone else's without you choosing a
+code.
+
+## Your metrics, whatever they are called
+
+A signal tries its sources in order. Add yours and it goes first:
+
+```python
+from admitperf.core.signals import KV_PRESSURE
+
+KV_PRESSURE.add_source("acme.cache.used_frac")  # your name
+KV_PRESSURE.add_source(lambda m: m["blocks_used"] / m["blocks_total"])  # computed
+```
+
+Out of the box it already reads vLLM (`kv_cache_usage_perc`, and the older
+`gpu_cache_usage_perc`, so a version difference is a non-event) and DCGM — including
+the 0–100 to fraction conversion, because every host getting that wrong differently
+is how a shared metric name stops meaning anything.
+
+## Two rules it will not break
+
+**Absence is never zero.** A signal nothing supplies reads `None`. A KV pressure of
+`0.0` claims the cache is empty, which looks like headroom — so the policy would
+admit everything while appearing to work.
+
+**A value outside its range is skipped, not clamped.** Map a 0–100 metric to a
+fraction and you get `None`, not a cluster that appears permanently saturated.
+
+## What gets recorded
+
+One JSON line per decision, holding **every** signal and the raw metrics — not just
+the one your policy read. That is what lets a report say *"your signal never moved,
+but queue depth hit 61"*, and what makes replaying a different policy over your own
+production trace possible at all.
+
+```python
+policy.outcome(rid, ttft_ms=418, ok=True)  # optional; without it, no goodput
+```
+
+## Shadow mode, and a counterfactual
+
+Call it and ignore the verdict: recording is unconditional and enforcement is yours,
+so that is a complete shadow deployment with no flag.
+
+```python
+policy = KvWall(threshold=0.90, enforce=0.5)  # half the traffic governed
+```
+
+Both arms in one run under identical conditions, split deterministically by request
+id so a retry is treated the same way twice. In production it caps the blast radius.
 
 ## Why
 
@@ -40,17 +115,31 @@ The arithmetic matters as much as the literature. On one A100-40GB serving
 Qwen2.5-7B, the KV pool holds roughly 384k tokens. At `max_num_seqs=64` with a
 2,168-token request, resident tokens cap near 139k — so `kv_used_fraction` cannot
 exceed about **0.35**, and a policy thresholded at 0.90 is unreachable at any arrival
-rate. A run like that reports numbers indistinguishable from no policy at all, and
-nothing in the literature would tell you.
+rate. A run like that reports numbers indistinguishable from no policy at all.
 
 That is the question AdmitPerf answers first: **could the policy have fired at all?**
+
+## Status
+
+**No measured results yet.** Earlier figures were removed rather than carried
+forward, because they could not be reproduced. The CLI — `watch`, `report`,
+`dashboard` — lands in the next PR, and with it the first real-fleet run.
 
 ## Layout
 
 ```
-src/admitperf/        the package
+src/admitperf/
+  core/               runs in YOUR request path. Stdlib only, no sockets. One class per file.
+    signal.py         Signal          signals.py    the signals we ship
+    policy.py         Policy          decision.py   Decision
+    verdict.py        Verdict         reasons.py    reason -> status code
+    log.py            Log
+  policies/           four baked-in policies, one per file
 infra/                one worked example of a host. NOT part of the package.
-tests/                boundaries enforced, not intended
 ```
+
+`admitperf.core` imports nothing but the standard library, opens no socket, and
+spawns no subprocess — `tests/test_layering.py` enforces each, because that is what
+makes it safe to install in a gateway.
 
 `make test` · `make lint`

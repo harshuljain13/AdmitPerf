@@ -17,6 +17,8 @@ someone else's gateway, so it must not reach for their infrastructure or ours.
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -97,3 +99,85 @@ def test_the_harness_is_gone() -> None:
     ]
     present = [p for p in gone if (SRC / p).exists()]
     assert not present, f"the harness is back: {present}"
+
+
+# --------------------------------------------------------------------------
+# core/ runs in someone else's request path
+# --------------------------------------------------------------------------
+
+
+def test_core_reaches_no_network_and_spawns_nothing() -> None:
+    """Anything in `core` that opened a socket would be fetching metrics, which is
+    the host's job, and would put a network round trip on an admission decision.
+
+    The rule is scoped to core and policies on purpose, so a CLI command can scrape
+    on an operator's behalf while the library never does.
+    """
+    forbidden = {"httpx", "requests", "urllib", "urllib.request", "socket", "subprocess"}
+    offenders = [
+        f"{py.relative_to(REPO)} imports {mod}"
+        for py in sorted((SRC / "core").rglob("*.py")) + sorted((SRC / "policies").rglob("*.py"))
+        for mod in _imports(py)
+        if mod in forbidden
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
+def test_core_imports_no_third_party_package() -> None:
+    """Checked by name as well as by install, because an empty dependency list only
+    holds while nobody reaches for something another extra happened to pull in."""
+    stdlib = set(sys.stdlib_module_names)
+    offenders = []
+    for py in sorted((SRC / "core").rglob("*.py")):
+        for mod in _imports(py):
+            if mod.split(".")[0] in stdlib or mod.startswith(("admitperf", "__future__")):
+                continue
+            offenders.append(f"{py.relative_to(REPO)} imports {mod}")
+    assert not offenders, "\n".join(offenders)
+
+
+def test_core_is_importable_without_the_cli_dependency() -> None:
+    """click is a dependency of the package and deliberately not of core. A
+    dependency we add there is one the host did not agree to, in the one place they
+    cannot afford it."""
+    code = (
+        "import sys\n"
+        "sys.modules['click'] = None\n"
+        "from admitperf.core import Policy, Decision, Signal, Verdict, Log\n"
+        "from admitperf.core.signals import ALL\n"
+        "from admitperf.policies import KvThreshold\n"
+        "assert ALL\n"
+        "print('ok')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False, cwd=REPO
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "ok" in proc.stdout
+
+
+def test_engine_vocabulary_lives_only_in_signals() -> None:
+    """A module that special-cases vLLM is a module that will be wrong for SGLang,
+    Modal, and whatever comes next. Vendor metric names belong in the one file that
+    lists them as guesses a host can override."""
+    allowed = {SRC / "core" / "signals.py"}
+    offenders = [
+        f"{py.relative_to(REPO)} mentions {needle}"
+        for py in sorted(SRC.rglob("*.py"))
+        if py not in allowed
+        for needle in ("vllm:", "DCGM_FI_", "sglang:")
+        if needle in py.read_text()
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
+def test_one_class_per_file() -> None:
+    """A file with one class is a file whose name tells you what is in it."""
+    offenders = []
+    for py in sorted(SRC.rglob("*.py")):
+        classes = [
+            n.name for n in ast.walk(ast.parse(py.read_text())) if isinstance(n, ast.ClassDef)
+        ]
+        if len(classes) > 1:
+            offenders.append(f"{py.relative_to(REPO)} defines {classes}")
+    assert not offenders, "\n".join(offenders)

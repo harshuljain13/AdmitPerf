@@ -75,4 +75,8 @@ jobs:
         run: |
           python -m venv /tmp/fresh
           /tmp/fresh/bin/pip install dist/*.whl
-          /tmp/fresh/bin/python -c "import admitperf; print('import ok', admitperf.__version__)"
+          /tmp/fresh/bin/python -c "from admitperf import Policy, Decision, Signal, Verdict, Log; print('contract ok')"
+          # The decision path runs in someone else's gateway, so the wheel must be
+          # usable without the extras. A missing module in the manifest only shows up
+          # here: the editable install above sees the working tree, not the package.
+          /tmp/fresh/bin/python -c "from admitperf.policies import KvThreshold, QueueDepth, DualGate, NoAdmission; print('policies ok')"
