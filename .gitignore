@@ -106,3 +106,6 @@ experiments/*/results/**/trace.jsonl
 
 # Spec-dev drafts stay local
 .spec-dev/
+
+# Output of examples/
+example-runs/

@@ -3,8 +3,8 @@ name: Release
 # Releases are cut from a TAG, never from a branch, so what is published is a fixed, named
 # commit that can be checked out again years later.
 #
-#   # bump the version in pyproject.toml and admitperf/__init__.py
-#   git commit -am "release: 0.1.0" && git tag v0.1.0 && git push origin v0.1.0
+#   # bump the version in pyproject.toml — __version__ reads it from metadata
+#   git commit -am "release: 0.0.1" && git tag v0.0.1 && git push origin v0.0.1
 #
 # A tag runs TestPyPI first, then installs the package back OUT of TestPyPI and smoke-tests
 # it before touching PyPI. That round trip is the only thing that catches a missing
@@ -79,11 +79,34 @@ jobs:
               admitperf && break
             echo "index not caught up yet, retry $i"; sleep 20
           done
+      # Exercise the contract, not just the import. A package that installs and then
+      # cannot make a decision is a package that passed the wrong test.
       - name: Smoke-test what was published
         run: |
-          python -c "from admitperf import AdmissionPolicy, Decision, Request, SystemState"
-          python -c "from admitperf.core.registry import available; assert available(), 'no policies registered'"
+          python -c "from admitperf import Policy, Decision, Signal, Verdict, Log"
+          python -c "from admitperf.policies import KvThreshold, QueueDepth, DualGate, NoAdmission"
+          python - <<'PY'
+          from admitperf import Policy
+          from admitperf.core.signals import KV_PRESSURE
+
+          class Wall(Policy):
+              name = "wall"
+              def decide(self, metrics):
+                  if KV_PRESSURE.read(metrics) >= 0.9:
+                      return self.reject("kv_pressure")
+                  return self.admit()
+
+          busy = Wall()({"vllm:kv_cache_usage_perc": 0.95}, request_id="r1")
+          assert not busy.admitted and busy.status == 503, busy
+          idle = Wall()({"vllm:kv_cache_usage_perc": 0.10}, request_id="r2")
+          assert idle.admitted and idle.status == 200, idle
+          # Absence is never zero: nothing supplied, so the signal is unreadable and
+          # the policy must not conclude the cache is empty.
+          assert KV_PRESSURE.read({}) is None
+          print("contract ok")
+          PY
           admitperf --help > /dev/null
+          admitperf signals > /dev/null
 
   pypi:
     name: Publish to PyPI

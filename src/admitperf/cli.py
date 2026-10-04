@@ -2,6 +2,7 @@
 
     admitperf watch http://host:8000/metrics --for 1h -o trace.jsonl
     admitperf report trace.jsonl
+    admitperf compare baseline.jsonl with-policy.jsonl
     admitperf dashboard
 
 `admitperf.core` never fetches anything, because a network round trip has no place
@@ -81,6 +82,33 @@ def report(log: str, check: bool) -> None:
     click.echo(r.text())
     if check and r.verdict() != "LIVE":
         raise SystemExit(f"verdict is {r.verdict()}: this log cannot support a claim")
+
+
+@main.command()
+@click.argument("baseline", type=click.Path(exists=True, dir_okay=False))
+@click.argument("policy", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--check",
+    is_flag=True,
+    help="exit non-zero unless the comparison is trustworthy: the policy fired, both "
+    "runs faced the same load, and outcomes were recorded",
+)
+def compare(baseline: str, policy: str, check: bool) -> None:
+    """What did the policy buy? Two logs, side by side.
+
+    \b
+      admitperf compare baseline.jsonl with-policy.jsonl
+
+    The question the package exists to answer. Three checks come before any number,
+    because a comparison between a policy that never fired and a baseline is two
+    measurements of the same configuration.
+    """
+    from admitperf.comparison import Comparison
+
+    c = Comparison.from_logs(baseline, policy)
+    click.echo(c.text())
+    if check and not (c.fired() and c.comparable_load() and c.measurable()):
+        raise SystemExit("this pair cannot support a claim — see CAN YOU TRUST THIS above")
 
 
 @main.command()

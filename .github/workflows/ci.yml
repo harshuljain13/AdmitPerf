@@ -53,6 +53,11 @@ jobs:
       - name: Test
         run: pytest -q
 
+      # The README quotes numbers this produces. Running it here is what stops those
+      # numbers going stale silently — and it needs no GPU, which is the point of it.
+      - name: Run the working example
+        run: python examples/compare_two_policies.py > /dev/null
+
   package:
     name: Build the wheel and test what ships
     runs-on: ubuntu-latest
