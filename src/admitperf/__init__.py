@@ -1,31 +1,12 @@
-"""AdmitPerf — a benchmark-driven admission control layer for LLM inference.
+"""AdmitPerf — standardized admission control for LLM inference.
 
-The public surface is the frozen adapter API. Writing a policy needs only:
-
-    from admitperf import AdmissionPolicy, Decision, Request, SystemState
+The contract, the policies and the report land in the following PRs. This commit
+removes the benchmark harness this package grew around, so that what replaces it
+is not built next to two engine adapters, two run paths and a provisioner.
 """
 
 from __future__ import annotations
 
-from admitperf.core import (
-    AdmissionPolicy,
-    Decision,
-    DecisionKind,
-    Request,
-    SystemState,
-    available,
-    get_policy,
-)
+__version__ = "0.1.0"
 
-__version__ = "0.0.1"
-
-__all__ = [
-    "AdmissionPolicy",
-    "Decision",
-    "DecisionKind",
-    "Request",
-    "SystemState",
-    "__version__",
-    "available",
-    "get_policy",
-]
+__all__ = ["__version__"]
