@@ -4,7 +4,8 @@ Drives identical traffic through a simulated engine three times — admitting
 everything, then with a KV-pressure policy, then with a queue-depth policy — and
 compares the reports.
 
-    python examples/compare_two_policies.py
+    python examples/compare_two_policies.py                 # one run per arm
+    python examples/compare_two_policies.py --repeats 5     # with an error bar
 
 The result is the reason the comparison exists. The KV policy cuts p95 TTFT by more
 than 10x and makes goodput WORSE, because a threshold chosen without reference to the
@@ -25,6 +26,7 @@ with short requests comes back inert: there is nothing to shed.
 
 from __future__ import annotations
 
+import argparse
 import random
 from pathlib import Path
 
@@ -48,8 +50,26 @@ TICK_MS = 50.0
 # 2.5x overload, which is the only regime where admission control can do anything:
 # below capacity there is nothing to shed and every policy looks identical.
 REQUESTS = 400
-ARRIVALS_PER_TICK = 10
+ARRIVALS_PER_TICK = 10  # the MEAN; arrivals are bursty, see below
 SLO_TTFT_MS = 1_500
+
+#: Arrivals are Poisson and service times are jittered, so repeats of the same
+#: configuration differ. Without that, every repeat is byte-identical, the spread is
+#: zero, and the error bar the comparison prints would be theatre — it would report
+#: two arms as cleanly separated on the strength of one deterministic run each.
+SERVICE_JITTER = 0.35
+
+
+def _poisson(mean: float) -> int:
+    """Knuth's method. Here rather than numpy because this package has no runtime
+    dependencies and an example that needs one is not an example."""
+    import math
+
+    limit, k, product = math.exp(-mean), 0, random.random()
+    while product > limit:
+        k += 1
+        product *= random.random()
+    return k
 
 
 class FakeEngine:
@@ -73,14 +93,21 @@ class FakeEngine:
         self.slots = [t - 1 for t in self.slots if t > 1]
         while self.queue and len(self.slots) < MAX_CONCURRENT:
             rid = self.queue.pop(0)
-            self.slots.append(SERVICE_TICKS)
+            self.slots.append(self._service())
             self.started[rid] = self.now
+
+    def _service(self) -> int:
+        """How long this request holds a slot. Real generations vary in length, and a
+        fixed cost makes the queue drain like a metronome."""
+        low = int(SERVICE_TICKS * (1 - SERVICE_JITTER))
+        high = int(SERVICE_TICKS * (1 + SERVICE_JITTER))
+        return random.randint(low, high)
 
     def accept(self, request_id: str) -> None:
         """Take an admitted request. It waits if every slot is busy."""
         self.arrived[request_id] = self.now
         if len(self.slots) < MAX_CONCURRENT:
-            self.slots.append(SERVICE_TICKS)
+            self.slots.append(self._service())
             self.started[request_id] = self.now
         else:
             self.queue.append(request_id)
@@ -112,14 +139,16 @@ class FakeEngine:
         }
 
 
-def run(policy, log: Path) -> None:
-    """Drive identical traffic through one policy.
+def run(policy, seed: int = 0) -> None:
+    """Drive traffic through one policy.
 
-    Identical because the seed is fixed. Without that, a difference between the two
-    runs could be a difference between traffic patterns, and the comparison would be
-    measuring the generator.
+    The seed is shared between arms within a repeat, so the two arms see the same
+    traffic — otherwise a difference between them could be a difference between
+    traffic patterns and the comparison would be measuring the generator. It CHANGES
+    between repeats, because repeats of an identical trace have no spread to report
+    and would make the error bar look like zero.
     """
-    random.seed(0)
+    random.seed(seed)
     engine = FakeEngine()
     admitted: list[str] = []
     sent = 0
@@ -127,7 +156,9 @@ def run(policy, log: Path) -> None:
     with policy:
         while sent < REQUESTS:
             engine.tick()
-            for _ in range(ARRIVALS_PER_TICK):
+            # Poisson arrivals, not a fixed rate. Bursts are the whole reason
+            # admission control exists; a smooth stream never tests it.
+            for _ in range(_poisson(ARRIVALS_PER_TICK)):
                 if sent >= REQUESTS:
                     break
                 rid = f"r{sent}"
@@ -159,40 +190,51 @@ def run(policy, log: Path) -> None:
 MAX_WAITING = int((SLO_TTFT_MS - 180) / TICK_MS * (MAX_CONCURRENT / SERVICE_TICKS))
 
 
-def main() -> None:
+def main(repeats: int = 1) -> None:
     OUT.mkdir(exist_ok=True)
     arms = {
-        "no admission (baseline)": (OUT / "baseline.jsonl", lambda log: NoAdmission(log=log)),
+        "no admission (baseline)": (OUT / "baseline", lambda log: NoAdmission(log=log)),
         "kv_threshold 0.90": (
-            OUT / "kv_threshold.jsonl",
+            OUT / "kv_threshold",
             lambda log: KvThreshold(threshold=0.90, log=log),
         ),
         f"queue_depth {MAX_WAITING}": (
-            OUT / "queue_depth.jsonl",
+            OUT / "queue_depth",
             lambda log: QueueDepth(max_waiting=MAX_WAITING, log=log),
         ),
     }
 
-    for _, (path, build) in arms.items():
-        path.unlink(missing_ok=True)
-        run(build(path), path)
+    for repeat in range(1, repeats + 1):
+        for _, (arm_dir, build) in arms.items():
+            arm_dir.mkdir(parents=True, exist_ok=True)
+            log = arm_dir / f"r{repeat}.jsonl"
+            log.unlink(missing_ok=True)
+            run(build(log), seed=repeat)
 
-    for name, (path, _) in arms.items():
-        print(f"\n{'=' * 68}\n  {name}\n{'=' * 68}")
-        print(Report.from_log(path).text())
+    baseline = arms["no admission (baseline)"][0]
+    for name, (arm_dir, _) in arms.items():
+        print(f"\n{'=' * 68}\n  {name}  (repeat 1 of {repeats})\n{'=' * 68}")
+        print(Report.from_log(arm_dir / "r1.jsonl").text())
 
-    baseline = OUT / "baseline.jsonl"
-    for name, (path, _) in arms.items():
-        if path == baseline:
+    for name, (arm_dir, _) in arms.items():
+        if arm_dir == baseline:
             continue
         print(f"\n\n### baseline  vs  {name}")
-        print(Comparison.from_logs(baseline, path).text())
+        print(Comparison.from_logs(baseline, arm_dir).text())
 
-    print(f"\nlogs in {OUT}/  —  try:")
-    for _, (path, _) in arms.items():
-        if path != baseline:
-            print(f"  admitperf compare {baseline} {path}")
+    print(f"\nlogs in {OUT}/  —  a directory per arm, one file per repeat. Try:")
+    for _, (arm_dir, _) in arms.items():
+        if arm_dir != baseline:
+            print(f"  admitperf compare {baseline} {arm_dir}")
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="runs per arm. One has no error bar, and a gap smaller than the spread "
+        "between repeats is not a result.",
+    )
+    main(ap.parse_args().repeats)

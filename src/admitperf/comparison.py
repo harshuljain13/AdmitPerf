@@ -10,6 +10,22 @@ from admitperf.report import THIN, WIDTH, Report
 RULE = "=" * WIDTH
 
 
+def _reports(target: str | Path) -> list[Report]:
+    """One log, or every log in a directory.
+
+    A directory is how an arm gets repeats. Sorted by name so `r1, r2, r10` is at
+    least stable between invocations, even though it is not numeric order — the
+    comparison does not care about sequence, only that the same set is read twice.
+    """
+    path = Path(target)
+    if path.is_dir():
+        logs = sorted(path.glob("*.jsonl"))
+        if not logs:
+            raise ValueError(f"no .jsonl logs in {path}")
+        return [Report.from_log(p) for p in logs]
+    return [Report.from_log(path)]
+
+
 class Comparison:
     """A baseline run against a policy run.
 
@@ -31,29 +47,81 @@ class Comparison:
     traffic, serve the rest perfectly, and the number reads 1.00.
     """
 
-    def __init__(self, baseline: Report, policy: Report) -> None:
-        self.baseline = baseline
-        self.policy = policy
+    def __init__(
+        self,
+        baseline: Report | list[Report],
+        policy: Report | list[Report],
+    ) -> None:
+        self.baselines = [baseline] if isinstance(baseline, Report) else list(baseline)
+        self.policies = [policy] if isinstance(policy, Report) else list(policy)
+        if not self.baselines or not self.policies:
+            raise ValueError("a comparison needs at least one run on each side")
+        #: The representative run of each arm, for the parts that do not vary between
+        #: repeats: which policy, its parameters, whether it fired.
+        self.baseline = self.baselines[0]
+        self.policy = self.policies[0]
 
     @classmethod
     def from_logs(cls, baseline: str | Path, policy: str | Path) -> Comparison:
-        return cls(Report.from_log(baseline), Report.from_log(policy))
+        """Each side is a log file, or a DIRECTORY of repeats of that arm.
+
+        A directory is how you get an error bar. One run of each arm has none, and a
+        gap smaller than the spread between repeats is not a result — so the tool has
+        to be able to read more than one.
+        """
+        return cls(_reports(baseline), _reports(policy))
+
+    # -- repeats -----------------------------------------------------------
+
+    @property
+    def repeats(self) -> int:
+        """The smaller of the two, since that is what the comparison is limited by."""
+        return min(len(self.baselines), len(self.policies))
+
+    @staticmethod
+    def _spread(values: list[float]) -> tuple[float, float, float]:
+        """Median, min, max. Median rather than mean because one pathological repeat
+        — a stalled scrape, a noisy neighbour — should not move the headline."""
+        ordered = sorted(values)
+        return ordered[len(ordered) // 2], ordered[0], ordered[-1]
+
+    def _arm(self, reports: list[Report], metric) -> tuple[float, float, float] | None:
+        values = [v for r in reports if (v := metric(r)) is not None]
+        return self._spread(values) if values else None
+
+    def separated(self) -> bool | None:
+        """Whether the two arms are further apart than their own repeats are.
+
+        None when there is only one run per arm, because then the question cannot be
+        asked — and answering it anyway is how a difference inside the noise gets
+        published as a finding.
+        """
+        if self.repeats < 2:
+            return None
+        base = self._arm(self.baselines, self._goodput)
+        pol = self._arm(self.policies, self._goodput)
+        if base is None or pol is None:
+            return None
+        # No overlap between the two arms' observed ranges.
+        return base[2] < pol[1] or pol[2] < base[1]
 
     # -- the three checks --------------------------------------------------
 
     def fired(self) -> bool:
-        return self.policy.refused > 0
+        """Every repeat must have fired. One that did not is a different experiment,
+        and averaging it in hides that."""
+        return all(r.refused > 0 for r in self.policies)
 
     def comparable_load(self) -> bool:
-        """Within 10%. Two runs offered materially different traffic are not a
-        comparison, however similar the configuration."""
-        a, b = len(self.baseline.decisions), len(self.policy.decisions)
-        if not a or not b:
+        """Within 10%, across every run on both sides. Two runs offered materially
+        different traffic are not a comparison, however similar the configuration."""
+        counts = [len(r.decisions) for r in self.baselines + self.policies]
+        if not all(counts):
             return False
-        return abs(a - b) / max(a, b) <= 0.10
+        return (max(counts) - min(counts)) / max(counts) <= 0.10
 
     def measurable(self) -> bool:
-        return bool(self.baseline.outcomes and self.policy.outcomes)
+        return all(r.outcomes for r in self.baselines + self.policies)
 
     # -- the numbers -------------------------------------------------------
 
@@ -82,8 +150,8 @@ class Comparison:
         return met / offered
 
     def refused_share(self) -> float:
-        total = len(self.policy.decisions)
-        return self.policy.refused / total if total else 0.0
+        shares = [r.refused / len(r.decisions) for r in self.policies if r.decisions]
+        return self._spread(shares)[0] if shares else 0.0
 
     # -- the page ----------------------------------------------------------
 
@@ -126,50 +194,81 @@ class Comparison:
             ]
             return out
 
-        base_t, pol_t = self._ttft(self.baseline), self._ttft(self.policy)
-        base_g, pol_g = self._goodput(self.baseline), self._goodput(self.policy)
-        if base_t and pol_t and base_t["p95"]:
-            factor = base_t["p95"] / pol_t["p95"] if pol_t["p95"] else float("inf")
+        p95 = lambda r: t["p95"] if (t := self._ttft(r)) else None  # noqa: E731
+        base_t = self._arm(self.baselines, p95)
+        pol_t = self._arm(self.policies, p95)
+        base_g = self._arm(self.baselines, self._goodput)
+        pol_g = self._arm(self.policies, self._goodput)
+
+        def band(s: tuple[float, float, float], fmt: str) -> str:
+            """Median, and the observed range when there is more than one run. A bare
+            number from one run reads as more certain than it is."""
+            median, lo, hi = s
+            if self.repeats < 2 or lo == hi:
+                return fmt.format(median)
+            return f"{fmt.format(median)} ({fmt.format(lo)}-{fmt.format(hi)})"
+
+        if base_t and pol_t and base_t[0]:
+            factor = base_t[0] / pol_t[0] if pol_t[0] else float("inf")
             direction = "lower" if factor > 1 else "HIGHER"
             out.append(
                 f"  p95 TTFT of served requests is {abs(factor):.2f}x {direction}: "
-                f"{base_t['p95']:.0f}ms -> {pol_t['p95']:.0f}ms"
+                f"{band(base_t, '{:.0f}')}ms -> {band(pol_t, '{:.0f}')}ms"
             )
-        if base_g is not None and pol_g is not None:
-            verb = "up" if pol_g > base_g else "DOWN"
-            out.append(f"  goodput is {verb}: {base_g:.3f} -> {pol_g:.3f}  (of offered)")
-            if pol_g < base_g:
+        if base_g and pol_g:
+            verb = "up" if pol_g[0] > base_g[0] else "DOWN"
+            out.append(
+                f"  goodput is {verb}: {band(base_g, '{:.3f}')} -> "
+                f"{band(pol_g, '{:.3f}')}  (of offered)"
+            )
+            if pol_g[0] < base_g[0]:
                 out += [
                     "",
                     "  Goodput fell, so the policy refused requests the cluster could have",
                     "  served. Faster tails bought at that price are not a win.",
                 ]
+
+        sep = self.separated()
+        if sep is False:
+            out += [
+                "",
+                f"  BUT the two arms overlap across {self.repeats} repeats, so this gap is",
+                "  inside the run-to-run noise. It is not a result yet — more repeats, or a",
+                "  larger effect.",
+            ]
         return out
 
     def _table(self) -> list[str]:
-        base_t, pol_t = self._ttft(self.baseline), self._ttft(self.policy)
-        base_g, pol_g = self._goodput(self.baseline), self._goodput(self.policy)
+        def med(reports: list[Report], metric, fmt: str = "{:.0f}") -> str:
+            s = self._arm(reports, metric)
+            return "--" if s is None else fmt.format(s[0])
 
-        def cell(value: float | None, fmt: str = "{:.0f}") -> str:
-            return "--" if value is None else fmt.format(value)
+        p50 = lambda r: t["p50"] if (t := self._ttft(r)) else None  # noqa: E731
+        p95 = lambda r: t["p95"] if (t := self._ttft(r)) else None  # noqa: E731
 
         rows = [
             ("policy", self.baseline.policy or "-", self.policy.policy or "-"),
-            ("offered", str(len(self.baseline.decisions)), str(len(self.policy.decisions))),
-            ("refused", str(self.baseline.refused), str(self.policy.refused)),
+            ("repeats", str(len(self.baselines)), str(len(self.policies))),
             (
-                "p50 TTFT ms",
-                cell(base_t and base_t["p50"]),
-                cell(pol_t and pol_t["p50"]),
+                "offered",
+                med(self.baselines, lambda r: float(len(r.decisions))),
+                med(self.policies, lambda r: float(len(r.decisions))),
             ),
             (
-                "p95 TTFT ms",
-                cell(base_t and base_t["p95"]),
-                cell(pol_t and pol_t["p95"]),
+                "refused",
+                med(self.baselines, lambda r: float(r.refused)),
+                med(self.policies, lambda r: float(r.refused)),
             ),
-            ("goodput", cell(base_g, "{:.3f}"), cell(pol_g, "{:.3f}")),
+            ("p50 TTFT ms", med(self.baselines, p50), med(self.policies, p50)),
+            ("p95 TTFT ms", med(self.baselines, p95), med(self.policies, p95)),
+            (
+                "goodput",
+                med(self.baselines, self._goodput, "{:.3f}"),
+                med(self.policies, self._goodput, "{:.3f}"),
+            ),
         ]
-        out = [f"  {'':<16} {'baseline':>14} {'with policy':>14}", ""]
+        label_row = "median of repeats" if self.repeats > 1 else ""
+        out = [f"  {label_row:<16} {'baseline':>14} {'with policy':>14}", ""]
         out += [f"  {label:<16} {a:>14} {b:>14}" for label, a, b in rows]
 
         # Signals, because "the policy changed the cluster" is checkable rather than
@@ -178,11 +277,12 @@ class Comparison:
         if shared:
             out += ["", f"  {'signal max':<16} {'baseline':>14} {'with policy':>14}", ""]
             for name in shared:
-                a = self.baseline.signal_range(name)
-                b = self.policy.signal_range(name)
+                top = lambda r, n=name: (  # noqa: E731
+                    s["max"] if (s := r.signal_range(n)) else None
+                )
                 out.append(
-                    f"  {name:<16} {cell(a and a['max'], '{:.3g}'):>14} "
-                    f"{cell(b and b['max'], '{:.3g}'):>14}"
+                    f"  {name:<16} {med(self.baselines, top, '{:.3g}'):>14} "
+                    f"{med(self.policies, top, '{:.3g}'):>14}"
                 )
         return out
 
@@ -197,14 +297,30 @@ class Comparison:
                 "requests — a policy run against less traffic will look better than it is"
             )
         out.append(f"  {mark[self.measurable()]} outcomes recorded, so cost is measurable")
-        for name, r in (("baseline", self.baseline), ("policy", self.policy)):
-            for fault in r.fault_text():
-                out.append(f"  !! {name}:{fault.strip()}")
-        if self.fired() and self.comparable_load() and self.measurable():
+        sep = self.separated()
+        if sep is None:
+            out.append("--  only one run per arm, so there is no error bar")
+        else:
+            out.append(f"  {mark[sep]} the arms separate across {self.repeats} repeats")
+        for name, reports in (("baseline", self.baselines), ("policy", self.policies)):
+            for i, r in enumerate(reports, 1):
+                for fault in r.fault_text():
+                    tag = f"{name}" if len(reports) == 1 else f"{name} r{i}"
+                    out.append(f"  !! {tag}:{fault.strip()}")
+
+        ok = self.fired() and self.comparable_load() and self.measurable()
+        if ok and sep:
             out += [
                 "",
-                "  All three hold, so the difference above is the policy. Repeat the pair",
-                "  before quoting it: one run of each has no error bar, and a gap smaller",
-                "  than the spread between repeats is not a result.",
+                "  All four hold, so the difference above is the policy and it is larger",
+                "  than the noise between repeats. This is a result you can quote.",
+            ]
+        elif ok and sep is None:
+            out += [
+                "",
+                "  The first three hold, but one run of each has no error bar. Run the pair",
+                "  again — a gap smaller than the spread between repeats is not a result:",
+                "",
+                "      python examples/compare_two_policies.py --repeats 5",
             ]
         return out

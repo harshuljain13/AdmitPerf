@@ -124,7 +124,8 @@ That is the question AdmitPerf answers first: **could the policy have fired at a
 The whole point: two logs, one without admission control and one with.
 
 ```bash
-python examples/compare_two_policies.py          # no GPU, no cluster, 2 seconds
+python examples/compare_two_policies.py              # no GPU, no cluster, 2 seconds
+python examples/compare_two_policies.py --repeats 5  # with an error bar
 ```
 
 ```
@@ -152,9 +153,28 @@ A report showing only latency would have picked the first policy. That is the ar
 for comparing, and `goodput` divides by requests **offered** rather than admitted —
 divide by admitted and refusing 95% of traffic reads as 1.00.
 
-Three checks come before any of those numbers: the policy fired at all, both runs
-faced the same load, and outcomes were recorded. `admitperf compare --check` exits
-non-zero when any fails.
+### Running it again and again
+
+One run of each arm has no error bar, and a gap smaller than the spread between
+repeats is not a result. `--repeats` writes a directory per arm, one log per repeat,
+and `compare` reads a directory as the set:
+
+```bash
+admitperf compare example-runs/baseline example-runs/queue_depth
+```
+
+```
+  p95 TTFT of served requests is 1.78x lower: 2630 (2530-2830)ms -> 1480 (1430-1480)ms
+  goodput is up: 0.542 (0.530-0.573) -> 0.723 (0.703-0.755)  (of offered)
+
+  ok  the arms separate across 5 repeats
+```
+
+Four checks come before any of those numbers: the policy fired in **every** repeat,
+every run faced the same load, outcomes were recorded, and the two arms' observed
+ranges do not overlap. With one run per arm the last cannot be asked, and the page
+says so instead of answering it. `admitperf compare --check` exits non-zero when any
+fails.
 
 ## The CLI
 
@@ -222,8 +242,9 @@ KV-pressure policy fire at all.
 
 **On real hardware: not yet measured.** The figures above come from the simulated
 engine in `examples/`, which is honest about what it models — bounded slots, a FIFO
-queue, and KV pressure driven by resident tokens — and is checked by a test so the
-numbers in this README cannot go stale silently. Earlier figures from real runs were
+queue, KV pressure driven by resident tokens, Poisson arrivals and jittered service —
+and is checked by tests, so the numbers in this README cannot go stale silently and
+repeats cannot quietly become identical. Earlier figures from real runs were
 removed rather than carried forward, because they could not be reproduced.
 
 ## Layout

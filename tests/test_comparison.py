@@ -114,11 +114,24 @@ def test_cost_is_not_invented_when_no_outcomes_were_recorded(tmp_path) -> None:
 
 
 def test_a_real_improvement_is_reported_as_one(tmp_path) -> None:
+    """With one run per arm the three checks can pass, and the page still refuses to
+    call it quotable — that needs repeats."""
     c = _pair(tmp_path, n=40)
     text = c.text()
     assert c.fired()
     assert "x lower" in text
-    assert "All three hold" in text
+    assert "The first three hold" in text
+    assert "This is a result you can quote" not in text
+
+
+def test_separated_repeats_make_it_quotable(tmp_path) -> None:
+    base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [2000.0, 2100.0, 1950.0])
+    pol = _arm(
+        tmp_path / "pol", lambda log: KvThreshold(threshold=0.9, log=log), [100.0, 110.0, 95.0]
+    )
+    c = Comparison.from_logs(base, pol)
+    assert c.separated() is True
+    assert "This is a result you can quote" in c.text()
 
 
 def test_goodput_divides_by_offered_not_admitted(tmp_path) -> None:
@@ -188,3 +201,110 @@ def test_a_repeat_warning_is_attached_to_a_trustworthy_result(tmp_path) -> None:
     """One run of each has no error bar. Saying so is cheaper than a reviewer saying
     it for you."""
     assert "no error bar" in _pair(tmp_path, n=40).text()
+
+
+# --------------------------------------------------------------------------
+# Repeats — one run of each arm has no error bar
+# --------------------------------------------------------------------------
+
+
+def _arm(dir_path, policy_factory, ttfts):
+    """One directory, one log per repeat."""
+    dir_path.mkdir(parents=True, exist_ok=True)
+    for i, ttft in enumerate(ttfts, 1):
+        log = dir_path / f"r{i}.jsonl"
+        with policy_factory(log) as p:
+            for j in range(20):
+                rid = f"r{j}"
+                if p(BUSY if j % 2 else IDLE, request_id=rid).admitted:
+                    p.outcome(rid, ttft_ms=ttft, ok=ttft <= 1000.0)
+    return dir_path
+
+
+def test_a_directory_is_read_as_repeats_of_one_arm(tmp_path) -> None:
+    """How an arm gets an error bar. One file is one run; a directory is the set."""
+    base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [2000.0, 2100.0, 1900.0])
+    pol = _arm(
+        tmp_path / "pol", lambda log: KvThreshold(threshold=0.9, log=log), [100.0, 120.0, 90.0]
+    )
+    c = Comparison.from_logs(base, pol)
+    assert c.repeats == 3
+    assert len(c.baselines) == 3 and len(c.policies) == 3
+
+
+def test_a_single_run_refuses_to_claim_separation(tmp_path) -> None:
+    """With one run per arm the question cannot be asked, and answering it anyway is
+    how a difference inside the noise gets published."""
+    c = _pair(tmp_path, n=40)
+    assert c.separated() is None
+    text = c.text()
+    assert "no error bar" in text
+    assert "This is a result you can quote" not in text
+
+
+def test_the_spread_is_shown_when_there_is_one(tmp_path) -> None:
+    """A bare number from one run reads as more certain than it is."""
+    base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [2000.0, 2400.0])
+    pol = _arm(tmp_path / "pol", lambda log: KvThreshold(threshold=0.9, log=log), [100.0, 140.0])
+    text = Comparison.from_logs(base, pol).text()
+    assert "(2000-2400)" in text
+
+
+def test_overlapping_arms_are_called_noise_not_a_result(tmp_path) -> None:
+    """The check that matters. Two arms whose repeats overlap have not separated,
+    however large the gap between their medians looks."""
+    # Both arms hover around the same goodput; admitted counts differ run to run.
+    base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [900.0, 1100.0, 950.0])
+    pol = _arm(
+        tmp_path / "pol", lambda log: KvThreshold(threshold=0.9, log=log), [900.0, 1100.0, 950.0]
+    )
+    c = Comparison.from_logs(base, pol)
+    if c.separated() is False:
+        assert "inside the run-to-run noise" in c.text()
+        assert "This is a result you can quote" not in c.text()
+
+
+def test_every_repeat_must_have_fired(tmp_path) -> None:
+    """Averaging in a repeat where the policy never fired hides that it was a
+    different experiment."""
+    pol_dir = tmp_path / "pol"
+    pol_dir.mkdir()
+    # r1 fires, r2 sees an idle cluster and refuses nothing.
+    for name, load in (("r1", [BUSY] * 10), ("r2", [IDLE] * 10)):
+        with KvThreshold(threshold=0.9, log=pol_dir / f"{name}.jsonl") as p:
+            for j, m in enumerate(load):
+                rid = f"r{j}"
+                if p(m, request_id=rid).admitted:
+                    p.outcome(rid, ttft_ms=100.0, ok=True)
+
+    base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [2000.0])
+    c = Comparison.from_logs(base, pol_dir)
+    assert not c.fired()
+    assert "NO FINDING" in c.text()
+
+
+def test_mismatched_load_is_caught_across_every_repeat(tmp_path) -> None:
+    """Not just between the two representative runs: one short repeat anywhere makes
+    the set incomparable."""
+    base_dir, pol_dir = tmp_path / "base", tmp_path / "pol"
+    _arm(base_dir, lambda log: NoAdmission(log=log), [2000.0, 2000.0])
+    with NoAdmission(log=base_dir / "r3.jsonl") as p:  # a short third run
+        for j in range(3):
+            p(BUSY, request_id=f"r{j}")
+            p.outcome(f"r{j}", ttft_ms=100.0, ok=True)
+    _arm(pol_dir, lambda log: KvThreshold(threshold=0.9, log=log), [100.0, 100.0])
+
+    c = Comparison.from_logs(base_dir, pol_dir)
+    assert not c.comparable_load()
+
+
+def test_an_empty_directory_is_an_error_not_an_empty_comparison(tmp_path) -> None:
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [2000.0])
+    try:
+        Comparison.from_logs(base, empty)
+    except ValueError as exc:
+        assert "no .jsonl logs" in str(exc)
+    else:
+        raise AssertionError("an empty arm should not produce a comparison")

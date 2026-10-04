@@ -52,6 +52,17 @@ class Report:
         return self.decisions[0]["policy"] if self.decisions else None
 
     @property
+    def is_baseline(self) -> bool:
+        """Whether the policy refuses nothing by design.
+
+        A baseline and a policy that failed to fire produce identical counts, and
+        they are opposite findings: one is the comparison arm working, the other is a
+        run that proves nothing. Declared by the policy and recorded in the log,
+        rather than guessed from the name.
+        """
+        return bool(self.decisions and self.decisions[0].get("baseline"))
+
+    @property
     def params(self) -> dict[str, Any]:
         return self.decisions[0].get("params", {}) if self.decisions else {}
 
@@ -144,6 +155,18 @@ class Report:
                 "  signal — see below — and not what a policy would have done.",
             ]
         total = len(self.decisions)
+        if v == "INERT" and self.is_baseline:
+            return [
+                "  THE BASELINE — it admits everything",
+                "",
+                f"  {self.policy} admitted all {total} requests, which is its job. This is",
+                "  what the cluster does unmanaged, and it is the arm every claim about",
+                '  admission control is measured against: without it, "the policy refused',
+                '  27%" has nothing to be 27% of.',
+                "",
+                "  The ranges below are the unmanaged cluster. Compare them against a",
+                "  policy run:  admitperf compare <this log> <policy log>",
+            ]
         if v == "INERT":
             return [
                 "  THE FINDING — INERT",

@@ -49,6 +49,12 @@ class Policy:
     #: all traffic, which is worse than the bug.
     on_error: ClassVar[Verdict] = Verdict.ADMIT
 
+    #: True for a policy that refuses nothing BY DESIGN. Recorded in the log so a
+    #: report can tell a baseline from a policy that failed to fire — otherwise the
+    #: comparison arm gets reported as a broken run and the reader is told to change
+    #: the load, which is exactly backwards.
+    baseline: ClassVar[bool] = False
+
     def __init__(self, *, log: str | None = None, enforce: float = 1.0, **params: Any) -> None:
         if not self.name:
             raise ValueError(f"{type(self).__name__} needs a `name`")
@@ -104,6 +110,7 @@ class Policy:
             {
                 "at": time.time(),
                 "policy": self.name,
+                "baseline": self.baseline,
                 "params": self.params,
                 "request_id": request_id,
                 "metrics": dict(metrics),
