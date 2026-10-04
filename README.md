@@ -119,6 +119,63 @@ rate. A run like that reports numbers indistinguishable from no policy at all.
 
 That is the question AdmitPerf answers first: **could the policy have fired at all?**
 
+## What it gets you
+
+The whole point: two logs, one without admission control and one with.
+
+```bash
+python examples/compare_two_policies.py              # no GPU, no cluster, 2 seconds
+python examples/compare_two_policies.py --repeats 5  # with an error bar
+```
+
+```
+  The policy refused 240 of 400 requests (60.0%).
+
+  p95 TTFT of served requests is 15.17x lower: 2730ms -> 180ms
+  goodput is DOWN: 0.480 -> 0.400  (of offered)
+
+  Goodput fell, so the policy refused requests the cluster could have
+  served. Faster tails bought at that price are not a win.
+```
+
+A 15× better tail, and the policy is **worse**. A KV threshold picked without
+reference to the SLO sheds requests the cluster could still have served in time. The
+same comparison against a queue bound derived from the SLO:
+
+```
+  The policy refused 110 of 400 requests (27.5%).
+
+  p95 TTFT of served requests is 1.67x lower: 2730ms -> 1630ms
+  goodput is up: 0.480 -> 0.670  (of offered)
+```
+
+A report showing only latency would have picked the first policy. That is the argument
+for comparing, and `goodput` divides by requests **offered** rather than admitted —
+divide by admitted and refusing 95% of traffic reads as 1.00.
+
+### Running it again and again
+
+One run of each arm has no error bar, and a gap smaller than the spread between
+repeats is not a result. `--repeats` writes a directory per arm, one log per repeat,
+and `compare` reads a directory as the set:
+
+```bash
+admitperf compare example-runs/baseline example-runs/queue_depth
+```
+
+```
+  p95 TTFT of served requests is 1.78x lower: 2630 (2530-2830)ms -> 1480 (1430-1480)ms
+  goodput is up: 0.542 (0.530-0.573) -> 0.723 (0.703-0.755)  (of offered)
+
+  ok  the arms separate across 5 repeats
+```
+
+Four checks come before any of those numbers: the policy fired in **every** repeat,
+every run faced the same load, outcomes were recorded, and the two arms' observed
+ranges do not overlap. With one run per arm the last cannot be asked, and the page
+says so instead of answering it. `admitperf compare --check` exits non-zero when any
+fails.
+
 ## The CLI
 
 Three verbs, and none of them is in a request path.
@@ -127,6 +184,7 @@ Three verbs, and none of them is in a request path.
 admitperf signals                                   # what can your stack already feed?
 admitperf watch http://host:8000/metrics --for 1h   # record it, no code change
 admitperf report trace.jsonl                        # the finding
+admitperf compare baseline.jsonl with-policy.jsonl  # what did it buy?
 admitperf dashboard                                 # every log, in a browser
 ```
 
@@ -182,8 +240,12 @@ request caps `kv_used_fraction` near 0.35. Requests need to be longer than about
 **6k tokens** before KV binds before the scheduler does, and only then can a
 KV-pressure policy fire at all.
 
-**Measured results: none yet.** Earlier figures were removed rather than carried
-forward, because they could not be reproduced. This is the next thing to do.
+**On real hardware: not yet measured.** The figures above come from the simulated
+engine in `examples/`, which is honest about what it models — bounded slots, a FIFO
+queue, KV pressure driven by resident tokens, Poisson arrivals and jittered service —
+and is checked by tests, so the numbers in this README cannot go stale silently and
+repeats cannot quietly become identical. Earlier figures from real runs were
+removed rather than carried forward, because they could not be reproduced.
 
 ## Layout
 
@@ -195,6 +257,10 @@ src/admitperf/
     verdict.py        Verdict         reasons.py    reason -> status code
     log.py            Log
   policies/           four baked-in policies, one per file
+  watch.py            Watch           report.py     Report
+  comparison.py       Comparison      cli.py        the CLI
+  dashboard/          the Streamlit reader
+examples/             a runnable comparison, no hardware needed
 infra/                one worked example of a host. NOT part of the package.
 ```
 

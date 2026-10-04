@@ -19,5 +19,9 @@ class NoAdmission(Policy):
 
     name = "no_admission"
 
+    #: Refusing nothing is the job, not a failure to fire. Without this the report
+    #: would call the comparison arm INERT and advise changing the load.
+    baseline = True
+
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         return self.admit()
