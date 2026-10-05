@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -83,6 +84,96 @@ def report(log: str, check: bool) -> None:
     click.echo(r.text())
     if check and r.verdict() != "LIVE":
         raise SystemExit(f"verdict is {r.verdict()}: this log cannot support a claim")
+
+
+#: Policies replay can construct, by the name you type.
+REPLAYABLE = {
+    "kv_threshold": ("threshold", 0.90),
+    "queue_depth": ("max_waiting", 32),
+    "dual_gate": ("threshold", 0.90),
+    "no_admission": (None, None),
+}
+
+
+@main.command()
+@click.argument("trace", type=click.Path(exists=True, dir_okay=False))
+@click.argument("policy_name", metavar="POLICY")
+@click.argument("params", nargs=-1, metavar="[KEY=VALUE]...")
+@click.option("--experiment", "-e", default=None, help="name for the replayed runs")
+@click.option("-o", "--out", default="experiments", show_default=True)
+@click.option(
+    "--baseline/--no-baseline",
+    default=True,
+    show_default=True,
+    help="also replay no_admission, so there is something to compare against",
+)
+def replay(
+    trace: str,
+    policy_name: str,
+    params: tuple[str, ...],
+    experiment: str | None,
+    out: str,
+    baseline: bool,
+) -> None:
+    """What a policy WOULD have done against a recorded trace.
+
+    \b
+      admitperf watch http://host:8000/metrics --for 10m -o trace.jsonl
+      admitperf replay trace.jsonl kv_threshold threshold=0.90
+
+    This is what makes `watch` worth running. A watch trace holds metric snapshots and
+    no decisions, so a report of it says UNKNOWN and leaves signal liveness unevidenced
+    — the answer is in the file with nothing to compare it against. Replaying supplies
+    the threshold, and the verdict follows. No gateway, no integration, no second run.
+
+    A policy is a pure function of metrics, so N policies can be judged on ONE trace
+    with identical inputs. That removes run-to-run variance from the comparison, which
+    no published admission-control comparison currently offers.
+    """
+    from admitperf.core.registry_names import build
+    from admitperf.replay import Replay
+    from admitperf.report import Report
+
+    kv: dict[str, Any] = {}
+    for item in params:
+        if "=" not in item:
+            raise SystemExit(f"expected KEY=VALUE, got {item!r}")
+        key, _, raw = item.partition("=")
+        try:
+            kv[key] = float(raw) if "." in raw else int(raw)
+        except ValueError:
+            kv[key] = raw
+
+    rep = Replay.from_log(trace)
+    if not rep.samples:
+        raise SystemExit(
+            f"{trace} holds no samples with metrics in them. If every scrape failed, "
+            "the trace records that — and a policy cannot be replayed against a reading "
+            "that was never taken."
+        )
+    name = experiment or f"replay-{Path(trace).stem}"
+    click.echo(f"{len(rep.samples)} samples" + (f", {rep.skipped} skipped" if rep.skipped else ""))
+
+    todo = [(policy_name, kv)]
+    if baseline and policy_name != "no_admission":
+        todo.append(("no_admission", {}))
+
+    for pname, pkv in todo:
+        policy = build(pname, **pkv)
+        log = rep.against(policy, out=Path(out) / name / pname, experiment=name, run="r1")
+        r = Report.from_log(log)
+        duty = rep.duty_cycle(policy)
+        click.echo(f"\n{'=' * 68}\n  replayed {pname} {pkv or ''}\n{'=' * 68}")
+        click.echo(r.text())
+        if pname != "no_admission":
+            click.echo(
+                f"\n  It would have been refusing for {duty:.1%} of the window.\n"
+                "  A duty cycle, not a refusal rate: samples are periodic and arrivals\n"
+                "  are not, so the two differ by however bursty the traffic was."
+            )
+
+    click.echo(f"\n  admitperf compare --experiment {name}")
+    click.echo("  admitperf dashboard")
 
 
 @main.command("experiments")
