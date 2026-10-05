@@ -1,6 +1,6 @@
 [project]
 name = "admitperf"
-version = "0.0.1"
+version = "0.0.2"
 # This is the one-liner PyPI shows under the package name. It said "an open
 # benchmark", which is what the project was before it became a standard for
 # policies — and a stale summary is the first thing a visitor reads.

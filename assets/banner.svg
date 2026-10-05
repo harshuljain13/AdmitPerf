@@ -2,8 +2,9 @@
 <!-- BRIEF: AdmitPerf banner. Simple. Black background, admit-yellow (#F5C518) wordmark,
      one-line tagline, single thin yellow accent bar at the bottom. No motif, no chip, no grid.
      Size: 1280x260. IDs: bg, wordmark, tagline, accent.
-     Tagline reframes -Perf suffix: not measurement-only, but benchmark-driven design. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 260" width="1280" height="260" role="img" aria-label="AdmitPerf — benchmark-driven admission control layer for LLM inference">
+     Tagline matches the package summary. It said 'benchmark-driven ... layer', which is
+     what the project was before it became a standard for policies. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 260" width="1280" height="260" role="img" aria-label="AdmitPerf — standardized admission control for LLM inference">
   <g id="bg">
     <rect width="1280" height="260" fill="#0B0B0B"/>
   </g>
@@ -16,7 +17,7 @@
 
   <g id="tagline" font-family="Helvetica, Arial, sans-serif">
     <text x="640" y="188" font-size="20" fill="#BFBFBF" font-weight="400" letter-spacing="3" text-anchor="middle">
-      benchmark-driven admission control layer for LLM inference
+      standardized admission control for LLM inference
     </text>
   </g>
 

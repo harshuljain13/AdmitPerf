@@ -184,3 +184,39 @@ def test_one_class_per_file() -> None:
         if len(classes) > 1:
             offenders.append(f"{py.relative_to(REPO)} defines {classes}")
     assert not offenders, "\n".join(offenders)
+
+
+# --------------------------------------------------------------------------
+# The README is the PyPI page
+# --------------------------------------------------------------------------
+
+
+def test_readme_images_would_render_on_pypi() -> None:
+    """Both halves of why the banner was broken on the published page.
+
+    PyPI renders this README with no repository context, so a relative path resolves
+    to nothing. And it proxies images through camo, which does not serve SVG — so a
+    `.svg` src is a broken image even when the URL is absolute. Neither failure shows
+    up locally or on GitHub, and neither can be fixed without publishing a new version,
+    because a released long_description cannot be edited.
+    """
+    import re
+
+    readme = (REPO / "README.md").read_text()
+    for src in re.findall(r'<img[^>]*src="([^"]+)"', readme):
+        assert src.startswith("http"), f"relative image src will not resolve on PyPI: {src}"
+        assert not src.endswith(".svg"), f"PyPI's image proxy does not serve SVG: {src}"
+
+
+def test_every_readme_image_is_committed() -> None:
+    """An absolute raw.githubusercontent URL only works if the file is actually in the
+    repository at that path, and a 404 looks identical to a broken renderer."""
+    import re
+
+    readme = (REPO / "README.md").read_text()
+    for src in re.findall(r'<img[^>]*src="([^"]+)"', readme):
+        if "raw.githubusercontent.com" not in src:
+            continue
+        # .../<owner>/<repo>/<ref>/<path...>
+        path = src.split("raw.githubusercontent.com/", 1)[1].split("/", 3)[3]
+        assert (REPO / path).is_file(), f"README points at {path}, which is not in the repo"

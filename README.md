@@ -1,5 +1,9 @@
+<!-- Absolute URL and PNG, both required. PyPI renders this README with no repository
+     context, so a relative path resolves to nothing; and it proxies images through
+     camo, which does not serve SVG — so assets/banner.svg was broken on both counts.
+     The SVG remains the source; banner.png is rendered from it. -->
 <p align="center">
-  <img src="assets/banner.svg" alt="AdmitPerf — standardized admission control for LLM inference" width="100%"/>
+  <img src="https://raw.githubusercontent.com/harshuljain13/AdmitPerf/main/assets/banner.png" alt="AdmitPerf — standardized admission control for LLM inference" width="100%"/>
 </p>
 
 # AdmitPerf
