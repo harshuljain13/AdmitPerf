@@ -124,8 +124,8 @@ That is the question AdmitPerf answers first: **could the policy have fired at a
 The whole point: two logs, one without admission control and one with.
 
 ```bash
-python examples/compare_two_policies.py              # no GPU, no cluster, 2 seconds
-python examples/compare_two_policies.py --repeats 5  # with an error bar
+admitperf demo              # no GPU, no cluster, 2 seconds
+admitperf demo --repeats 5  # with an error bar
 ```
 
 ```
@@ -155,12 +155,11 @@ divide by admitted and refusing 95% of traffic reads as 1.00.
 
 ### Running it again and again
 
-One run of each arm has no error bar, and a gap smaller than the spread between
-repeats is not a result. `--repeats` writes a directory per arm, one log per repeat,
-and `compare` reads a directory as the set:
+One run of each policy has no error bar, and a gap smaller than the spread between
+runs is not a result. `--repeats` writes one log per run, and `compare` reads them all:
 
 ```bash
-admitperf compare example-runs/baseline example-runs/queue_depth
+admitperf compare --experiment demo
 ```
 
 ```
@@ -172,9 +171,39 @@ admitperf compare example-runs/baseline example-runs/queue_depth
 
 Four checks come before any of those numbers: the policy fired in **every** repeat,
 every run faced the same load, outcomes were recorded, and the two arms' observed
-ranges do not overlap. With one run per arm the last cannot be asked, and the page
+ranges do not overlap. With one run per policy the last cannot be asked, and the page
 says so instead of answering it. `admitperf compare --check` exits non-zero when any
 fails.
+
+## Naming a measurement
+
+Every decision carries the identity you gave it, so a result can be found from its
+log and vice versa:
+
+```python
+KvThreshold(
+    threshold=0.90,
+    experiment="kv-wall-8k",            # the question being asked
+    run="r1",                           # which repeat
+    notes="1xA100-40 · 8k prompts",     # what a log cannot know
+    provenance={"threshold": "fitted"}, # fitted, inherited, or default
+    log="...",
+)
+```
+
+Grouping **is** the claim: two policies in one experiment assert they faced the same
+conditions. That is declared rather than inferred from a directory, because otherwise
+moving a file silently changes what the result says.
+
+Everything written lands in one place, and the path mirrors the identity:
+
+```
+experiments/<experiment>/<policy>/r<n>.jsonl
+```
+
+```bash
+admitperf experiments     # every experiment found here, and its policies
+```
 
 ## The CLI
 
@@ -184,8 +213,9 @@ Three verbs, and none of them is in a request path.
 admitperf signals                                   # what can your stack already feed?
 admitperf watch http://host:8000/metrics --for 1h   # record it, no code change
 admitperf report trace.jsonl                        # the finding
-admitperf compare baseline.jsonl with-policy.jsonl  # what did it buy?
-admitperf dashboard                                 # every log, in a browser
+admitperf experiments                               # what has been recorded here
+admitperf compare --experiment kv-wall-8k           # what did it buy?
+admitperf dashboard                                 # all of it, in a browser
 ```
 
 Start with `watch`. It answers *could a policy have fired here, and which signal
@@ -241,11 +271,45 @@ request caps `kv_used_fraction` near 0.35. Requests need to be longer than about
 KV-pressure policy fire at all.
 
 **On real hardware: not yet measured.** The figures above come from the simulated
-engine in `examples/`, which is honest about what it models — bounded slots, a FIFO
+engine behind `admitperf demo`, which is honest about what it models — bounded slots, a FIFO
 queue, KV pressure driven by resident tokens, Poisson arrivals and jittered service —
 and is checked by tests, so the numbers in this README cannot go stale silently and
 repeats cannot quietly become identical. Earlier figures from real runs were
 removed rather than carried forward, because they could not be reproduced.
+
+## How it connects to the survey
+
+The survey behind this found that of seven reporting items across sixteen
+admission-primary papers, six are fully populated and the seventh — **signal
+liveness** — is empty for every one of them.
+
+So `admitperf report` checks a run against all seven, using the survey's own wording
+for what each asks, and leads with the one nobody fills:
+
+```
+✓  3. Signal liveness      kv_pressure reached 0.907 against a threshold of 0.9
+✓  4. Repeats and spread   3 runs, with the spread reported
+✓  6. Metric definition    goodput over OFFERED, so a refusal is a miss
+✓  7. Configuration        from notes=
+—  1. Capacity-relative load    no measured serveable capacity recorded
+—  2. Calibrated deadlines      no unloaded-latency baseline recorded
+—  5. Parameter provenance      values recorded, but not where they came from
+```
+
+`—` is deliberately neither a pass nor a failure: it means this log does not carry
+the fact. The survey's finding is that the corpus is *silent* on these, so silence
+has to be its own state.
+
+A policy also declares the taxonomy axes — `unit`, `setting`, `slo_awareness`,
+`signal_quantity`, `signal_structure` — which is what lets a result here be placed
+beside a published one. `signal_structure` is load-bearing rather than decorative: a
+dual gate can hold its first signal above threshold for a whole run and never fire,
+so one signal's range does not establish liveness for it.
+
+The dashboard has a **Terminology** section defining every term a report can print,
+tagged where the wording is the survey's. It exists because two pairs cause nearly all
+the confusion here and both look interchangeable: *offered* versus *admitted* as a
+denominator, and *INERT* versus *UNKNOWN*.
 
 ## Layout
 
@@ -258,9 +322,11 @@ src/admitperf/
     log.py            Log
   policies/           four baked-in policies, one per file
   watch.py            Watch           report.py     Report
-  comparison.py       Comparison      cli.py        the CLI
-  dashboard/          the Streamlit reader
-examples/             a runnable comparison, no hardware needed
+  comparison.py       Comparison      items.py      the survey's seven items
+  experiment.py       Experiment      policy_runs.py  PolicyRuns
+  discover.py         finds logs      terminology.py  every term defined
+  demo.py             a simulated run, no hardware needed
+  cli.py              the CLI         dashboard/    the Streamlit reader
 infra/                one worked example of a host. NOT part of the package.
 ```
 
