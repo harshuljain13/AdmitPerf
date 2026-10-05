@@ -10,9 +10,22 @@ name: Release
 # it before touching PyPI. That round trip is the only thing that catches a missing
 # dependency or a bad pin, because it is a real index resolve rather than a local path.
 #
-# Publishing uses Trusted Publishing (OIDC), so no API token is stored in this repository.
-# Configure once at https://pypi.org/manage/account/publishing/ with
-#   owner harshuljain13 · repo AdmitPerf · workflow release.yml · environment pypi
+# Publishing uses Trusted Publishing (OIDC), so no API token is stored in this
+# repository. Configured once per index, as a PENDING publisher since the project does
+# not exist on either yet:
+#
+#   https://pypi.org/manage/account/publishing/
+#     owner harshuljain13 · repo AdmitPerf · workflow release.yml
+#     environment pypi-admitperf
+#
+#   https://test.pypi.org/manage/account/publishing/
+#     owner harshuljain13 · repo AdmitPerf · workflow release.yml
+#     environment testpypi-admitperf
+#
+# The environment names MUST match the two `environment:` keys below exactly — PyPI
+# checks them in the OIDC claim, and a mismatch fails at the publish step with a
+# rejected token rather than anything that names the cause. They differ between the
+# two indexes on purpose: that is what stops a TestPyPI run reaching PyPI.
 on:
   push:
     tags: ["v*"]
@@ -68,7 +81,7 @@ jobs:
     name: Publish to TestPyPI
     needs: build
     runs-on: ubuntu-latest
-    environment: testpypi
+    environment: testpypi-admitperf
     # OIDC. The token is minted per run; nothing long-lived is stored.
     permissions:
       id-token: write
@@ -141,7 +154,7 @@ jobs:
     # unless it explicitly asked for pypi.
     if: startsWith(github.ref, 'refs/tags/v') || inputs.target == 'pypi'
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: pypi-admitperf
     permissions:
       id-token: write
     steps:
