@@ -34,9 +34,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # A tag is the name the release is remembered by, so it has to agree with the
+      # version inside the package. Without this check, tagging v0.1.0 while pyproject
+      # says 0.0.1 publishes 0.0.1 under a v0.1.0 tag, and nothing ever notices.
+      - name: The tag must match the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python -m pip install --upgrade pip
+          declared=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          echo "pyproject: $declared   tag: $tagged"
+          test "$declared" = "$tagged" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match version $declared in pyproject.toml"
+            exit 1
+          }
+
       - run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build twine
           python -m build
+
+      # Catches a malformed README or missing metadata before either index sees it.
+      # PyPI rejects a bad long_description outright, and the failure there is far
+      # less legible than this one.
+      - name: Check the artifacts
+        run: python -m twine check --strict dist/*
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -58,6 +80,10 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # Rehearsing twice at the same version is normal; a hard failure on
+          # "file already exists" would make the dry run useless. Deliberately NOT
+          # set for PyPI, where re-uploading a version is a mistake worth stopping.
+          skip-existing: true
 
   verify:
     name: Install from TestPyPI and smoke-test

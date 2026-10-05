@@ -1,9 +1,31 @@
 [project]
 name = "admitperf"
 version = "0.0.1"
-description = "An open benchmark for LLM admission-control policies"
+# This is the one-liner PyPI shows under the package name. It said "an open
+# benchmark", which is what the project was before it became a standard for
+# policies — and a stale summary is the first thing a visitor reads.
+description = "Standardized admission control for LLM inference"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["llm", "inference", "admission-control", "vllm", "slo", "serving"]
+
+# PyPI renders these as the sidebar facets. Without them the page says nothing
+# about which Python versions work or what the package is for.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+
 authors = [
     { name = "Harshul Jain", email = "harshuljain1393@gmail.com" },
 ]
@@ -17,6 +39,13 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",     # the CLI only. The decision path needs nothing.
 ]
+
+# Links in the PyPI sidebar. A package page with no route back to the source is a
+# package nobody can evaluate.
+[project.urls]
+Homepage = "https://github.com/harshuljain13/AdmitPerf"
+Source = "https://github.com/harshuljain13/AdmitPerf"
+Issues = "https://github.com/harshuljain13/AdmitPerf/issues"
 
 [project.optional-dependencies]
 dev = [
