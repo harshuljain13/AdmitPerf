@@ -1,0 +1,51 @@
+# ===========================================================================
+#  disagg — 4 GPUs, disaggregated prefill/decode
+# ===========================================================================
+#  The comparison against pair. Read the caveat before citing any hop number.
+#
+#      python -m infra.render infra/config/disagg.yaml --plan
+#
+#  What this adds          prefill and decode are separate pools, so a big
+#                         prefill cannot stall decode for everyone on a worker
+#
+#  WHAT IT COSTS           half the concurrency. A prefill worker builds KV,
+#                         hands it off and frees it, so its 22 GB never holds a
+#                         live sequence. Only the decode pool gates how many
+#                         requests are in flight: ~23 here against ~46 for four
+#                         aggregated workers
+#
+#  CAVEAT — issue #33      the vendored transport POSTs a metadata dict, NOT KV.
+#                         Hop counts and token totals are instrumentation, not
+#                         evidence that bytes moved, and no hop latency can be
+#                         claimed from this stack.
+#
+#                         Measured on a Lambda A100 fleet: the private network
+#                         runs at 4.3 Gbps with four streams and 1.6 Gbps on one,
+#                         which is what a single urllib POST gets. A 16k-token
+#                         7B sequence is 0.88 GiB of KV against ~2.0 s to
+#                         recompute it, so a REAL single-stream hop would cost
+#                         ~4.7 s and lose by 2.4x. The ratio is context-
+#                         independent, since payload and prefill cost both scale
+#                         linearly with tokens.
+# ===========================================================================
+extends: base.yaml
+
+topology:
+  mode: disaggregated
+  split: phase
+
+  # mooncake is the only backend that moves anything at all. nccl and nixl are
+  # no-op stubs, so zero hops would not prove the hop did not happen.
+  kv_transport: mooncake
+
+  # PRIVATE address. The public interface accepts only SSH, so a public endpoint
+  # here would fail as a timeout mid-run rather than an error at render time.
+  kv_endpoint: http://10.19.81.206:50051
+
+  pools:
+    prefill:
+      replicas: 2
+      tensor_parallel_size: 1
+    decode:
+      replicas: 2
+      tensor_parallel_size: 1

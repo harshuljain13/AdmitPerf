@@ -1,13 +1,18 @@
-"""Turn infra/config/cluster.yaml into manifests and the gateway's environment.
+"""Turn a cluster config into manifests and the gateway's environment.
 
 One config in; per-host Kubernetes manifests out, plus the URL lists the gateway
-reads. Model, topology and engine flags appear exactly once. Hand-edited
-manifests make "same cluster, only the policy changed" a claim nobody can check.
+reads. Model, topology and engine flags appear exactly once. Hand-edited manifests
+make "same cluster, only the policy changed" a claim nobody can check.
 
-    python -m infra.render infra/config/cluster.yaml                 # manifests
-    python -m infra.render infra/config/cluster.yaml --host gpu-a
-    python -m infra.render infra/config/cluster.yaml --env           # gateway env
-    python -m infra.render infra/config/cluster.yaml --plan          # what lands where
+Three runnable configs, each extending base.yaml, so the shared settings are
+declared once and only the topology differs:
+
+    python -m infra.render infra/config/single.yaml --plan   # 1 GPU, aggregated
+    python -m infra.render infra/config/pair.yaml --plan     # 2 GPUs, aggregated
+    python -m infra.render infra/config/disagg.yaml --plan   # 4 GPUs, disagg 2+2
+
+    python -m infra.render infra/config/pair.yaml --env      # gateway env
+    python -m infra.render infra/config/pair.yaml --host gpu-1
 
 Static manifests (gateway, mooncake, open-webui, observability) are not
 generated — they do not vary with the model.
@@ -94,6 +99,16 @@ class Host:
     gpu_kind: str
     gpu_count: int
     hbm_gb: float
+    #: Name of the .env variable holding this host's PUBLIC address, used for SSH
+    #: and rsync. The NAME is not a secret so it belongs in the config; the
+    #: address is, so it does not.
+    address_env: str | None = None
+
+    #: Name of the variable holding its PRIVATE address. Lambda firewalls the
+    #: public interface down to port 22, so worker URLs and the KV store must use
+    #: the private network — 10.19.x.x here. Falls back to the public address when
+    #: unset, which is correct for a single host reached through a tunnel.
+    private_env: str | None = None
 
     @property
     def env_suffix(self) -> str:
@@ -106,10 +121,35 @@ class Host:
         is ambiguous, and silently applying it to both would point every URL at
         one machine while the plan claimed two.
         """
+        if self.address_env:
+            return env.get(self.address_env, "").strip()
+        # Falls back to a name-derived variable when the config does not name one,
+        # then to LAMBDA for a single host so the lab's scripts keep working.
         specific = env.get(f"LAMBDA_HOST_{self.env_suffix}", "").strip()
         if specific:
             return specific
         return env.get("LAMBDA", "").strip() if sole else ""
+
+    def data_address(self, env: Mapping[str, str], *, sole: bool = False) -> str:
+        """The address OTHER MACHINES use to reach this one.
+
+        Separate from `address` because they are genuinely different networks. The
+        public interface accepts only SSH, so a worker URL built from it connects
+        to nothing — and the failure is a timeout during a run rather than an error
+        at configuration time.
+        """
+        if self.private_env:
+            got = env.get(self.private_env, "").strip()
+            if got:
+                return got
+            if not sole:
+                # Falling back to the public address here is how a run dies in the
+                # middle rather than at render time: the public interface accepts
+                # only SSH, so the URL resolves, connects to nothing, and times out.
+                # Only a single host behind a tunnel can legitimately use its public
+                # address as a data address.
+                return ""
+        return self.address(env, sole=sole)
 
     def key(self, env: Mapping[str, str]) -> str:
         return (
@@ -118,7 +158,7 @@ class Host:
         )
 
     def env_var(self) -> str:
-        return f"LAMBDA_HOST_{self.env_suffix}"
+        return self.address_env or f"LAMBDA_HOST_{self.env_suffix}"
 
 
 @dataclass(frozen=True)
@@ -182,15 +222,87 @@ def load_dotenv(root: Path | None = None) -> dict[str, str]:
     return out
 
 
-def load(path: Path) -> dict[str, Any]:
+#: Keys whose child value REPLACES the parent's rather than merging into it. A
+#: variant declaring `engine.max_model_len` should inherit the other engine flags,
+#: but one declaring pools must not inherit the parent's — half a pool set is not a
+#: topology.
+REPLACE_WHOLE = frozenset({"pools", "on"})
+
+
+def _merge(base: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge child over base. Lists replace; REPLACE_WHOLE keys replace."""
+    out = dict(base)
+    for key, value in child.items():
+        if (
+            key not in REPLACE_WHOLE
+            and isinstance(value, dict)
+            and isinstance(out.get(key), dict)
+        ):
+            out[key] = _merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def load(path: Path, _seen: tuple[Path, ...] = ()) -> dict[str, Any]:
+    """Read a config, following `extends` so shared values are declared once.
+
+        # pair.yaml
+        extends: base.yaml
+        topology: {...}
+
+    base.yaml holds hosts, model, engine, placement, overflow and admission, and
+    deliberately declares NO topology — that is the thing each variant changes. So
+    when two runs differ only by which file was rendered, "same cluster, only the
+    topology changed" is true by construction rather than by discipline.
+
+    Paths are relative to the file doing the extending, so a config directory can
+    be copied or moved whole.
+    """
+    path = path.resolve()
+    if path in _seen:
+        chain = " -> ".join(q.name for q in (*_seen, path))
+        raise ConfigError(f"extends forms a cycle: {chain}")
+
     raw = yaml.safe_load(path.read_text())
     if not isinstance(raw, dict):
         raise ConfigError(f"{path} is not a mapping")
-    return raw
+
+    parent_ref = raw.pop("extends", None)
+    if not parent_ref:
+        raw.setdefault("config_name", path.stem)
+        return raw
+
+    parent_path = (path.parent / str(parent_ref)).resolve()
+    if not parent_path.exists():
+        raise ConfigError(
+            f"{path.name} extends {parent_ref!r}, which does not exist "
+            f"(looked in {path.parent})"
+        )
+    merged = _merge(load(parent_path, (*_seen, path)), raw)
+    # Recorded so a plan, and later a run bundle, says which variant produced it.
+    merged["config_name"] = path.stem
+    return merged
 
 
-def hosts_from(cfg: dict[str, Any]) -> dict[str, Host]:
+def hosts_from(
+    cfg: dict[str, Any], env: Mapping[str, str] | None = None
+) -> dict[str, Host]:
+    """The machines, either listed explicitly or derived from an inventory.
+
+    Every host is declared, with its own GPU kind, count and HBM, because a fleet
+    is not necessarily uniform. Each names the .env variable holding its address:
+
+        hosts:
+          - name: gpu-1
+            address_env: LAMBDA_HOST_1
+            gpu: {kind: A100, count: 1, hbm_gb: 40}
+
+    The variable NAME is not a secret, so it lives in the committed config. The
+    address is, so it does not.
+    """
     raw = cfg.get("hosts") or []
+
     if not raw:
         raise ConfigError("no hosts declared. At least one is required.")
     out: dict[str, Host] = {}
@@ -208,6 +320,8 @@ def hosts_from(cfg: dict[str, Any]) -> dict[str, Host]:
                 )
         out[name] = Host(
             name=name,
+            address_env=(str(h["address_env"]) if h.get("address_env") else None),
+            private_env=(str(h["private_env"]) if h.get("private_env") else None),
             gpu_kind=str(gpu.get("kind", "unknown")),
             gpu_count=int(gpu.get("count", 0)),
             hbm_gb=float(gpu.get("hbm_gb", 0)),
@@ -215,14 +329,46 @@ def hosts_from(cfg: dict[str, Any]) -> dict[str, Host]:
     return out
 
 
-def workers_from(cfg: dict[str, Any]) -> list[Worker]:
-    """Expand pools into one Worker per replica, numbered per host."""
-    hosts = hosts_from(cfg)
+def workers_from(
+    cfg: dict[str, Any], env: Mapping[str, str] | None = None
+) -> list[Worker]:
+    """Expand pools into one Worker per replica, numbered per host.
+
+    A pool naming a `host` is pinned there. A pool without one is PLACED, by
+    filling hosts in declaration order until each is full. The assignment is
+    deterministic given the same config and the same inventory order, and `--plan`
+    prints it — an assignment that moved silently when .env changed would mean a
+    rerun measured a different deployment while claiming to be a repeat.
+    """
+    hosts = hosts_from(cfg, env)
     topo = cfg["topology"]
     model = cfg["model"]
     pools = topo.get("pools") or {}
     per_host_index: dict[str, int] = dict.fromkeys(hosts, 0)
+    free: dict[str, int] = {n: h.gpu_count for n, h in hosts.items()}
     out: list[Worker] = []
+
+    # Pinned pools claim their GPUs first, so placement works around them rather
+    # than handing out cards a pinned pool is going to need.
+    for spec in (topo.get("pools") or {}).values():
+        pinned_at = spec.get("host")
+        if pinned_at in free:
+            need = int(spec.get("replicas", 1)) * int(
+                spec.get("tensor_parallel_size", 1)
+            ) * int(spec.get("pipeline_parallel_size", 1))
+            free[pinned_at] -= need
+
+    def place(need: int) -> str:
+        """First host in declaration order with room. Not least-loaded: stable
+        beats balanced here, because a stable mapping is what makes two runs
+        comparable."""
+        for name, left in free.items():
+            if left >= need:
+                return name
+        raise ConfigError(
+            f"no host has {need} free GPU(s) for an unpinned pool. "
+            f"Remaining: {', '.join(f'{n}:{v}' for n, v in free.items())}"
+        )
 
     # Iterate in the mode's declared pool order so ports and URL lists are
     # stable across renders. Dict order would depend on how the YAML was typed.
@@ -230,15 +376,31 @@ def workers_from(cfg: dict[str, Any]) -> list[Worker]:
         spec = pools.get(pool_name)
         if spec is None:
             continue
-        host_name = str(spec.get("host", ""))
-        if host_name not in hosts:
+        declared = str(spec.get("host", "") or "")
+        if declared and declared != "auto" and declared not in hosts:
             raise ConfigError(
-                f"pool {pool_name!r} names host {host_name!r}, which is not declared. "
-                f"Known hosts: {', '.join(sorted(hosts)) or 'none'}"
+                f"pool {pool_name!r} names host {declared!r}, which is not "
+                f"declared. Known hosts: {', '.join(hosts) or 'none'}"
             )
-        host = hosts[host_name]
+        pinned = declared if declared and declared != "auto" else None
+        tp = int(spec.get("tensor_parallel_size", 1))
+        pp = int(spec.get("pipeline_parallel_size", 1))
+        per = tp * pp
         m = spec.get("model") or {}
+
         for replica in range(int(spec.get("replicas", 1))):
+            # Placed PER REPLICA, not per pool. A replica is an independent
+            # server, so two replicas of one pool may sit on different boxes —
+            # only a tensor-parallel group is forbidden from spanning hosts,
+            # because it all-reduces every layer. Placing per pool meant six
+            # replicas could not use two four-GPU hosts, which is a real
+            # topology and was refused for no reason.
+            if pinned:
+                host_name = pinned
+            else:
+                host_name = place(per)
+                free[host_name] -= per
+            host = hosts[host_name]
             out.append(
                 Worker(
                     pool=pool_name,
@@ -249,8 +411,8 @@ def workers_from(cfg: dict[str, Any]) -> list[Worker]:
                     served_name=m.get("served_name", model.get("served_name", "lab")),
                     capability=m.get("capability", model.get("capability", "text")),
                     quantization=m.get("quantization", model.get("quantization")),
-                    tp=int(spec.get("tensor_parallel_size", 1)),
-                    pp=int(spec.get("pipeline_parallel_size", 1)),
+                    tp=tp,
+                    pp=pp,
                 )
             )
             per_host_index[host_name] += 1
@@ -310,8 +472,12 @@ def concurrency_estimate(cfg: dict[str, Any], kv_gb_total: float) -> float | Non
     return kv_gb_total * 1e9 / per_seq
 
 
-def validate(cfg: dict[str, Any]) -> None:
-    """Refuse what would otherwise fail ten minutes into a deploy."""
+def validate(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> None:
+    """Refuse what would otherwise fail ten minutes into a deploy.
+
+    Takes `env` because the host set can come from an inventory variable, and a
+    check whose result depends on the machine it runs on is not a check.
+    """
     topo = cfg["topology"]
     mode = str(topo.get("mode", ""))
     if mode not in POOLS_FOR_MODE:
@@ -343,6 +509,19 @@ def validate(cfg: dict[str, Any]) -> None:
             f"topology.kv_transport is set to {transport!r} but mode is aggregated, "
             "where there is no hop. It would be ignored, which is worse than absent."
         )
+    if str(transport) == "mooncake" and not topo.get("kv_endpoint"):
+        raise ConfigError(
+            "kv_transport is mooncake but topology.kv_endpoint is unset. The hop "
+            "would then be a silent no-op: _store_put returns without posting and "
+            "logs nothing, so zero hops on the dashboard would look like a "
+            "measurement rather than a missing setting."
+        )
+    if transport and str(transport) not in ("mooncake",) and topo.get("kv_endpoint"):
+        raise ConfigError(
+            f"topology.kv_endpoint is set but kv_transport is {transport!r}, which "
+            "is not URL-addressed — nccl is a collective and nixl is an RDMA path. "
+            "It would be read by nothing while looking configured."
+        )
     if transport and str(transport) != "mooncake":
         print(
             f"note: kv_transport={transport} is a no-op stub that returns immediately. "
@@ -362,13 +541,13 @@ def validate(cfg: dict[str, Any]) -> None:
     if not 0.0 < util <= 1.0:
         raise ConfigError(f"gpu_memory_utilization must be in (0, 1], got {util}")
 
-    workers = workers_from(cfg)
+    workers = workers_from(cfg, env)
     if not workers:
         raise ConfigError("the topology expands to zero workers")
 
     # GPUs are accounted PER HOST. A global count would happily approve two
     # workers needing 4 GPUs spread over two 2-GPU boxes, which cannot run.
-    for host_name, host in hosts_from(cfg).items():
+    for host_name, host in hosts_from(cfg, env).items():
         mine = [w for w in workers if w.host.name == host_name]
         if not mine:
             continue
@@ -594,6 +773,88 @@ def service(w: Worker) -> dict[str, Any]:
     }
 
 
+def serve_commands(
+    cfg: dict[str, Any], host: str | None = None, env: Mapping[str, str] | None = None
+) -> str:
+    """`vllm serve` command lines, for a bare VM with no Kubernetes.
+
+    A rented GPU box is an Ubuntu machine with SSH and a driver. The manifests
+    assume a cluster it does not have, so without this the bring-up step is a
+    hand-written command line — and a hand-written one drifts from the config in
+    exactly the settings that decide the experiment. `infra/setup/lambda_vllm.sh`
+    is the proof: it hardcodes gpu-memory-utilization 0.85 against the config's
+    0.90 and omits --max-num-seqs altogether, which is the single flag that
+    decides whether a KV-pressure signal can reach its threshold.
+
+    Built from `engine_args`, the same function the manifests use, so the two
+    cannot disagree about what is being served.
+    """
+    validate(cfg, env)
+    workers = [w for w in workers_from(cfg, env) if host is None or w.host.name == host]
+    if host is not None and not workers:
+        raise ConfigError(f"no pools are placed on host {host!r}")
+
+    out = [
+        "# GENERATED by infra/render.py — do not edit.",
+        f"# Change infra/config/{cfg.get('config_name', '')}.yaml and re-render.",
+        "# Run on the GPU box. One engine per line; each needs its own shell.",
+        "",
+    ]
+    # Each engine on a host gets its own contiguous slice of that host's cards.
+    # Without this two engines on one box both grab GPU 0 and the second dies
+    # out of memory, which reads as a weights-too-big problem and is not one.
+    cursor: dict[str, int] = {}
+    for w in workers:
+        args = engine_args(cfg, w)
+        # --model is positional for `vllm serve`, and the port is per engine
+        # rather than the container's fixed 8000.
+        flags: list[str] = []
+        skip = False
+        for a in args:
+            if skip:
+                skip = False
+                continue
+            if a == "--model":
+                skip = True
+                continue
+            if a == "--port":
+                flags += ["--port", str(w.host_port)]
+                skip = True
+                continue
+            flags.append(a)
+
+        start = cursor.get(w.host.name, 0)
+        cursor[w.host.name] = start + w.gpus
+        same_host = sum(1 for other in workers if other.host.name == w.host.name)
+
+        out.append(f"# {w.name} on {w.host.name} ({w.host.gpu_kind} x{w.gpus}) -> :{w.host_port}")
+        if same_host > 1:
+            cards = ",".join(str(start + i) for i in range(w.gpus))
+            out.append(f"CUDA_VISIBLE_DEVICES={cards} \\")
+        out.append(f"vllm serve {w.model_id} \\")
+        out.append("  " + " \\\n  ".join(_pairs(flags)))
+        out.append("")
+    return "\n".join(out)
+
+
+def _pairs(flags: list[str]) -> list[str]:
+    """Group `--flag value` onto one line each, so the command is readable."""
+    lines: list[str] = []
+    i = 0
+    while i < len(flags):
+        if i + 1 < len(flags) and not flags[i + 1].startswith("--"):
+            run = [flags[i]]
+            i += 1
+            while i < len(flags) and not flags[i].startswith("--"):
+                run.append(flags[i])
+                i += 1
+            lines.append(" ".join(run))
+        else:
+            lines.append(flags[i])
+            i += 1
+    return lines
+
+
 class _NoAliases(yaml.SafeDumper):
     """Anchors are valid YAML and unreadable in a manifest."""
 
@@ -601,10 +862,12 @@ class _NoAliases(yaml.SafeDumper):
         return True
 
 
-def render(cfg: dict[str, Any], host: str | None = None) -> str:
+def render(
+    cfg: dict[str, Any], host: str | None = None, env: Mapping[str, str] | None = None
+) -> str:
     """Manifests for one host, or for all of them when host is None."""
-    validate(cfg)
-    workers = [w for w in workers_from(cfg) if host is None or w.host.name == host]
+    validate(cfg, env)
+    workers = [w for w in workers_from(cfg, env) if host is None or w.host.name == host]
     if host is not None and not workers:
         raise ConfigError(f"no pools are placed on host {host!r}")
     docs: list[dict[str, Any]] = []
@@ -613,7 +876,7 @@ def render(cfg: dict[str, Any], host: str | None = None) -> str:
         docs.append(service(w))
     header = (
         "# GENERATED by infra/render.py — do not edit.\n"
-        "# Change infra/config/cluster.yaml and re-render.\n"
+        f"# Change infra/config/{cfg.get('config_name', '')}.yaml and re-render.\n"
         f"# host: {host or 'all'}\n"
     )
     return header + yaml.dump_all(docs, Dumper=_NoAliases, sort_keys=False)
@@ -637,21 +900,36 @@ def gateway_env(
     block and it stays in .env; everything else is emitted from the config so it
     cannot be typed twice and drift.
     """
-    validate(cfg)
     env = load_dotenv() if env is None else dict(env)
+    validate(cfg, env)
     topo = cfg["topology"]
     mode, split = str(topo["mode"]), str(topo.get("split", "phase"))
-    workers = workers_from(cfg)
-    hosts = hosts_from(cfg)
-    sole = len(hosts) == 1
+    workers = workers_from(cfg, env)
+    hosts = hosts_from(cfg, env)
+    # Counted over hosts that actually run something, not over hosts declared.
+    # base.yaml declares the whole fleet and single.yaml uses one of them, so a
+    # count of declarations would make the single case look multi-host and reject
+    # the LAMBDA shorthand it is entitled to.
+    in_use = {w.host.name for w in workers}
+    sole = len(in_use) == 1
 
     addr: dict[str, str] = {}
     for name, host in hosts.items():
         if not any(w.host.name == name for w in workers):
             continue
-        a = host.address(env, sole=sole)
+        # The PRIVATE address: these URLs are used by the gateway and by workers
+        # reaching each other, and the public interface accepts only SSH.
+        a = host.data_address(env, sole=sole)
         if not a:
             if strict:
+                if host.private_env and not sole:
+                    raise ConfigError(
+                        f"host {name!r} has no PRIVATE address. Set "
+                        f"{host.private_env} in .env. Its public address will not "
+                        "do: that interface accepts only SSH, so a worker URL "
+                        "built from it connects to nothing and fails as a timeout "
+                        "mid-run rather than an error here."
+                    )
                 hint = f" (or LAMBDA, since {name!r} is the only host)" if sole else ""
                 raise ConfigError(
                     f"host {name!r} has no address. Set {host.env_var()} in .env{hint}. "
@@ -681,6 +959,11 @@ def gateway_env(
         out["DECODE_URLS"] = urls("decode")
         if topo.get("kv_transport"):
             out["KV_BACKEND"] = str(topo["kv_transport"])
+            # Mooncake is an HTTP service and reads MOONCAKE_URL. Emitting it from
+            # the config is what stops it being unset: _store_put returns silently
+            # when it is, so every hop becomes a no-op with nothing logged.
+            if str(topo["kv_transport"]) == "mooncake" and topo.get("kv_endpoint"):
+                out["MOONCAKE_URL"] = str(topo["kv_endpoint"])
 
     ov = cfg.get("overflow") or {}
     if ov.get("base_url"):
@@ -698,10 +981,14 @@ def plan(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> str:
     Takes `env` explicitly so a caller — a test especially — is never at the mercy
     of whether a .env happens to exist on the machine running it.
     """
-    validate(cfg)
-    hosts, workers = hosts_from(cfg), workers_from(cfg)
+    env = load_dotenv() if env is None else dict(env)
+    validate(cfg, env)
+    hosts, workers = hosts_from(cfg, env), workers_from(cfg, env)
     topo, util = cfg["topology"], float(cfg["engine"]["gpu_memory_utilization"])
-    lines = [
+    lines = []
+    if cfg.get("config_name"):
+        lines.append(f"config={cfg['config_name']}")
+    lines += [
         f"mode={topo['mode']} split={topo.get('split', 'phase')} "
         f"transport={topo.get('kv_transport') or '-'} "
         f"prefix_cache={'on' if cfg['engine'].get('enable_prefix_caching') else 'OFF'}",
@@ -726,14 +1013,28 @@ def plan(cfg: dict[str, Any], env: Mapping[str, str] | None = None) -> str:
                 n = concurrency_estimate(cfg, kv_total)
                 if n is not None:
                     cap = int(cfg["engine"]["max_num_seqs"])
-                    verdict = (
-                        "KV binds — admission can bite"
-                        if n <= cap
-                        else f"SCHEDULER binds at {cap}, not KV — a KV policy may never fire"
+                    mml = int(cfg["engine"]["max_model_len"])
+                    # Which constraint binds is NOT a property of this file. The cache
+                    # fills with `max_num_seqs x tokens_per_request` tokens, and the
+                    # request length comes from the experiment. Comparing seqs-at-
+                    # max_model_len against max_num_seqs assumes every request uses the
+                    # full context; at a realistic length it is wrong by the ratio
+                    # between them, and it reported "KV binds" for a workload whose
+                    # kv_used_fraction could not pass 0.35.
+                    pool_tokens = n * mml
+                    crossover = pool_tokens / cap
+                    lines.append(
+                        f"    {'':<20} {kv_total:.0f}GB KV = ~{pool_tokens / 1000:.0f}k tokens"
+                        f"  (~{n:.0f} seqs at max_model_len {mml})"
                     )
                     lines.append(
-                        f"    {'':<20} ~{n:.0f} seqs at {cfg['engine']['max_model_len']} "
-                        f"tokens ({kv_total:.0f}GB KV), max_num_seqs={cap} -> {verdict}"
+                        f"    {'':<20} max_num_seqs={cap} -> KV binds only above "
+                        f"~{crossover / 1000:.1f}k tokens/request; below that the "
+                        f"SCHEDULER binds"
+                    )
+                    lines.append(
+                        f"    {'':<20} so a KV policy can fire only if the experiment "
+                        f"sends requests longer than ~{crossover / 1000:.1f}k tokens"
                     )
         if not mine:
             lines.append("    (no pools placed here)")
@@ -749,12 +1050,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host", help="only this host's manifests")
     p.add_argument("--env", action="store_true", help="print the gateway environment")
     p.add_argument("--plan", action="store_true", help="print what lands where")
+    p.add_argument(
+        "--serve",
+        action="store_true",
+        help="print the `vllm serve` command lines, for a bare GPU box with no cluster",
+    )
     a = p.parse_args(argv)
 
     try:
         cfg = load(a.config)
         if a.plan:
             print(plan(cfg))
+            return 0
+        if a.serve:
+            # A rented GPU box is an Ubuntu machine with a driver and no cluster, so
+            # the manifests are useless there. Generated from the same config as the
+            # manifests, so the bare-VM path cannot drift from it in the settings that
+            # decide the experiment — `infra/setup/lambda_vllm.sh` hardcodes
+            # gpu-memory-utilization 0.85 and omits --max-num-seqs, which is exactly
+            # the flag that decides whether a KV policy can fire at all.
+            print(serve_commands(cfg, host=a.host))
             return 0
         if a.env:
             for k, v in gateway_env(cfg).items():
