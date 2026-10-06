@@ -1,0 +1,35 @@
+# pair — 2 GPUs, two aggregated engines behind one gateway.
+#
+# ADDS over single   placement. Two destinations, so choosing one is a decision and
+#                    the router's scorers (prefix affinity, token load, KV headroom)
+#                    do something measurable
+# STILL CANNOT       separate prefill from decode; a long prefill still stalls decode
+#                    for everyone on that engine
+
+topology:
+  mode: aggregated
+  split: phase
+
+pools:
+  - name: engine
+    replicas: 2
+    tensorParallelSize: 1
+    pipelineParallelSize: 1
+    gpus: 1
+
+kv: {enabled: false}
+
+# Two replicas to move between, so autoscaling is now meaningful. Off by default:
+# a run whose replica count changes mid-flight cannot attribute a latency change to
+# the policy.
+autoscale: {enabled: false}
+keda:      {enabled: false}
+hami:      {enabled: false}
+slicing:   {enabled: false}
+
+gateway:
+  enabled: true
+  tenantTokensPerMin: 0
+
+observability: {enabled: true}
+ui:            {enabled: true}

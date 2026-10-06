@@ -1,0 +1,42 @@
+apiVersion: v2
+name: admitperf-lab
+description: One GPU-serving cluster — engines, gateway, router, KV transport, observability.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+# Subcharts, so the four shell scripts that ran `helm repo add` and `helm upgrade` in a
+# fixed order are gone. Each one is conditional on a values flag, which is what makes a
+# topology a values file rather than a different script.
+#
+# This is the piece the old setup/ could not express: lambda_k3s_hami.sh installed HAMi
+# and KEDA unconditionally, so a single-GPU aggregated config ran a GPU slicer and an
+# autoscaler it never asked for.
+dependencies:
+  # Without a device plugin the node advertises nvidia.com/gpu: 0 and every engine is
+  # unschedulable, whatever the runtime. k3s --default-runtime nvidia gives containers
+  # ACCESS to the card; it does not ADVERTISE it as a schedulable resource.
+  #
+  # HAMi's own plugin does both, so exactly one of the two is installed — validation
+  # refuses having neither, which is how a clean install left the engine Pending with
+  # "Insufficient nvidia.com/gpu" and nothing in the plan hinting why.
+  - name: nvidia-device-plugin
+    version: "0.17.4"
+    repository: https://nvidia.github.io/k8s-device-plugin
+    condition: nvidia-device-plugin.enabled
+
+  - name: hami
+    version: "2.9.0"
+    repository: https://project-hami.github.io/HAMi/
+    condition: hami.enabled
+
+  - name: keda
+    version: "2.17.2"
+    repository: https://kedacore.github.io/charts
+    condition: keda.enabled
+
+  - name: kube-prometheus-stack
+    version: "77.14.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: observability.enabled
+    alias: observability

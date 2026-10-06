@@ -1,12 +1,19 @@
 # Topology — why `cluster.yaml` says what it says
 
+> **The bring-up commands in this file predate the Helm chart.** `infra/render.py`,
+> `infra/config/*.yaml` and `infra/setup/lambda_*.sh` no longer exist; a topology is
+> now `infra/values/<name>.yaml` and the commands are `make plan` / `make up` /
+> `make down` (see [../README.md](../README.md)). Everything about the gateway, router,
+> KV transport and dashboards still describes the code in `infra/lib`, which moved
+> across unchanged.
+
 The config is deliberately terse. This is the reasoning behind it, and the list of
 things the renderer refuses.
 
 ```
-python -m infra.render infra/config/cluster.yaml --plan    # what lands where
-python -m infra.render infra/config/cluster.yaml --env     # the gateway's env
-python -m infra.render infra/config/cluster.yaml --host gpu-a -o /tmp/a.yaml
+make plan VALUES=cluster    # what lands where
+make -C infra show VALUES=cluster --env     # the gateway's env
+make -C infra show VALUES=cluster --host gpu-a -o /tmp/a.yaml
 ```
 
 Part of the [cluster docs](README.md). Overview: [ARCHITECTURE.md](ARCHITECTURE.md)

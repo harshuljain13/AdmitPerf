@@ -111,3 +111,8 @@ experiments/*/results/**/trace.jsonl
 # Runs are outputs, not source: they are large, machine-written, and reproducible from
 # the command that made them.
 experiments/
+
+# Helm subcharts, fetched by `make -C infra deps`. Chart.lock IS committed — it pins
+# the versions, so the lock is the reproducible part and the tarballs are a cache.
+infra/chart/charts/
+infra/.tunnel.pid
