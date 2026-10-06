@@ -1,12 +1,19 @@
 # Things that will confuse you
 
+> **The bring-up commands in this file predate the Helm chart.** `infra/render.py`,
+> `infra/config/*.yaml` and `infra/setup/lambda_*.sh` no longer exist; a topology is
+> now `infra/values/<name>.yaml` and the commands are `make plan` / `make up` /
+> `make down` (see [../README.md](../README.md)). Everything about the gateway, router,
+> KV transport and dashboards still describes the code in `infra/lib`, which moved
+> across unchanged.
+
 Each of these cost real time. They are collected here because every one looks
 like a different problem than it is.
 
 **`READY 1/1` does not mean serving.** Without a readiness probe a pod reports
 ready minutes before vLLM binds its port, while the engine downloads weights and
 compiles CUDA graphs. It looks exactly like a crash, and any latency measured in
-that window is meaningless. The manifests `infra/render.py` generates include a
+that window is meaningless. The manifests `infra/chart (Helm) and infra/plan.py` generates include a
 probe; the originals vendored from the reference lab did not.
 
 **The engine's own traceback is not the error.** When the engine core dies, the

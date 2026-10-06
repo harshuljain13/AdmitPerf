@@ -111,7 +111,7 @@ lines before it. `kubectl logs … | grep -v '(APIServer'` is how you see it.
 
 ```mermaid
 sequenceDiagram
-    participant D as day2_observability.sh
+    participant D as observability.sh
     participant H as Helm
     participant PY as observability/dashboards.py
     participant CM as ConfigMap

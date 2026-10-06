@@ -1,0 +1,74 @@
+# sliced — prefill and decode on HAMi slices of ONE card.
+#
+# The only way to exercise disaggregation on a single GPU, which is what you have when
+# you have rented one box. Each pool gets a memory slice rather than a whole card.
+#
+# COSTS     both pools contend for the same SMs, so latency numbers are not comparable
+#           with disagg.yaml on four cards. Use it to test the PLUMBING — the handoff,
+#           the router, the gateway — not to measure performance.
+#
+# Requires the HAMi scheduler: without it a gpumem request is ignored, the pod takes a
+# whole card, and two "slices" are quietly two cards. Validation refuses that pairing.
+
+topology:
+  mode: disaggregated
+  split: phase
+
+pools:
+  - name: prefill
+    replicas: 1
+    tensorParallelSize: 1
+    pipelineParallelSize: 1
+    gpus: 1
+  - name: decode
+    replicas: 1
+    tensorParallelSize: 1
+    pipelineParallelSize: 1
+    gpus: 1
+
+kv:
+  enabled: true
+  backend: mooncake
+
+# HAMi's device plugin advertises nvidia.com/gpu AND nvidia.com/gpumem, so the plain
+# one would double-advertise the card.
+nvidia-device-plugin:
+  enabled: false
+
+hami:
+  enabled: true
+slicing:
+  enabled: true
+  # 40 GB card, two slices. Weights are ~14 GB each, so this leaves little KV — which
+  # is the point: it is a plumbing test, not a capacity test.
+  memPerSliceMiB: 16384
+
+# A SMALLER MODEL, and this is forced rather than a preference. 7B bf16 is ~15 GB of
+# weights, so two of them on one 40 GB card leave ~1 GB of cache between them — 14k
+# tokens, under two requests at 8.7k each, which preempts on almost every arrival. The
+# run would measure eviction thrash, not admission. `make plan VALUES=sliced` shows it.
+#
+# This is why the lab used a 3B here.
+model:
+  id: Qwen/Qwen2.5-3B-Instruct
+  servedNames: [lab]
+  params: 3.09e9
+  attention:
+    layers: 36
+    kvHeads: 2
+    headDim: 128
+    dtypeBytes: 2
+
+engine:
+  # 16 GiB slice: ~6 GB of weights leaves ~8 GB of cache per engine.
+  gpuMemoryUtilization: 0.90
+
+autoscale: {enabled: false}
+keda:      {enabled: false}
+
+gateway:
+  enabled: true
+  tenantTokensPerMin: 0
+
+observability: {enabled: true}
+ui:            {enabled: true}

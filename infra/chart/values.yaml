@@ -1,0 +1,243 @@
+# Defaults for the admitperf-lab chart. A TOPOLOGY IS A VALUES FILE, not a script.
+#
+# Everything the old infra/setup/*.sh decided by ordering is a flag here, so
+# `helm template` shows exactly what a topology deploys before anything is applied.
+# See values/single.yaml, values/pair.yaml, values/disagg.yaml, values/sliced.yaml.
+
+# ---------------------------------------------------------------------------
+#  MODEL
+# ---------------------------------------------------------------------------
+model:
+  id: Qwen/Qwen2.5-7B-Instruct
+  # Every name the engine answers to. The alias matters: the gateway's guardrail
+  # keeps an allowlist, and a client using the short name used to get
+  # 400 model_not_allowed for a model the engine behind it served happily.
+  servedNames: [lab]
+  quantization: null
+
+  # Bytes of KV per token = 2 x layers x kv_heads x head_dim x dtype_bytes.
+  # Declared because `make plan` needs it to tell you whether a KV policy can fire,
+  # and no deployment tool computes that.
+  attention:
+    layers: 28
+    kvHeads: 4
+    headDim: 128
+    dtypeBytes: 2
+  params: 7.6e9
+
+# ---------------------------------------------------------------------------
+#  ENGINE — vLLM flags, in one place
+# ---------------------------------------------------------------------------
+engine:
+  image: vllm/vllm-openai:v0.11.0
+  maxModelLen: 32768
+  gpuMemoryUtilization: 0.90
+
+  # The single setting that decides whether a KV-pressure policy can fire. The cache
+  # fills with maxNumSeqs x tokensPerRequest, so below the crossover
+  # (kvPoolTokens / maxNumSeqs) the scheduler binds first and kv_used_fraction cannot
+  # reach a high threshold at ANY arrival rate.
+  maxNumSeqs: 64
+
+  enablePrefixCaching: true
+  schedulingPolicy: priority
+  toolCallParser: hermes
+  enableAutoToolChoice: true
+  distributedExecutorBackend: mp
+  port: 8000
+  # NodePorts count up from here, one per engine.
+  baseNodePort: 30800
+
+# ---------------------------------------------------------------------------
+#  POOLS — the topology itself
+# ---------------------------------------------------------------------------
+#  Names are NOT free. infra/gateway and infra/router are written against exactly
+#  two pool names in ~15 places (metrics.py keys its dicts {"prefill","decode"};
+#  pools.py branches on `phase in ("prefill","both")`), so a third name is silently
+#  coerced into one of them. Two shapes are therefore supported:
+#
+#      aggregated      pools: [engine]              one pool, prefill and decode together
+#      disaggregated   pools: [prefill, decode]     separate phases, needs kv.enabled
+#
+#  `helm template` refuses anything else — see templates/_validate.tpl.
+# ---------------------------------------------------------------------------
+topology:
+  mode: aggregated
+  split: phase
+
+pools:
+  - name: engine
+    replicas: 1
+    tensorParallelSize: 1
+    pipelineParallelSize: 1
+    # Whole cards. A HAMi slice would masquerade as a GPU here and two slices of one
+    # card would look like TP=2 across two cards.
+    gpus: 1
+
+# ---------------------------------------------------------------------------
+#  GATEWAY — where an admission policy runs
+# ---------------------------------------------------------------------------
+gateway:
+  enabled: true
+  image: python:3.12-slim
+  port: 8080
+  nodePort: 30080
+  # hostPath to the synced lib/, so the lab's gateway and router run as-is rather
+  # than being rebuilt into an image on every edit.
+  libPath: /home/ubuntu/admitperf/lib
+
+  # Per-tenant token budget per minute. 0 disables it.
+  #
+  # The default in gateway/admission.py is 10_000, which is less than TWO requests at
+  # the length an admission experiment needs: a prompt at this cluster's crossover is
+  # ~8.2k tokens, so the second arrival exhausted it and 28 of 32 requests came back
+  # 429 tenant_tokens. A rate limit is client-attributable and has nothing to do with
+  # capacity, but in a report it is a refusal and it looked exactly like the KV policy
+  # working. Off by default here because an experiment wants capacity to be the only
+  # thing that sheds.
+  tenantTokensPerMin: 0
+
+  # The guardrail's limits. Its own defaults are 512 output tokens and 8,000 prompt
+  # CHARACTERS, and a prompt at the crossover is ~33,000 characters — so every request
+  # returned 400 prompt_too_long. Derived from maxModelLen below rather than pinned.
+  guardrail:
+    maxPromptCharsPerToken: 6
+
+  admission:
+    # Which AdmitPerf policy the gateway should apply.
+    #
+    # NOT YET WIRED. infra/gateway/admission.py and infra/router/router.py have their
+    # own admission logic (a tenant bucket, and a KV_SATURATION check that sheds
+    # `kv_free`) and import nothing from admitperf. These values are carried into the
+    # pod's environment and are read by nothing until that is changed. Stated here
+    # rather than omitted so the gap is visible instead of implied.
+    policy: kv_threshold
+    params:
+      threshold: 0.90
+    enforce: 1.0
+
+# ---------------------------------------------------------------------------
+#  KV TRANSPORT — only disaggregation needs it
+# ---------------------------------------------------------------------------
+#  Off for aggregated: each engine does prefill and decode for its own requests, so
+#  no handoff exists. The old lambda_apply_slices.sh deployed mooncake-store onto a
+#  one-GPU box with no second engine to hand KV to, because nothing tied the
+#  transport to the topology that needs it.
+#
+#  CAVEAT: the vendored transport POSTs a metadata dict, NOT KV bytes. Hop counts are
+#  instrumentation, not evidence that anything moved.
+kv:
+  enabled: false
+  backend: mooncake      # mooncake moves something; nccl and nixl are no-op stubs
+  port: 50051
+
+# ---------------------------------------------------------------------------
+#  ROUTER — Gateway API Inference Extension
+# ---------------------------------------------------------------------------
+#  InferencePool + an endpoint picker is the standardised seam for inference-aware
+#  routing and admission, and the natural home for an AdmitPerf policy.
+gie:
+  enabled: false
+  eppPort: 9002
+
+# ---------------------------------------------------------------------------
+#  AUTOSCALING
+# ---------------------------------------------------------------------------
+#  Scales a pool on orch_tokens_in_flight, so it needs the gateway publishing that
+#  metric, Prometheus scraping it, and more than one replica to move between.
+autoscale:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  tokensInFlightThreshold: "20000"
+
+keda:
+  enabled: false
+
+# ---------------------------------------------------------------------------
+#  GPU SLICING
+# ---------------------------------------------------------------------------
+#  Only when a card is shared between pools. Installing the HAMi scheduler without
+#  slicing is what the old bring-up did unconditionally.
+# Advertises nvidia.com/gpu so the scheduler can place an engine. Required unless HAMi
+# is installed, whose plugin advertises both nvidia.com/gpu and nvidia.com/gpumem.
+#
+# The hyphenated key is the subchart's name, which Helm requires for `condition` to
+# match. Not a style choice.
+nvidia-device-plugin:
+  enabled: true
+
+hami:
+  enabled: false
+  devicePlugin:
+    deviceSplitCount: 4
+
+slicing:
+  enabled: false
+  memPerSliceMiB: 16384
+
+# ---------------------------------------------------------------------------
+#  OBSERVABILITY
+# ---------------------------------------------------------------------------
+observability:
+  enabled: true
+
+  grafana:
+    service:
+      type: NodePort
+      # PINNED. Unpinned, k3s picks any port in 30000-32767, so the bring-up cannot
+      # know which to tunnel and the URL changes on every reinstall.
+      nodePort: 31495
+    adminPassword: admin
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+
+  prometheus:
+    service:
+      type: NodePort
+      nodePort: 30090
+    prometheusSpec:
+      # 1s, not the chart's 30s. KV cache occupancy fills and drains in seconds, so a
+      # coarse sample steps over the saturation event a policy reacts to — and the
+      # trace then shows headroom that was never there. This is the sample rate the
+      # whole measurement rests on.
+      scrapeInterval: 1s
+      scrapeTimeout: 1s
+      # Pods carry prometheus.io/scrape annotations; without this the stack ignores
+      # them and only scrapes ServiceMonitors.
+      additionalScrapeConfigsSecret: {}
+
+  # Per-GPU-node exporter: utilisation, framebuffer, power, from outside vLLM.
+  dcgm:
+    enabled: true
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:4.1.1-4.0.4-ubuntu22.04
+    port: 9400
+
+# ---------------------------------------------------------------------------
+#  CHAT UI
+# ---------------------------------------------------------------------------
+#  Points at the GATEWAY, not an engine, so a browser request passes through
+#  admission like any other.
+ui:
+  enabled: true
+  image: ghcr.io/open-webui/open-webui:main
+  nodePort: 30030
+
+# ---------------------------------------------------------------------------
+#  OVERFLOW — spill to a hosted model instead of shedding
+# ---------------------------------------------------------------------------
+#  The API key is NEVER rendered into a manifest. It is read from a Secret the
+#  bring-up creates out of .env, so it cannot reach git.
+overflow:
+  enabled: false
+  provider: superlinked
+  baseUrl: https://api.superlinked.com/v1
+  model: Qwen/Qwen3.5-4B
+  maxRequests: 20
+  maxTokens: 64
+  on: [503, 529]
+  secretName: admitperf-overflow

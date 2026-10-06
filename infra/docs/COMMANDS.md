@@ -1,5 +1,12 @@
 # Debugging commands — the cluster
 
+> **The bring-up commands in this file predate the Helm chart.** `infra/render.py`,
+> `infra/config/*.yaml` and `infra/setup/lambda_*.sh` no longer exist; a topology is
+> now `infra/values/<name>.yaml` and the commands are `make plan` / `make up` /
+> `make down` (see [../README.md](../README.md)). Everything about the gateway, router,
+> KV transport and dashboards still describes the code in `infra/lib`, which moved
+> across unchanged.
+
 10 shares its cluster with the cluster, so
 **[the cluster's COMMANDS.md](COMMANDS.md)** still applies for
 Kubernetes, HAMi, NVIDIA and KEDA. This file covers what 10 adds: the tunnel,
@@ -43,7 +50,7 @@ Which forwarded ports are actually bound locally. A missing port means that
 curl -sf http://127.0.0.1:8080/metrics >/dev/null && echo "gateway reachable" || echo "TUNNEL DOWN"
 ```
 
-The one-line health check. If this fails, re-run `bash setup/ssh.sh`; nothing
+The one-line health check. If this fails, re-run `make -C infra status`; nothing
 else will work until it passes.
 
 ---
@@ -54,7 +61,7 @@ else will work until it passes.
 kubectl -n monitoring get pods,svc
 ```
 
-Is the observability stack up. It is installed by `day2_observability.sh`
+Is the observability stack up. It is installed by `observability.sh`
 (Step 22), *not* by the cluster bring-up — missing pods usually means Step 22
 was skipped.
 

@@ -1,5 +1,12 @@
 # Runbook — bringing the cluster up
 
+> **The bring-up commands in this file predate the Helm chart.** `infra/render.py`,
+> `infra/config/*.yaml` and `infra/setup/lambda_*.sh` no longer exist; a topology is
+> now `infra/values/<name>.yaml` and the commands are `make plan` / `make up` /
+> `make down` (see [../README.md](../README.md)). Everything about the gateway, router,
+> KV transport and dashboards still describes the code in `infra/lib`, which moved
+> across unchanged.
+
 The whole stack in one module: the disaggregated cluster from the cluster, the
 observability layer from 9b, and a new engine-tuning layer on top.
 
@@ -103,7 +110,7 @@ Six guardrail scenarios — the 400s that happen before admission ever runs.
 Mac terminal, already in `class-code/admitperf`.
 
 ```
-bash setup/sync_to_lambda.sh
+bash scripts/sync.sh
 ```
 
 Copy the lab to `~/admitperf` on the GPU box over rsync/SSH. Reads `LAMBDA` and
@@ -114,7 +121,7 @@ Copy the lab to `~/admitperf` on the GPU box over rsync/SSH. Reads `LAMBDA` and
 Same Mac terminal. This is the only SSH. Leave it open for the rest of the lab.
 
 ```
-bash setup/ssh.sh
+make -C infra status
 ```
 
 Opens the shell *and* the seven port-forwards. Every `127.0.0.1` URL in this
@@ -126,7 +133,7 @@ here first.
 Same terminal — prompt is now `ubuntu@…:~/admitperf$`. Do not open another terminal.
 
 ```
-bash setup/lambda_setup.sh
+make up
 ```
 
 Build the venv, install requirements plus vLLM, verify torch and CUDA see the device.
@@ -136,7 +143,7 @@ Build the venv, install requirements plus vLLM, verify torch and CUDA see the de
 Same SSH terminal.
 
 ```
-bash setup/lambda_cluster.sh
+make up
 ```
 
 k3s + HAMi, then the sliced workloads, Open WebUI, and the KEDA ScaledObjects.
@@ -158,7 +165,7 @@ not Ready, see **[docs/COMMANDS.md](COMMANDS.md)**.
 Same SSH terminal.
 
 ```
-bash setup/smoke_sliced.sh
+make smoke
 ```
 
 Curl both model endpoints and check `nvidia-smi` shows two compute processes on
@@ -346,14 +353,14 @@ One JSON line per request. Read `happened` for the outcome verb and
 
 ---
 
-## Day 2 — Grafana
+## Grafana
 
 ### Step 22
 
 Step 2 SSH terminal (already on the GPU box). Do not SSH again. Cluster from Step 4 must be up.
 
 ```
-bash setup/day2_observability.sh
+make up
 ```
 
 Install Prometheus and Grafana by Helm, generate the ten dashboards from

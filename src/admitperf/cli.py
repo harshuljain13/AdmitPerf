@@ -64,6 +64,80 @@ def watch(url: str, duration: str, every: float, out: str) -> None:
 
 
 @main.command()
+@click.argument("url")
+@click.option("--model", required=True, help="the --served-model-name the engine answers to")
+@click.option("--rps", required=True, type=float, help="requests offered per second")
+@click.option("--for", "duration", default="120s", show_default=True, help="90s · 15m")
+@click.option("--prompt-tokens", default=8192, show_default=True)
+@click.option("--output-tokens", default=512, show_default=True)
+@click.option("--seed", default=0, show_default=True, help="same seed, same traffic")
+@click.option(
+    "--endpoint",
+    type=click.Choice(["chat", "completions"]),
+    default="chat",
+    show_default=True,
+    help="chat is /v1/chat/completions; many engines 404 the legacy route",
+)
+@click.option("-o", "--out", default="load.jsonl", show_default=True)
+def load(
+    url: str,
+    model: str,
+    rps: float,
+    duration: str,
+    prompt_tokens: int,
+    output_tokens: int,
+    seed: int,
+    endpoint: str,
+    out: str,
+) -> None:
+    """Offer traffic at a fixed rate, and record what each request got.
+
+    \b
+      admitperf load http://127.0.0.1:8000 --model lab --rps 12 --for 3m
+
+    Arrivals follow the clock, not completions — a generator that waits for a
+    response before sending the next one slows down with the server and can never
+    build the queue admission control exists to shed.
+    """
+    from admitperf.load import Load
+
+    seconds = _seconds(duration)
+    click.echo(
+        f"offering {rps:g} rps for {seconds:g}s to {url}"
+        f" ({prompt_tokens} prompt + {output_tokens} out) -> {out}"
+    )
+    gen = Load(
+        url,
+        out,
+        model=model,
+        rps=rps,
+        prompt_tokens=prompt_tokens,
+        output_tokens=output_tokens,
+        seed=seed,
+        endpoint=endpoint,
+    ).run(seconds)
+
+    click.echo(f"\n  offered   {gen.sent}")
+    click.echo(f"  served    {gen.ok}")
+    click.echo(f"  refused   {gen.refused}   (503/429 — a policy turning work away)")
+    click.echo(f"  failed    {gen.failed}")
+    if gen.prompt_tokens_seen:
+        mean = sum(gen.prompt_tokens_seen) / len(gen.prompt_tokens_seen)
+        # The engine's own count, because the prompt was built from a word estimate.
+        # Whether a KV policy can fire depends on this number, not on the request.
+        click.echo(f"\n  prompt tokens the engine actually saw: {mean:.0f} (asked {prompt_tokens})")
+    if gen.at_capacity:
+        click.echo(
+            f"\n  {gen.at_capacity} arrival(s) dropped at the {1024}-in-flight cap."
+            "\n  The engine fell further behind than the generator can hold open."
+        )
+    if gen.aborted:
+        raise SystemExit(f"\ngave up: {gen.aborted}")
+    if gen.ok == 0 and gen.refused == 0:
+        raise SystemExit(f"nothing was served. Is {url} reachable and is --model right?")
+
+
+@main.command()
 @click.argument("log", type=click.Path(exists=True, dir_okay=False))
 @click.option(
     "--check",

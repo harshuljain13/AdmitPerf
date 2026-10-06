@@ -1,5 +1,12 @@
 # Data flow — where a request actually goes, file by file
 
+> **The bring-up commands in this file predate the Helm chart.** `infra/render.py`,
+> `infra/config/*.yaml` and `infra/setup/lambda_*.sh` no longer exist; a topology is
+> now `infra/values/<name>.yaml` and the commands are `make plan` / `make up` /
+> `make down` (see [../README.md](../README.md)). Everything about the gateway, router,
+> KV transport and dashboards still describes the code in `infra/lib`, which moved
+> across unchanged.
+
 [ARCHITECTURE.md](ARCHITECTURE.md) describes the shape of the system. This one
 follows a single request through the code, naming the file and line at each
 step, and answers the questions the file layout does not.
@@ -32,7 +39,7 @@ sequenceDiagram
     participant A as lambda_apply_slices.sh
     participant API as Kubernetes
 
-    U->>C: bash setup/lambda_cluster.sh
+    U->>C: make up
     C->>G: source (guard)
     G->>G: refuse on macOS or without nvidia-smi
     C->>K: bash
@@ -55,7 +62,7 @@ sequenceDiagram
 | `setup/_lambda_only.sh` | Nothing — refuses to run off the GPU box |
 | `setup/lambda_k3s_hami.sh` | k3s, HAMi scheduler, KEDA operator |
 | `setup/lambda_apply_slices.sh` | vllm-prefill, vllm-decode, mooncake, orch-serve, ScaledObjects, Open WebUI |
-| `setup/day2_observability.sh` | Prometheus, Grafana, dashboards, DCGM — **separate, Step 22** |
+| `setup/observability.sh` | Prometheus, Grafana, dashboards, DCGM — **separate step** |
 
 Observability is deliberately not part of bring-up. That is why `kubectl -n
 monitoring get pods` is empty until Step 22.
