@@ -1,0 +1,24 @@
+# ===========================================================================
+#  pair — 2 GPUs, aggregated
+# ===========================================================================
+#  The second step. Placement becomes a decision.
+#
+#      python -m infra.render infra/config/pair.yaml --plan
+#
+#  What this adds          two interchangeable workers, so least_loaded,
+#                         round_robin and prefix_affinity differ from each
+#                         other and can be compared
+#  Fleet capacity          ~23 concurrent, against ~12 on single
+#  Per-worker scarcity     UNCHANGED at ~12. Adding a host adds fleet capacity,
+#                         not per-worker pressure, so when admission fires on a
+#                         given worker is the same as on single
+# ===========================================================================
+extends: base.yaml
+
+topology:
+  mode: aggregated
+  pools:
+    engine:
+      replicas: 2
+      tensor_parallel_size: 1
+      # Unpinned: the renderer places each replica and prints where.

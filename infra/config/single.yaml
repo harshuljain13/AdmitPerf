@@ -1,0 +1,49 @@
+# ===========================================================================
+#  single — 1 GPU, aggregated
+# ===========================================================================
+#  Start here. The fewest things that can be wrong.
+#
+#      admitperf plan infra/config/single.yaml           what lands where
+#      admitperf plan infra/config/single.yaml --serve   how to bring it up
+#
+#  What this proves        the bring-up works, the gateway reaches a worker,
+#                         decisions are logged, a report is produced
+#  What it cannot show     placement. One worker means one destination, which
+#                         is routing rather than a decision
+#
+#  WHETHER A KV POLICY CAN FIRE DEPENDS ON THE WORKLOAD, NOT ON THIS FILE.
+#  The KV pool is ~21.4 GiB = ~401k tokens (56 KiB/token for this model). What
+#  fills it is `max_num_seqs x tokens_per_request`, and tokens_per_request comes
+#  from the experiment:
+#
+#      2048 prompt +  120 out =  2168/req -> 64 seqs hold 139k = 0.35 of the pool
+#      8192 prompt +  512 out =  8704/req -> 46 seqs hold the WHOLE pool
+#
+#  So at short requests `max_num_seqs` binds first and kv_used_fraction cannot
+#  pass 0.35 — a 0.90 threshold is unreachable and the run is INERT no matter
+#  the arrival rate. An earlier version of this comment did the arithmetic at
+#  max_model_len (32768) instead of at the workload's length, concluded "KV binds
+#  before max_num_seqs", and was wrong by 2.6x in the fraction.
+#
+#  Check before you deploy, not after.
+# ===========================================================================
+extends: base.yaml
+
+# One host, declared here rather than inherited. base.yaml carries four, from when
+# the fleet had four instances, and a plan listing three hosts with "(no pools
+# placed here)" is noise that hides the one line that matters.
+hosts:
+  - name: gpu-1
+    address_env: LAMBDA_HOST_1
+    private_env: LAMBDA_PRIVATE_1
+    gpu: {kind: A100, count: 1, hbm_gb: 40}
+
+topology:
+  mode: aggregated
+  # Each engine does prefill and decode for its own requests, so no KV hop
+  # exists and kv_transport must not be set.
+  pools:
+    engine:
+      replicas: 1
+      tensor_parallel_size: 1
+      host: gpu-1
