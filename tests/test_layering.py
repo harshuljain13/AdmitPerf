@@ -244,3 +244,26 @@ def test_the_load_generator_is_not_in_the_package() -> None:
     the opposite of the claim that you call it from your own gateway.
     """
     assert not (SRC / "load.py").exists()
+
+
+def test_the_package_reads_no_environment_variables() -> None:
+    """A policy's behaviour must come from its arguments, not from the shell that
+    happened to start the gateway.
+
+    Two deployments passing identical parameters have to decide identically, or a report
+    naming `kv_threshold 0.90` describes something the reader cannot reconstruct. It also
+    keeps the package out of the business of owning a .env.
+    """
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        text = path.read_text()
+        for needle in ("os.environ", "os.getenv", "load_dotenv"):
+            if needle in text:
+                offenders.append(f"{path.relative_to(REPO)}: {needle}")
+    assert not offenders, offenders
+
+
+def test_no_env_example_in_the_package() -> None:
+    """There is nothing to give an example of. Cluster credentials live with the
+    cluster, in llm-inference-experiments/admitperf_testing."""
+    assert not (REPO / ".env.example").exists()
