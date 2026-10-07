@@ -139,7 +139,7 @@ def test_the_sidebar_scopes_and_the_content_bar_selects(tmp_path, monkeypatch) -
     """The division that fixed the squeeze.
 
     The sidebar holds what scopes the whole page — brand, section, experiment. View and
-    arm sit inline above the content. A RIGHT-hand panel holding them as well left the
+    run sit inline above the content. A RIGHT-hand panel holding them as well left the
     charts about sixty percent of the width, which for a page whose job is a chart is
     the wrong way round.
     """
@@ -153,7 +153,7 @@ def test_the_sidebar_scopes_and_the_content_bar_selects(tmp_path, monkeypatch) -
     assert "test-exp" in " ".join(str(m.value) for m in at.sidebar.markdown)
 
     inline = {s.label for s in at.selectbox} | {s.label for s in at.segmented_control}
-    # Arm and Run: the Experiments section is for choosing a run and reading its stats.
+    # The Experiments section is for choosing a run and reading its stats.
     assert {"Policy", "Run"} <= inline
     # The signal picker belongs to one chart, so it is not a page-level control.
     assert "Signal" in inline

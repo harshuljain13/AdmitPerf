@@ -16,7 +16,7 @@ IDLE = {"vllm:kv_cache_usage_perc": 0.05, "vllm:num_requests_waiting": 0.0}
 
 
 def _run(path, policy, metrics_seq, ttft_for):
-    """Drive one arm and record an outcome per admitted request."""
+    """Drive one run and record an outcome per admitted request."""
     with policy:
         for i, m in enumerate(metrics_seq):
             rid = f"r{i}"
@@ -30,7 +30,7 @@ def _pair(tmp_path, *, n=20, slow_baseline=True):
     """A baseline that misses its SLO, and a policy that sheds to protect it.
 
     The load alternates so the policy refuses roughly half rather than everything —
-    an arm that refuses all of its traffic records no outcomes, and then there is
+    a run that refuses all of its traffic records no outcomes, and then there is
     nothing to compare.
     """
     base_path, pol_path = tmp_path / "base.jsonl", tmp_path / "pol.jsonl"
@@ -114,7 +114,7 @@ def test_cost_is_not_invented_when_no_outcomes_were_recorded(tmp_path) -> None:
 
 
 def test_a_real_improvement_is_reported_as_one(tmp_path) -> None:
-    """With one run per arm the three checks can pass, and the page still refuses to
+    """With one run per policy the three checks can pass, and the page still refuses to
     call it quotable — that needs repeats."""
     c = _pair(tmp_path, n=40)
     text = c.text()
@@ -204,7 +204,7 @@ def test_a_repeat_warning_is_attached_to_a_trustworthy_result(tmp_path) -> None:
 
 
 # --------------------------------------------------------------------------
-# Repeats — one run of each arm has no error bar
+# Repeats — one run of each run has no error bar
 # --------------------------------------------------------------------------
 
 
@@ -222,7 +222,7 @@ def _arm(dir_path, policy_factory, ttfts):
 
 
 def test_a_directory_is_read_as_repeats_of_one_arm(tmp_path) -> None:
-    """How an arm gets an error bar. One file is one run; a directory is the set."""
+    """How a run gets an error bar. One file is one run; a directory is the set."""
     base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [2000.0, 2100.0, 1900.0])
     pol = _arm(
         tmp_path / "pol", lambda log: KvThreshold(threshold=0.9, log=log), [100.0, 120.0, 90.0]
@@ -233,7 +233,7 @@ def test_a_directory_is_read_as_repeats_of_one_arm(tmp_path) -> None:
 
 
 def test_a_single_run_refuses_to_claim_separation(tmp_path) -> None:
-    """With one run per arm the question cannot be asked, and answering it anyway is
+    """With one run per policy the question cannot be asked, and answering it anyway is
     how a difference inside the noise gets published."""
     c = _pair(tmp_path, n=40)
     assert c.separated() is None
@@ -251,9 +251,9 @@ def test_the_spread_is_shown_when_there_is_one(tmp_path) -> None:
 
 
 def test_overlapping_arms_are_called_noise_not_a_result(tmp_path) -> None:
-    """The check that matters. Two arms whose repeats overlap have not separated,
+    """The check that matters. Two policies whose repeats overlap have not separated,
     however large the gap between their medians looks."""
-    # Both arms hover around the same goodput; admitted counts differ run to run.
+    # Both policies hover around the same goodput; admitted counts differ run to run.
     base = _arm(tmp_path / "base", lambda log: NoAdmission(log=log), [900.0, 1100.0, 950.0])
     pol = _arm(
         tmp_path / "pol", lambda log: KvThreshold(threshold=0.9, log=log), [900.0, 1100.0, 950.0]
@@ -307,4 +307,4 @@ def test_an_empty_directory_is_an_error_not_an_empty_comparison(tmp_path) -> Non
     except ValueError as exc:
         assert "no .jsonl logs" in str(exc)
     else:
-        raise AssertionError("an empty arm should not produce a comparison")
+        raise AssertionError("an empty run should not produce a comparison")

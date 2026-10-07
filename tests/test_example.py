@@ -51,7 +51,7 @@ def test_repeats_produce_runs_that_actually_differ(tmp_path) -> None:
 
     This is load-bearing. An earlier version set a seed and then never used `random`,
     so every repeat was byte-identical: the spread was zero and the comparison printed
-    a clean separation on the strength of one deterministic run per arm. An error bar
+    a clean separation on the strength of one deterministic run per policy. An error bar
     computed from identical runs is worse than no error bar.
     """
     proc = subprocess.run(
@@ -65,7 +65,7 @@ def test_repeats_produce_runs_that_actually_differ(tmp_path) -> None:
 
     from admitperf.report import Report
 
-    arm = tmp_path / "experiments" / "demo" / "no_admission"
-    maxima = {Report.from_log(p).signal_range("queue_depth")["max"] for p in arm.glob("*.jsonl")}
+    run = tmp_path / "experiments" / "demo" / "no_admission"
+    maxima = {Report.from_log(p).signal_range("queue_depth")["max"] for p in run.glob("*.jsonl")}
     assert len(maxima) > 1, f"every repeat was identical: {maxima}"
     assert "(" in proc.stdout, "no spread was reported despite repeats differing"

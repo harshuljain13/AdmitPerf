@@ -159,7 +159,7 @@ class FakeEngine:
 def run(policy, seed: int = 0) -> None:
     """Drive traffic through one policy.
 
-    The seed is shared between arms within a repeat, so the two policies see the same
+    The seed is shared between runs within a repeat, so the two policies see the same
     traffic — otherwise a difference between them could be a difference between
     traffic patterns and the comparison would be measuring the generator. It CHANGES
     between repeats, because repeats of an identical trace have no spread to report
@@ -208,7 +208,7 @@ MAX_WAITING = int((SLO_TTFT_MS - 180) / TICK_MS * (MAX_CONCURRENT / SERVICE_TICK
 
 
 def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Path]:
-    """Run every arm, print the reports and the comparisons, return the arm directories."""
+    """Run every run, print the reports and the comparisons, return the run directories."""
     out = DEFAULT_OUT if out is None else Path(out)
     out.mkdir(parents=True, exist_ok=True)
     #: Named, so a report can group these three as one comparable set rather than
@@ -226,7 +226,7 @@ def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Pat
     # Run directories are named by POLICY, not by a label of mine, so the path and the
     # log's own `policy` field cannot disagree.
     root = out / experiment
-    arms = {
+    runs = {
         "no admission (baseline)": (
             root / "no_admission",
             lambda log, run: NoAdmission(log=log, run=run, **ident),
@@ -242,18 +242,18 @@ def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Pat
     }
 
     for repeat in range(1, repeats + 1):
-        for _, (policy_dir, build) in arms.items():
+        for _, (policy_dir, build) in runs.items():
             policy_dir.mkdir(parents=True, exist_ok=True)
             log = policy_dir / f"r{repeat}.jsonl"
             log.unlink(missing_ok=True)
             run(build(log, f"r{repeat}"), seed=repeat)
 
-    baseline = arms["no admission (baseline)"][0]
-    for name, (policy_dir, _) in arms.items():
+    baseline = runs["no admission (baseline)"][0]
+    for name, (policy_dir, _) in runs.items():
         echo(f"\n{'=' * 68}\n  {name}  (repeat 1 of {repeats})\n{'=' * 68}")
         echo(Report.from_log(policy_dir / "r1.jsonl").text())
 
-    for name, (policy_dir, _) in arms.items():
+    for name, (policy_dir, _) in runs.items():
         if policy_dir == baseline:
             continue
         echo(f"\n\n### baseline  vs  {name}")
@@ -263,7 +263,7 @@ def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Pat
     echo("\n  admitperf compare --experiment " + experiment)
     echo("  admitperf dashboard")
     echo(f"\nthe code that produced this: {Path(__file__).name} in the admitperf package")
-    return {name: arm_dir for name, (arm_dir, _) in arms.items()}
+    return {name: arm_dir for name, (arm_dir, _) in runs.items()}
 
 
 if __name__ == "__main__":  # python -m admitperf.demo

@@ -1,4 +1,4 @@
-"""A named, comparable set of arms."""
+"""A named, comparable set of runs."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class Experiment:
 
     @property
     def baseline(self) -> PolicyRuns | None:
-        """The arm that admits everything.
+        """The run that admits everything.
 
         Without it there is nothing to compare against, and "the policy refused 27%"
         has nothing to be 27% of.

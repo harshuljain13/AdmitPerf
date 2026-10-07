@@ -72,14 +72,45 @@ def experiments(root: str | Path = ".") -> dict[str, Experiment]:
     return found
 
 
+#: Names listed before the message gives up and says how many are left. Run from a home
+#: directory this once printed sixteen unrelated folders, which is less useful than
+#: printing none.
+MOST_NAMES_TO_LIST = 10
+
+
 def find(name: str, root: str | Path = ".") -> Experiment:
     """One experiment by name, with a message that lists the alternatives.
 
     "no such experiment" is useless on its own — the whole point of naming things is
     being able to ask for one by name and be told what the names are.
+
+    Only NAMED experiments are offered. A log with no `experiment` field cannot be
+    asked for by name, so listing it as an alternative sends a reader looking for a
+    name that does not exist.
     """
     all_of_them = experiments(root)
     if name in all_of_them:
         return all_of_them[name]
-    known = ", ".join(sorted(all_of_them)) or "none found"
-    raise KeyError(f"no experiment named {name!r} under {root}. Found: {known}")
+
+    named = sorted(n for n in all_of_them if n and not n.endswith("(unnamed)"))
+    lines = [f"no experiment named {name!r} under {Path(root).resolve()}"]
+    if named:
+        shown = named[:MOST_NAMES_TO_LIST]
+        lines.append("")
+        lines.append("  did you mean:")
+        lines += [f"    {n}" for n in shown]
+        if len(named) > len(shown):
+            lines.append(f"    ... and {len(named) - len(shown)} more")
+    else:
+        # The usual cause, and worth saying plainly: logs live under the directory they
+        # were written in, and experiments group by the name a policy DECLARED, not by
+        # path. `cd` to where the run wrote them.
+        lines += [
+            "",
+            "  No named experiments here. Logs are found under the current directory,",
+            "  and an experiment is the name a policy was given — not a folder name.",
+            "",
+            "    admitperf experiments        list what is here",
+            "    admitperf demo               make some, no hardware needed",
+        ]
+    raise KeyError("\n".join(lines))
