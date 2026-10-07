@@ -533,7 +533,7 @@ def comparison_view(exp: Experiment, candidate: PolicyRuns) -> None:
         f"Dot is the median; the line through it is the range across repeats. "
         f"<span style='color:{theme.GREY}'>grey = baseline</span> · "
         f"<span style='color:{theme.GREEN}'>green = beat it</span> · "
-        f"<span style='color:{theme.RED}'>red = worse</span>. Two arms whose lines "
+        f"<span style='color:{theme.RED}'>red = worse</span>. Two policies whose lines "
         "overlap have not separated, whatever the gap between their dots looks like.",
         unsafe_allow_html=True,
     )
@@ -709,7 +709,7 @@ def compare_controls(exp: Experiment) -> PolicyRuns | None:
         st.warning(
             f"**{exp.name}** has no baseline, so there is nothing to compare "
             'against — and "the policy refused 27%" has nothing to be 27% of. Run an '
-            "arm whose policy admits everything; `NoAdmission` is one."
+            "run whose policy admits everything; `NoAdmission` is one."
         )
         return None
     if not exp.candidates:

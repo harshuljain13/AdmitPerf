@@ -84,9 +84,11 @@ experiments/*/results/**/trace.jsonl.gitkeep
 modal_logs/
 
 # Secrets
+# No .env.example either: the package reads no environment variables, so there is
+# nothing to give an example of. Cluster credentials belong with the cluster, in
+# llm-inference-experiments/admitperf_testing.
 .env
 .env.*
-!.env.example
 
 # Roadmap intentionally outside this repo — do not commit if placed here by mistake
 Roadmap.md

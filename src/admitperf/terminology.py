@@ -53,7 +53,7 @@ TERMS: dict[str, tuple[str, str, str]] = {
         "One policy within one experiment, with all of its runs.",
         "A comparison takes one side from the baseline and one from a candidate. Runs "
         "live inside a policy rather than beside it, because a single run has no error "
-        "bar. Clinical trials call this an *arm*; this package does not, because the "
+        "bar. Clinical trials call this an *run*; this package does not, because the "
         "thing on screen is a policy.",
         "admitperf",
     ),
@@ -63,7 +63,7 @@ TERMS: dict[str, tuple[str, str, str]] = {
         "admitperf",
     ),
     "baseline": (
-        "The arm that admits everything.",
+        "The run that admits everything.",
         "Not a placeholder. Without it “the policy refused 27%” has nothing to be "
         "27% of, and no latency figure is interpretable. It is also why `no_admission` "
         "refusing nothing is its job rather than a failure.",

@@ -105,7 +105,7 @@ so that is a complete shadow deployment with no flag.
 policy = KvWall(threshold=0.90, enforce=0.5)  # half the traffic governed
 ```
 
-Both arms in one run under identical conditions, split deterministically by request
+Both policies in one run under identical conditions, split deterministically by request
 id so a retry is treated the same way twice. In production it caps the blast radius.
 
 ## Why
@@ -170,11 +170,11 @@ admitperf compare --experiment demo
   p95 TTFT of served requests is 1.78x lower: 2630 (2530-2830)ms -> 1480 (1430-1480)ms
   goodput is up: 0.542 (0.530-0.573) -> 0.723 (0.703-0.755)  (of offered)
 
-  ok  the arms separate across 5 repeats
+  ok  the runs separate across 5 repeats
 ```
 
 Four checks come before any of those numbers: the policy fired in **every** repeat,
-every run faced the same load, outcomes were recorded, and the two arms' observed
+every run faced the same load, outcomes were recorded, and the two runs' observed
 ranges do not overlap. With one run per policy the last cannot be asked, and the page
 says so instead of answering it. `admitperf compare --check` exits non-zero when any
 fails.

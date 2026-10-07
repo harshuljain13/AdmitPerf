@@ -66,11 +66,11 @@ class Report:
         return self.decisions[0].get("notes") if self.decisions else None
 
     @property
-    def arm(self) -> str:
-        """How this log is labelled in a comparison: the policy, and the run if named.
+    def label(self) -> str:
+        """How this log is named in a comparison: the policy, and the run if it has one.
 
-        Deliberately not the file path. A path tells a reader where bytes live, not
-        what was measured, and it changes when someone tidies a directory.
+        Deliberately not the file path. A path tells a reader where bytes live, not what
+        was measured, and it changes when someone tidies a directory.
         """
         parts = [self.policy or "no policy"]
         if self.run:
@@ -123,7 +123,7 @@ class Report:
         """Whether the policy refuses nothing by design.
 
         A baseline and a policy that failed to fire produce identical counts, and
-        they are opposite findings: one is the comparison arm working, the other is a
+        they are opposite findings: one is the comparison run working, the other is a
         run that proves nothing. Declared by the policy and recorded in the log,
         rather than guessed from the name.
         """

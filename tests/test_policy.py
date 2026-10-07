@@ -147,7 +147,7 @@ def test_a_missing_signal_does_not_crash_a_shipped_policy() -> None:
 
 
 def test_unenforced_requests_are_measured_but_not_governed(tmp_path) -> None:
-    """One run yields both arms under identical conditions. Two sequential runs cannot:
+    """One run yields both policies under identical conditions. Two sequential runs cannot:
     they share an engine, so the second starts against the first's leftover queue."""
     path = tmp_path / "d.jsonl"
     with KvWall(threshold=0.9, max_waiting=32, log=path, enforce=0.5) as p:

@@ -220,3 +220,50 @@ def test_every_readme_image_is_committed() -> None:
         # .../<owner>/<repo>/<ref>/<path...>
         path = src.split("raw.githubusercontent.com/", 1)[1].split("/", 3)[3]
         assert (REPO / path).is_file(), f"README points at {path}, which is not in the repo"
+
+
+# --------------------------------------------------------------------------
+# No cluster in the package
+# --------------------------------------------------------------------------
+
+
+def test_the_repo_ships_no_infrastructure() -> None:
+    """Helm charts, Kubernetes manifests and bring-up scripts lived here for a while and
+    it was a mistake: a policy library that ships a cluster is a test harness pretending
+    to be a library, and readers could not tell which half they were installing.
+
+    The cluster that exercises this lives in llm-inference-experiments/admitperf_testing.
+    """
+    for name in ("infra", "chart", "k8s-config", "deploy", "helm"):
+        assert not (REPO / name).exists(), f"{name}/ is back"
+
+
+def test_the_load_generator_is_not_in_the_package() -> None:
+    """Offering traffic has nothing to do with deciding whether to admit it. A load
+    generator inside a policy library implies the library drives the experiment, which is
+    the opposite of the claim that you call it from your own gateway.
+    """
+    assert not (SRC / "load.py").exists()
+
+
+def test_the_package_reads_no_environment_variables() -> None:
+    """A policy's behaviour must come from its arguments, not from the shell that
+    happened to start the gateway.
+
+    Two deployments passing identical parameters have to decide identically, or a report
+    naming `kv_threshold 0.90` describes something the reader cannot reconstruct. It also
+    keeps the package out of the business of owning a .env.
+    """
+    offenders = []
+    for path in SRC.rglob("*.py"):
+        text = path.read_text()
+        for needle in ("os.environ", "os.getenv", "load_dotenv"):
+            if needle in text:
+                offenders.append(f"{path.relative_to(REPO)}: {needle}")
+    assert not offenders, offenders
+
+
+def test_no_env_example_in_the_package() -> None:
+    """There is nothing to give an example of. Cluster credentials live with the
+    cluster, in llm-inference-experiments/admitperf_testing."""
+    assert not (REPO / ".env.example").exists()
