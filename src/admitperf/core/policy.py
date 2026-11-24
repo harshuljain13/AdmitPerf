@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import zlib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
@@ -224,9 +225,10 @@ class Policy:
     def _enforced(self, request_id: str | None) -> bool:
         """Deterministic in the request id, not random, so a replay reproduces the
         split and a retried request is treated the same way twice — otherwise a
-        client could succeed simply by retrying past a refusal."""
+        client could succeed simply by retrying past a refusal. CRC32 rather than
+        `hash()`, which is salted per process, so the split also holds across runs."""
         if self.enforce >= 1.0 or request_id is None:
             return True
         if self.enforce <= 0.0:
             return False
-        return (hash(request_id) % 1000) < self.enforce * 1000
+        return (zlib.crc32(request_id.encode()) % 1000) < self.enforce * 1000

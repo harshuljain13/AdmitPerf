@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import pytest
 
 from admitperf.core.log import Log
@@ -168,6 +172,29 @@ def test_the_split_is_deterministic_so_a_retry_is_treated_the_same() -> None:
     first = [p(SCRAPE, request_id=f"r{i}").admitted for i in range(50)]
     again = [p(SCRAPE, request_id=f"r{i}").admitted for i in range(50)]
     assert first == again
+
+
+def test_the_split_is_the_same_in_every_process() -> None:
+    """`hash()` of a str is salted per process, so a split built on it changes between
+    runs and a replay no longer matches the run it replays."""
+    code = (
+        "from admitperf.core.policy import Policy\n"
+        "class P(Policy):\n"
+        "    name = 'p'\n"
+        "p = P(enforce=0.5)\n"
+        "print(''.join('1' if p._enforced(f'r{i}') else '0' for i in range(200)))"
+    )
+    splits = {
+        subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for seed in ("1", "2", "3")
+    }
+    assert len(splits) == 1
 
 
 def test_enforce_zero_is_shadow_mode(tmp_path) -> None:
