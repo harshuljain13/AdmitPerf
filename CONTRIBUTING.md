@@ -1,7 +1,13 @@
 # Contributing to AdmitPerf
 
-The package is being rebuilt around a contract: metrics in, signals derived, policies
-decide. Until that lands, the guidance that outlives it:
+The contract: metrics in, signals derived, policies decide. A policy implements one
+method,
+
+```python
+def decide(self, metrics: Mapping[str, float]) -> Decision
+```
+
+and the base class records every decision. Everything below protects that contract.
 
 ## What AdmitPerf is not
 
@@ -32,9 +38,34 @@ name. Six of the sixteen surveyed policies are in that category.
 directory that did not exist, so it globbed zero files and stayed green throughout the
 period those rules were being broken — which is why it now asserts its own path first.
 
+## Adding a policy or a signal
+
+- A policy subclasses `admitperf.Policy`, declares `name` and the signal it reads
+  (`signal_quantity`, `signal_structure`, `slo_awareness`), and reads metrics only
+  through signals. `.claude/skills/admitperf-policy/SKILL.md` walks through a port.
+- Its tests must show it refusing *something* under pressure. A policy that admits
+  everything passes most tests.
+- A new metric name for an existing signal is `add_source`, not a new signal.
+
 ## Workflow
 
-Branch off `main` as `feat/<short>`, `fix/<short>`, `docs/<short>`. Conventional
-commits. Never commit to `main`. `make lint && make test` before pushing.
+Branch off `main` as `feat/<short>`, `fix/<short>`, `docs/<short>`. Never commit to
+`main`. One logical change per PR; a change that depends on another goes in a separate PR
+based on it. Titles are conventional commits (`feat(policies):`, `fix(core):`, `docs:`,
+`ci:`), because release notes are built from them.
+
+Before pushing, in a fresh virtual environment with `pip install -e '.[all]'` (what CI
+installs):
+
+```bash
+ruff check . && ruff format --check . && pytest -q
+```
+
+Check the exit code, not the last line of output.
+
+The PR body says what changed and why, how you verified it (what you ran and saw, not
+"tests pass"), and what you left undone. Any number in a doc names the run it came from.
+
+Never edit the version: releases are cut by pushing a tag.
 
 Open an issue with the `question` label if anything here is unclear.

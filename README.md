@@ -335,3 +335,25 @@ spawns no subprocess — `tests/test_layering.py` enforces each, because that is
 makes it safe to install in a gateway.
 
 `make test` · `make lint`
+
+## Contributing
+
+Bug reports, new signals and policy ports are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
+says what belongs in this package, what does not, and the checks a PR has to pass.
+
+## Citing
+
+If AdmitPerf helps your work, please cite it. GitHub's **Cite this repository** button
+reads [`CITATION.cff`](CITATION.cff). The findings AdmitPerf is built on come from the
+survey:
+
+```bibtex
+@article{jain2026admission,
+  title   = {Admission Control for LLM Inference Serving: A Systematic Review},
+  author  = {Jain, Harshul and Sah, Tanmay and Sah, Tanya and Khatri, Parv and Sah, Dolly},
+  journal = {Preprints.org},
+  year    = {2026},
+  doi     = {10.20944/preprints202611.1079.v1},
+  url     = {https://www.preprints.org/manuscript/202611.1079}
+}
+```
