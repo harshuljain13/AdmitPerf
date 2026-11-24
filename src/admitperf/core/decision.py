@@ -41,7 +41,9 @@ class Decision:
     @property
     def status(self) -> int:
         """Derived, never stored, so it cannot drift from the reason."""
-        return ADMITTED if self.admitted else REASONS[self.reason]
+        if self.reason is None:  # only an admit has no reason; __init__ enforces it
+            return ADMITTED
+        return REASONS[self.reason]
 
     def __repr__(self) -> str:
         return f"Decision({self.verdict.value}, {self.reason!r}, status={self.status})"

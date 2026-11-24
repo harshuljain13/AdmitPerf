@@ -20,12 +20,13 @@ Three decisions shape the layout, each taken after the previous version failed o
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import altair as alt
 import pandas as pd
 import streamlit as st
 
-from admitperf.comparison import Comparison
+from admitperf.comparison import Comparison, Metric
 from admitperf.core.log import Log
 from admitperf.dashboard import theme
 from admitperf.discover import experiments
@@ -240,7 +241,12 @@ def ttft_chart(by_policy: dict[str, list[Report]]) -> None:
 
 
 def policies_chart(
-    by_policy: dict[str, list[Report]], metric, title: str, fmt: str, *, higher_is_better: bool
+    by_policy: dict[str, list[Report]],
+    metric: Metric,
+    title: str,
+    fmt: str,
+    *,
+    higher_is_better: bool,
 ) -> None:
     """One policy per row: a dot at the median, a line across the observed range.
 
@@ -251,7 +257,8 @@ def policies_chart(
     Colour carries the comparison — grey baseline, green or red by whether a policy beat
     it — so the answer is readable before any number is.
     """
-    rows, baseline_value = [], None
+    rows: list[dict[str, Any]] = []
+    baseline_value: float | None = None
     for name, reps in by_policy.items():
         values = [v for r in reps if (v := metric(r)) is not None]
         if not values:
@@ -469,6 +476,8 @@ def _delta(before: float | None, after: float | None, *, lower_is_better: bool) 
 
 
 def comparison_view(exp: Experiment, candidate: PolicyRuns) -> None:
+    if exp.baseline is None:  # compare_controls offers no candidate without one
+        return
     base, pol = reports(exp.baseline.logs), reports(candidate.logs)
     c = Comparison(base, pol)
 

@@ -38,9 +38,11 @@ from __future__ import annotations
 
 import argparse
 import random
+from collections.abc import Callable
 from pathlib import Path
 
 from admitperf.comparison import Comparison
+from admitperf.core.policy import Policy
 from admitperf.policies import KvThreshold, NoAdmission, QueueDepth
 from admitperf.report import Report
 
@@ -156,7 +158,7 @@ class FakeEngine:
         }
 
 
-def run(policy, seed: int = 0) -> None:
+def run(policy: Policy, seed: int = 0) -> None:
     """Drive traffic through one policy.
 
     The seed is shared between runs within a repeat, so the two policies see the same
@@ -207,7 +209,9 @@ def run(policy, seed: int = 0) -> None:
 MAX_WAITING = int((SLO_TTFT_MS - 180) / TICK_MS * (MAX_CONCURRENT / SERVICE_TICKS))
 
 
-def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Path]:
+def main(
+    repeats: int = 1, out: str | Path | None = None, echo: Callable[[str], object] = print
+) -> dict[str, Path]:
     """Run every run, print the reports and the comparisons, return the run directories."""
     out = DEFAULT_OUT if out is None else Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -221,23 +225,26 @@ def main(repeats: int = 1, out: Path | None = None, echo=print) -> dict[str, Pat
         f"{MAX_CONCURRENT} slots · {TOKENS_PER_REQUEST} tokens/request · "
         f"SLO {SLO_TTFT_MS}ms TTFT"
     )
-    ident = {"experiment": experiment, "notes": notes}
 
     # Run directories are named by POLICY, not by a label of mine, so the path and the
     # log's own `policy` field cannot disagree.
     root = out / experiment
-    runs = {
+    runs: dict[str, tuple[Path, Callable[[Path, str], Policy]]] = {
         "no admission (baseline)": (
             root / "no_admission",
-            lambda log, run: NoAdmission(log=log, run=run, **ident),
+            lambda log, run: NoAdmission(log=log, run=run, experiment=experiment, notes=notes),
         ),
         "kv_threshold 0.90": (
             root / "kv_threshold",
-            lambda log, run: KvThreshold(threshold=0.90, log=log, run=run, **ident),
+            lambda log, run: KvThreshold(
+                threshold=0.90, log=log, run=run, experiment=experiment, notes=notes
+            ),
         ),
         f"queue_depth {MAX_WAITING}": (
             root / "queue_depth",
-            lambda log, run: QueueDepth(max_waiting=MAX_WAITING, log=log, run=run, **ident),
+            lambda log, run: QueueDepth(
+                max_waiting=MAX_WAITING, log=log, run=run, experiment=experiment, notes=notes
+            ),
         ),
     }
 

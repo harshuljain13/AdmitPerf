@@ -26,6 +26,9 @@ class DualGate(Policy):
     slo_awareness = "throughput"
     signal_structure = "dual-gate"
 
+    threshold: float
+    min_hit_rate: float
+
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         pressure = KV_PRESSURE.read(metrics)
         reuse = PREFIX_HIT_RATE.read(metrics)

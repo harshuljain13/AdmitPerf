@@ -18,17 +18,22 @@ concurrency:
 
 jobs:
   test:
-    name: Lint and test (offline)
+    name: Lint and test (offline, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every version pyproject's classifiers claim. The floor catches syntax and
+        # stdlib assumptions that break the oldest; the others catch what newer
+        # releases deprecate or remove.
+        python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # The floor from pyproject. Testing only on the newest version hides the syntax
-          # and stdlib assumptions that break the oldest supported one.
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
 
       # EVERY extra, not just dev. The suite collects tests for every optional surface;
@@ -47,6 +52,11 @@ jobs:
       # is only whitespace can no longer hide a real change inside it.
       - name: Format check
         run: ruff format --check .
+
+      # Strict, over src/ (configured in pyproject). The package ships `Typing :: Typed`,
+      # so a type error here is a broken promise to every caller.
+      - name: Type check
+        run: mypy
 
       # Bare pytest honours testpaths from pyproject. Naming a directory here would silently
       # skip anything added outside it later.

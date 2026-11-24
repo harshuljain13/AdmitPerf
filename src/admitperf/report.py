@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from admitperf.core.log import Log
 from admitperf.core.reasons import REASONS
+
+if TYPE_CHECKING:
+    from admitperf.item import Item
 
 WIDTH = 68
 RULE = "=" * WIDTH
@@ -112,7 +115,7 @@ class Report:
         span = self.decisions[-1]["at"] - self.decisions[0]["at"]
         return len(self.decisions) / span if span > 0 else None
 
-    def items(self, *, repeats: int = 1, has_baseline: bool | None = None) -> list:
+    def items(self, *, repeats: int = 1, has_baseline: bool | None = None) -> list[Item]:
         """The survey's seven reporting items, checked against this run."""
         from admitperf.items import evaluate
 

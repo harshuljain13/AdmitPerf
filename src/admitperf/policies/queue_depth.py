@@ -25,6 +25,8 @@ class QueueDepth(Policy):
     slo_awareness = "stability"
     signal_structure = "scalar"
 
+    max_waiting: float
+
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         waiting = QUEUE_DEPTH.read(metrics)
         if waiting is not None and waiting > self.max_waiting:

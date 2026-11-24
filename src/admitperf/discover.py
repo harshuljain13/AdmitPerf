@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from admitperf.experiment import Experiment
 from admitperf.policy_runs import PolicyRuns
@@ -17,7 +18,7 @@ SKIP = {".venv", "node_modules", ".git", "__pycache__", ".pytest_cache", ".ruff_
 OURS = ("signals", "verdict", "outcome", "scrape_error")
 
 
-def _head(log: Path) -> dict | None:
+def _head(log: Path) -> dict[str, Any] | None:
     """The first record, or None if this is not one of ours.
 
     Only the first line, because identity is the same on every line and reading a

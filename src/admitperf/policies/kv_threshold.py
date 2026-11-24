@@ -28,6 +28,8 @@ class KvThreshold(Policy):
     slo_awareness = "throughput"
     signal_structure = "scalar"
 
+    threshold: float
+
     def decide(self, metrics: Mapping[str, float]) -> Decision:
         pressure = KV_PRESSURE.read(metrics)
         if pressure is not None and pressure >= self.threshold:

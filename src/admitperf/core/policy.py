@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, ClassVar
 
 from admitperf.core.decision import Decision
@@ -85,7 +86,7 @@ class Policy:
     def __init__(
         self,
         *,
-        log: str | None = None,
+        log: str | Path | None = None,
         experiment: str | None = None,
         run: str | None = None,
         notes: str | None = None,

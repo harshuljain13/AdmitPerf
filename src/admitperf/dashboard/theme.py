@@ -7,6 +7,8 @@ admitted in every chart — a reader should not have to learn a second key.
 
 from __future__ import annotations
 
+from typing import Any
+
 INK = "#0B0B0B"  # ground
 SURFACE = "#141414"  # cards and sidebar, a shade off the ground
 LINE = "#2A2A2A"  # hairlines
@@ -140,7 +142,7 @@ CSS = f"""
 """
 
 
-def axis() -> dict:
+def axis() -> dict[str, Any]:
     """Altair config, so charts sit on the ground rather than on a white card."""
     return {
         "background": INK,
