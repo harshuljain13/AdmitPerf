@@ -10,8 +10,9 @@ description: >-
 
 ## Class A or Class B — decide before writing anything
 
-**Class A** is a pure function of `(request, observable fleet state) → decision`, running in
-front of an unmodified engine and reading its metrics. That is all this API accepts.
+**Class A** decides at the door: a pure function of what the gateway can observe →
+decision, running in front of an unmodified engine and reading its metrics. That is all
+this API accepts.
 
 **Class B** changes how batches are *formed inside* the engine. Porting one means
 maintaining a fork of thousands of lines of scheduler internals. FairBatching, FastServe
@@ -23,20 +24,27 @@ Getting this wrong costs the whole port, and it is answerable from the paper's a
 ## The interface is frozen
 
 ```python
-def decide(self, req: Request, state: SystemState) -> Decision
+def decide(self, metrics: Mapping[str, float]) -> Decision
 ```
 
-`ADMIT`, `DEFER` (with `retry_after_ms`), or `REJECT` (with a reason). Deterministic: the
-same inputs and internal state must give the same decision, or experiments stop being
-reproducible.
+`metrics` is whatever the host scraped, under its own names. Read it through signals
+(`KV_PRESSURE.read(metrics)`), never by raw key, so the policy works on any stack that
+feeds the signal. A signal nothing supplies reads `None`; admit in that case rather than
+crash, and the log records the signal as absent.
 
-Anything the policy needs that `SystemState` lacks arrives as an **optional** field. Never
-change `Decision` or `decide()`.
+Return `self.admit()`, `self.defer(reason, retry_after_ms)`, or `self.reject(reason)`.
+Deterministic: the same metrics and internal state must give the same decision, or
+experiments stop being reproducible.
+
+Parameters arrive as keyword arguments (`KvThreshold(threshold=0.9)` sets
+`self.threshold`). Never change `Decision` or `decide()`.
 
 ## Declare what it reads
 
-A policy states its signal in the same vocabulary as the survey's axes — unit, setting,
-objective, signal, portability. Two things fall out for free:
+A policy states its signal as class attributes in the survey's vocabulary — `name`,
+`signal_quantity`, `signal_structure`, `slo_awareness` (and `unit`, `setting` where they
+differ from the defaults). They are written into every decision record. Two things fall
+out for free:
 
 - The harness can **refuse to run** a policy against an engine that cannot supply its
   signal, before any provisioning cost.
@@ -55,4 +63,5 @@ record; written afterwards it is a reconstruction, and the details that mattered
   everything passes most tests.
 - A run where its signal actually crossed its threshold. Otherwise the port is unexercised
   and you have no evidence it works.
-- Its entry in `docs/policies.md`, with the deviation list.
+- A class docstring saying what it does and when it measures nothing, with the deviation
+  list, and an export in `admitperf/policies/__init__.py`.

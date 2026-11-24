@@ -31,14 +31,14 @@ from a run where nothing was saturated?** If yes, that is the review finding.
    passes most of them.
 5. **Class A?** A policy that needs engine changes does not fit behind this API, and a
    review is the last cheap place to notice.
-6. **Does `docs/status.md` still match what the code can demonstrate in one command?** The
+6. **Does the README still match what the code can demonstrate in one command?** The
    gap between claim and proof is the risk that matters for this project.
 
-## On vendored code
+## No cluster in this repository
 
-`infra/` is the vendored serving cluster, excluded from ruff. Do not reformat it — that
-makes every future diff against upstream unreadable. Changes there should be minimal and
-should say why they could not be made upstream.
+Helm charts, bring-up scripts and the load generator moved out. A change that brings any
+of them back — or teaches the package about an engine, Kubernetes or a cloud — is in the
+wrong repository; `tests/test_layering.py` fails on the obvious cases.
 
 ## What a good review comment looks like
 

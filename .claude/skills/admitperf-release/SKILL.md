@@ -50,5 +50,5 @@ this for any release that changes packaging, adds a dependency, or moves a modul
 - CI green on `main`, including the wheel job that installs into a clean venv and imports
   the public API. That job is what catches a module missing from the package manifest; the
   editable install cannot, because it sees the working tree.
-- `docs/status.md` matches what ships.
+- The README matches what ships.
 - No number in the docs lacks a bundle. A release is a bad time to discover one.
