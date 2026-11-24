@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 from admitperf.report import THIN, WIDTH, Report
+
+Metric = Callable[[Report], float | None]
 
 RULE = "=" * WIDTH
 
@@ -85,7 +88,7 @@ class Comparison:
         ordered = sorted(values)
         return ordered[len(ordered) // 2], ordered[0], ordered[-1]
 
-    def _arm(self, reports: list[Report], metric) -> tuple[float, float, float] | None:
+    def _arm(self, reports: list[Report], metric: Metric) -> tuple[float, float, float] | None:
         values = [v for r in reports if (v := metric(r)) is not None]
         return self._spread(values) if values else None
 
@@ -239,7 +242,7 @@ class Comparison:
         return out
 
     def _table(self) -> list[str]:
-        def med(reports: list[Report], metric, fmt: str = "{:.0f}") -> str:
+        def med(reports: list[Report], metric: Metric, fmt: str = "{:.0f}") -> str:
             s = self._arm(reports, metric)
             return "--" if s is None else fmt.format(s[0])
 

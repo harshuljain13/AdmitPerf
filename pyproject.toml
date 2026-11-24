@@ -103,13 +103,12 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# Runs only inside a Modal container, against decorators we do not have stubs
-# for locally. Type-checking it here would check Modal, not us.
-exclude = []
+files = ["src"]
 
+# The dashboard is an optional extra and pandas ships no type stubs.
 [[tool.mypy.overrides]]
-module = "infra.providers.modal_app"
-ignore_errors = true
+module = ["pandas", "pandas.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
