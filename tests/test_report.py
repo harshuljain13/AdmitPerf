@@ -123,6 +123,26 @@ def test_goodput_counts_refusals_as_misses(tmp_path) -> None:
     assert "0.500" in r.text()
 
 
+def test_a_retried_request_is_offered_once(tmp_path) -> None:
+    """A deferred request that comes back is decided again under the same id. Counting
+    each retry as new traffic inflates the load and makes goodput look worse."""
+    path = tmp_path / "d.jsonl"
+    with KvWall(threshold=0.9, log=path) as p:
+        p(BUSY, request_id="a")
+        p(BUSY, request_id="a")
+        p(IDLE, request_id="a")
+        p.outcome("a", ttft_ms=100.0, ok=True)
+        p(IDLE, request_id="b")
+        p.outcome("b", ttft_ms=100.0, ok=True)
+        p(IDLE)
+        p(IDLE)
+
+    r = Report.from_log(path)
+    assert len(r.decisions) == 6
+    assert r.offered == 4  # a, b, and two decisions with no id to match a retry
+    assert "2 met / 4 offered" in r.text()
+
+
 def test_sampled_enforcement_is_reported_as_both_sides(tmp_path) -> None:
     r = Report.from_log(_log(tmp_path, [BUSY] * 40, enforce=0.5))
     assert 0 < r.enforced < 40

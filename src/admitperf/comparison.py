@@ -118,7 +118,7 @@ class Comparison:
     def comparable_load(self) -> bool:
         """Within 10%, across every run on both sides. Two runs offered materially
         different traffic are not a comparison, however similar the configuration."""
-        counts = [len(r.decisions) for r in self.baselines + self.policies]
+        counts = [r.offered for r in self.baselines + self.policies]
         if not all(counts):
             return False
         return (max(counts) - min(counts)) / max(counts) <= 0.10
@@ -146,7 +146,7 @@ class Comparison:
     @staticmethod
     def _goodput(report: Report) -> float | None:
         """Met-SLO over OFFERED. A refusal counts as a miss, which is the point."""
-        offered = len(report.decisions)
+        offered = report.offered
         if not offered or not report.outcomes:
             return None
         met = sum(1 for r in report.outcomes if r["outcome"].get("ok"))
@@ -254,8 +254,8 @@ class Comparison:
             ("repeats", str(len(self.baselines)), str(len(self.policies))),
             (
                 "offered",
-                med(self.baselines, lambda r: float(len(r.decisions))),
-                med(self.policies, lambda r: float(len(r.decisions))),
+                med(self.baselines, lambda r: float(r.offered)),
+                med(self.policies, lambda r: float(r.offered)),
             ),
             (
                 "refused",
@@ -296,7 +296,7 @@ class Comparison:
         out.append(f"  {mark[self.comparable_load()]} both were offered the same load")
         if not self.comparable_load():
             out.append(
-                f"      {len(self.baseline.decisions)} vs {len(self.policy.decisions)} "
+                f"      {self.baseline.offered} vs {self.policy.offered} "
                 "requests — a policy run against less traffic will look better than it is"
             )
         out.append(f"  {mark[self.measurable()]} outcomes recorded, so cost is measurable")

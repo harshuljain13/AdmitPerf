@@ -104,6 +104,19 @@ class Report:
         rng = self.signal_range(quantity)
         return (quantity, rng, self.threshold) if rng else None
 
+    @property
+    def offered(self) -> int:
+        """Requests offered, counted by request id. Item 7.
+
+        Not the number of decisions: a deferred request that comes back is decided
+        again under the same id, and counting each retry as new traffic inflates the
+        load and deflates goodput. A decision with no id cannot be matched to a
+        retry, so each one counts once.
+        """
+        ids = {r.get("request_id") for r in self.decisions}
+        anonymous = sum(1 for r in self.decisions if r.get("request_id") is None)
+        return len(ids - {None}) + anonymous
+
     def offered_rps(self) -> float | None:
         """Requests per second offered, from the first and last decision. Item 7.
 
@@ -113,7 +126,7 @@ class Report:
         if len(self.decisions) < 2:
             return None
         span = self.decisions[-1]["at"] - self.decisions[0]["at"]
-        return len(self.decisions) / span if span > 0 else None
+        return self.offered / span if span > 0 else None
 
     def items(self, *, repeats: int = 1, has_baseline: bool | None = None) -> list[Item]:
         """The survey's seven reporting items, checked against this run."""
@@ -320,8 +333,8 @@ class Report:
             # counts as a miss. Dividing by admitted instead would reward a policy
             # for refusing more, rather than for refusing better.
             out.append(
-                f"  goodput            {met / len(self.decisions):.3f}  "
-                f"({met} met / {len(self.decisions)} offered)"
+                f"  goodput            {met / self.offered:.3f}  "
+                f"({met} met / {self.offered} offered)"
             )
         return out
 
