@@ -244,22 +244,16 @@ makes it usable in CI.
 
 ## On a real fleet
 
-Nothing here provisions or drives load — that is your infra's job. AdmitPerf's part
-is the last two commands.
+Nothing here provisions, serves, or drives load — that is your infra's job, and the
+cluster that used to live in this repository has moved out of it. AdmitPerf's part is
+the first and last command: `watch` while the run happens, `report` after it.
 
 ```bash
-# --- one command brings up a cluster: engines, gateway, observability, tunnel ---
-make plan                                        # does this config make sense?
-make up                                          # infra/values/single.yaml
-make smoke                                       # does it actually serve?
+# The ENGINE's metrics endpoint: the signals a policy reads.
+admitperf watch http://<engine>:8000/metrics --for 10m -o trace.jsonl &
 
-# 8801 is the ENGINE's metrics — the signals a policy reads.
-# 8800 is the GATEWAY, where the policy runs. `make urls` prints both.
-admitperf watch http://127.0.0.1:8801/metrics --for 10m -o trace.jsonl &
-
-admitperf load http://127.0.0.1:8800 --model lab --rps 4 --for 3m
-
-vllm bench serve --base-url http://127.0.0.1:8800 \
+# Any load generator, pointed at the GATEWAY where your policy runs. vLLM's own:
+vllm bench serve --base-url http://<gateway>:8000 \
     --model Qwen/Qwen2.5-7B-Instruct \
     --random-input-len 8192 --random-output-len 512 --ignore-eos \
     --num-prompts 150 --request-rate 5
@@ -334,8 +328,6 @@ src/admitperf/
   discover.py         finds logs      terminology.py  every term defined
   demo.py             a simulated run, no hardware needed
   cli.py              the CLI         dashboard/    the Streamlit reader
-infra/                one Helm chart and one worked example of a host.
-                      NOT part of the package.
 ```
 
 `admitperf.core` imports nothing but the standard library, opens no socket, and

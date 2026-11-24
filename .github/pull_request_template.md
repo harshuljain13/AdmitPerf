@@ -26,11 +26,11 @@
 - [ ] `pytest -q` passes locally.
 - [ ] `ruff check .` and `ruff format --check .` are clean.
   <!-- Check the exit code, not the output: piping either into `tail` hides the failure. -->
-- [ ] If this touches a policy: it is Class A — a pure function of `(request, state)`,
+- [ ] If this touches a policy: it is Class A — a pure function of `metrics` (what the gateway sees),
       no engine changes. Class B does not fit behind this API.
 - [ ] If this adds or changes a number that appears in a doc, the bundle it came from is
       named, and the commit that produced the bundle is recorded.
-- [ ] `docs/status.md` still matches what the software can actually demonstrate.
+- [ ] The README still matches what the software can actually demonstrate.
   <!-- A claim the code cannot back in one command is the review risk that matters here. -->
 - [ ] Version untouched — releases are cut by tag, never by hand-editing a version.
 

@@ -11,7 +11,7 @@ description: >-
 ## What this looks for
 
 **A claim the software cannot demonstrate in one command.** Reviewers read the repo; a gap
-between `docs/status.md` and what runs is the risk that matters here.
+between the README and what runs is the risk that matters here.
 
 ## The audit
 
@@ -35,8 +35,6 @@ between `docs/status.md` and what runs is the risk that matters here.
   Any claim resting on it is unsupported.
 - **KV pressure and queue depth have never been compared in the same deployment.**
   `which-policy-when` is specified for it and has not run.
-- **`infra/` is vendored and unlinted.** Its lint debt is upstream's; ours is that we have
-  not decided what happens to the gateway inside it.
 
 ## How to report
 
