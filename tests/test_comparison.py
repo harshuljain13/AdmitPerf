@@ -308,3 +308,23 @@ def test_an_empty_directory_is_an_error_not_an_empty_comparison(tmp_path) -> Non
         assert "no .jsonl logs" in str(exc)
     else:
         raise AssertionError("an empty run should not produce a comparison")
+
+
+def test_retries_are_not_counted_as_extra_load(tmp_path) -> None:
+    """A policy that defers and sees each request come back twice was offered the same
+    traffic as the baseline, not three times as much."""
+    base_path, pol_path = tmp_path / "b.jsonl", tmp_path / "p.jsonl"
+    base = _run(base_path, NoAdmission(log=base_path), [IDLE] * 20, lambda i: 100.0)
+    with KvThreshold(threshold=0.9, log=pol_path) as p:
+        for i in range(20):
+            rid = f"r{i}"
+            p(BUSY, request_id=rid)
+            p(BUSY, request_id=rid)
+            p(IDLE, request_id=rid)
+            p.outcome(rid, ttft_ms=100.0, ok=True)
+    pol = Report.from_log(pol_path)
+
+    assert len(pol.decisions) == 60
+    assert pol.offered == 20
+    assert Comparison(base, pol).comparable_load()
+    assert Comparison._goodput(pol) == 1.0

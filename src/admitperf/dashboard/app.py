@@ -371,7 +371,7 @@ def report_view(exp: Experiment, runs: PolicyRuns, log: Path) -> None:
     for col, (k, v, d) in zip(
         cols,
         [
-            ("offered", str(len(r.decisions)), f"{rate:.1f}/s" if rate else ""),
+            ("offered", str(r.offered), f"{rate:.1f}/s" if rate else ""),
             ("admitted", str(len(r.decisions) - r.refused), ""),
             ("refused", str(r.refused), f"{r.refused / max(1, len(r.decisions)):.1%}"),
             ("outcomes", str(len(r.outcomes)), "" if r.outcomes else "none, so no cost figure"),
