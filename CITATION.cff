@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+title: "AdmitPerf: Standardized Admission Control for LLM Inference"
+message: >-
+  If you use this software, please cite it as below. If you use the findings it is
+  built on, please also cite the survey listed under references.
+type: software
+authors:
+  - family-names: Jain
+    given-names: Harshul
+    email: harshuljain1393@gmail.com
+repository-code: "https://github.com/harshuljain13/AdmitPerf"
+url: "https://pypi.org/project/admitperf/"
+license: MIT
+keywords:
+  - llm
+  - inference
+  - admission control
+  - serving
+  - benchmark
+references:
+  - type: article
+    title: "Admission Control for LLM Inference Serving: A Systematic Review"
+    authors:
+      - family-names: Jain
+        given-names: Harshul
+      - family-names: Sah
+        given-names: Tanmay
+      - family-names: Sah
+        given-names: Tanya
+      - family-names: Khatri
+        given-names: Parv
+      - family-names: Sah
+        given-names: Dolly
+    journal: "Preprints.org"
+    year: 2026
+    doi: "10.20944/preprints202611.1079.v1"
+    url: "https://www.preprints.org/manuscript/202611.1079"
