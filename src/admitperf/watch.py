@@ -9,7 +9,8 @@ import urllib.request
 from pathlib import Path
 
 from admitperf.core.log import Log
-from admitperf.core.signals import ALL
+from admitperf.core.signals import ALL, PREFIX_COUNTERS
+from admitperf.core.window import Window
 
 #: name{labels} value — the Prometheus text format, enough of it.
 _LINE = re.compile(r"^(?P<name>[a-zA-Z_:][\w:]*)(?:\{[^}]*\})?\s+(?P<value>[-+0-9.eE]+)\s*$")
@@ -32,8 +33,13 @@ class Watch:
     completely idle cluster, which would make the whole trace look like headroom.
     """
 
-    def __init__(self, url: str, out: str | Path, *, interval: float = 1.0) -> None:
+    def __init__(
+        self, url: str, out: str | Path, *, interval: float = 1.0, window: float = 60.0
+    ) -> None:
         self.url = url
+        #: Counter-based signals are read over the last `window` seconds, not since
+        #: the engine started. The raw counters are still what gets logged.
+        self.window = Window(PREFIX_COUNTERS, seconds=window)
         self.interval = interval
         self.log = Log(out)
         self.samples = 0
@@ -50,11 +56,12 @@ class Watch:
             return None
 
         metrics = parse(text)
+        windowed = self.window.update(metrics)
         self.log.write(
             {
                 "at": time.time(),
                 "metrics": metrics,
-                "signals": {s.name: s.read(metrics) for s in ALL},
+                "signals": {s.name: s.read(windowed) for s in ALL},
             }
         )
         self.samples += 1

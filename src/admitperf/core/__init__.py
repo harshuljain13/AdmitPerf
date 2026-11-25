@@ -16,6 +16,7 @@ from admitperf.core.policy import Policy
 from admitperf.core.reasons import ADMITTED, REASONS
 from admitperf.core.signal import Signal, Source
 from admitperf.core.verdict import Verdict
+from admitperf.core.window import Window
 
 __all__ = [
     "ADMITTED",
@@ -26,4 +27,5 @@ __all__ = [
     "Signal",
     "Source",
     "Verdict",
+    "Window",
 ]

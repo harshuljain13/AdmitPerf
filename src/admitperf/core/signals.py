@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from admitperf.core.signal import Signal
+from admitperf.core.window import SUFFIX
 
 
 def _dcgm_gpu_util(m: Mapping[str, float]) -> float:
@@ -24,10 +25,22 @@ def _dcgm_gpu_util(m: Mapping[str, float]) -> float:
     return m["DCGM_FI_DEV_GPU_UTIL"] / 100.0
 
 
+#: The counters `PREFIX_HIT_RATE` needs windowed. Pass to `Window`.
+PREFIX_COUNTERS = ("vllm:prefix_cache_hits_total", "vllm:prefix_cache_queries_total")
+
+
+def _vllm_prefix_hit_rate_window(m: Mapping[str, float]) -> float:
+    """The rate over the last window, when the metrics went through a `Window`.
+    Tried first: a cumulative rate moves less the longer the engine runs."""
+    hits, queries = PREFIX_COUNTERS
+    return m[hits + SUFFIX] / m[queries + SUFFIX]
+
+
 def _vllm_prefix_hit_rate(m: Mapping[str, float]) -> float:
-    """Two counters, not a gauge. Cumulative since start, so a host wanting a
-    windowed rate adds its own source."""
-    return m["vllm:prefix_cache_hits_total"] / m["vllm:prefix_cache_queries_total"]
+    """Two counters, not a gauge. Cumulative since start: the fallback when the
+    metrics were not windowed."""
+    hits, queries = PREFIX_COUNTERS
+    return m[hits] / m[queries]
 
 
 KV_PRESSURE = Signal(
@@ -68,7 +81,7 @@ GPU_UTIL = Signal(
 
 PREFIX_HIT_RATE = Signal(
     "prefix_hit_rate",
-    [_vllm_prefix_hit_rate],
+    [_vllm_prefix_hit_rate_window, _vllm_prefix_hit_rate],
     lo=0.0,
     hi=1.0,
     help="Share of prompt tokens served from cache. Pairs with kv_pressure: high use "
